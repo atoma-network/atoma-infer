@@ -6,4 +6,4 @@ A collection of Large Language Models (LLMs) optimized for KV cache memory manag
 
 ## Integration with Candle
 
-We plan to integrate with the HuggingFace [candle](https://github.com/huggingface/candle) ML framework, a fully Rust based ML framework. Candle allows to rely on the blazing Rust performance and its memory safety. Moreover, it eases the process of integrating Machine Learning pipelines with AI inference distributed systems. For these reasons, we believe this repository can be of great value to both the ML and Rust communities. 
+Our infra integrates with the HuggingFace [candle](https://github.com/huggingface/candle) ML framework, a fully Rust based ML framework. Candle allows to rely on the blazing Rust performance and its memory safety. Moreover, it eases the process of integrating Machine Learning pipelines with AI inference distributed systems. For these reasons, we believe this repository can be of great value to both the ML and Rust communities. 
