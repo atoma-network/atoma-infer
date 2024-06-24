@@ -251,13 +251,13 @@ __global__ void reshape_and_cache_flash_kernel(
           num_heads, head_size, block_size, x, kv_scale);
 
 void reshape_and_cache(
-    const scalar_t* key,    // [num_tokens, num_heads, head_size]
-    const scalar_t* value,  // [num_tokens, num_heads, head_size]
-    scalar_t*
+    torch::Tensor& key,    // [num_tokens, num_heads, head_size]
+    torch::Tensor& value,  // [num_tokens, num_heads, head_size]
+    torch::Tensor&
         key_cache,  // [num_blocks, num_heads, head_size/x, block_size, x]
-    scalar_t*
+    torch::Tensor&
         value_cache,  // [num_blocks, num_heads, head_size, block_size]
-    const int64_t* slot_mapping,  // [num_tokens]
+    torch::Tensor& slot_mapping,  // [num_tokens]
     const std::string& kv_cache_dtype, const double kv_scale) {
   int num_tokens = key.size(0);
   int num_heads = key.size(1);
