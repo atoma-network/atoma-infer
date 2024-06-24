@@ -1,3 +1,3 @@
 pub mod kernels;
-pub mod llama;
+pub mod models;
 pub mod paged_attention;

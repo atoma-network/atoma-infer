@@ -27,7 +27,7 @@ impl PagedAttention {
     ) -> Result<Self, PagedAttentionError> {
         let num_kv_heads = num_kv_heads.unwrap_or(num_attention_heads);
         let num_queries_per_kv = num_attention_heads / num_kv_heads;
-        let alibi_slopes = if let Some(alibi_slopes) = alibi_slopes {   
+        let alibi_slopes = if let Some(alibi_slopes) = alibi_slopes {
             Some(Tensor::new(alibi_slopes, device)?)
         } else {
             None
@@ -57,6 +57,11 @@ impl PagedAttention {
         head_size: u32,
     ) -> Vec<usize> {
         vec![2, num_blocks, block_size * num_kv_heads * head_size]
+    }
+
+    /// Splits the KV cache
+    pub fn split_kv_cache() {
+        todo!()
     }
 
     /// Initiates a swap blocks operation on the CUDA device
