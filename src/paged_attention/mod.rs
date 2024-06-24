@@ -12,7 +12,8 @@ impl PagedAttention {
         vec![64, 80, 96, 112, 128, 192, 256]
     }
 
-    ///
+    /// Returns the KV cache shape for the given model
+    /// configurations.
     pub fn get_kv_cache_shape(
         num_blocks: usize,
         block_size: usize,
