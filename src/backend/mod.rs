@@ -1,7 +1,8 @@
 use candle::{
-    cuda::{cudarc::driver::DeviceRepr, CudaDType},
-    CpuStorage, CudaStorage, CustomOp1, DType, Layout, Result, Shape, Tensor,
+    backend::BackendStorage, cuda::{cudarc::driver::DeviceRepr, CudaDType}, CpuStorage, CudaStorage, CustomOp1, DType, Layout, Result, Shape, Tensor
 };
+use half::{bf16, f16};
+
 
 /// `PagedAttention` - Backend to run
 /// Paged Attention based attention cuda kernels
@@ -42,8 +43,18 @@ impl PagedAttention {
     fn cuda_fwd_t<T: CudaDType + DeviceRepr>(
         &self,
         storage: &CudaStorage,
-        layer: &Layout,
+        layout: &Layout,
     ) -> Result<(CudaStorage, Shape)> {
+        let dtype = storage.dtype();
+        let internal_type = match dtype {
+            DType::F32 => 0,
+            DType::F16 => 1,
+            DType::BF16 => 2,
+            _ => candle::bail!("Unsupported dtype for paged attention: {}", dtype),
+        };
+
+        let device = storage.device();
+        let output_shape = layout.shape();
         todo!()
     }
 }

@@ -10,4 +10,5 @@ candle = { git = "https://github.com/huggingface/candle", package = "candle-core
 candle-flash-attn = { git = "https://github.com/huggingface/candle", package = "candle-flash-attn", branch = "main" }
 candle-nn = { git = "https://github.com/huggingface/candle", package = "candle-nn", branch = "main" }
 candle-transformers = { git = "https://github.com/huggingface/candle", package = "candle-transformers", branch = "main" }
+half = "2.4.1"
 serde = { version = "1.0.203", features = ["derive"] }
