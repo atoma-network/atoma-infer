@@ -1,9 +1,10 @@
-use candle::{DType, Device, IndexOp, Module, Result, Tensor, D};
+use candle::{CudaDevice, DType, Device, IndexOp, Module, Result, Tensor, D};
 use candle_transformers::models::with_tracing::{
     linear_no_bias as linear, Embedding, Linear, RmsNorm,
 };
 use serde::Serialize;
 use std::collections::HashMap;
+use crate::paged_attention::PagedAttention;
 
 /// Maximum input sequence token length
 const MAX_SEQ_LEN: usize = 4096;

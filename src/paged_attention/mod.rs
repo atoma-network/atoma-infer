@@ -4,9 +4,45 @@ use thiserror::Error;
 /// `PagedAttention` - Structure wrapping the CUDA
 /// kernels implementing the paged attention memory
 /// management algorithm
-pub struct PagedAttention {}
+pub struct PagedAttention {
+    num_attention_heads: usize,
+    head_dim: usize,
+    num_kv_heads: usize,
+    scale: f32,
+    sliding_window: Option<usize>,
+    num_queries_per_kv: usize,
+    alibi_slopes: Option<Tensor>,
+}
 
 impl PagedAttention {
+    /// Constructor
+    pub fn new(
+        num_attention_heads: usize,
+        head_dim: usize,
+        scale: f32,
+        num_kv_heads: Option<usize>,
+        sliding_window: Option<usize>,
+        device: Device,
+        alibi_slopes: Option<Vec<f64>>,
+    ) -> Result<Self, PagedAttentionError> {
+        let num_kv_heads = num_kv_heads.unwrap_or(num_attention_heads);
+        let num_queries_per_kv = num_attention_heads / num_kv_heads;
+        let alibi_slopes = if let Some(alibi_slopes) = alibi_slopes {   
+            Some(Tensor::new(alibi_slopes, device)?)
+        } else {
+            None
+        };
+        Ok(Self {
+            num_attention_heads,
+            head_dim,
+            num_kv_heads,
+            scale,
+            sliding_window,
+            num_queries_per_kv,
+            alibi_slopes,
+        })
+    }
+
     /// Available supported head sizes
     pub fn supported_head_sizes() -> Vec<u32> {
         vec![64, 80, 96, 112, 128, 192, 256]
