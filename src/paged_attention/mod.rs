@@ -1,5 +1,5 @@
 use crate::kernels::ffi::{copy_blocks, reshape_and_cache, swap_blocks};
-use candle_core::{Error as CandleError, IndexOp, Tensor, Storage, Device};
+use candle_core::{Error as CandleError, IndexOp, Tensor, Storage, Device, Layout};
 use thiserror::Error;
 
 /// `PagedAttention` - Structure wrapping the CUDA
@@ -25,7 +25,7 @@ impl PagedAttention {
         sliding_window: Option<usize>,
         device: &Device,
         alibi_slopes: Option<Vec<f64>>,
-    ) -> Result<Self, PagedAttentionError> {
+    ) -> Result<Self, CandleError> {
         let num_kv_heads = num_kv_heads.unwrap_or(num_attention_heads);
         let num_queries_per_kv = num_attention_heads / num_kv_heads;
         let alibi_slopes = if let Some(alibi_slopes) = alibi_slopes {
@@ -70,7 +70,7 @@ impl PagedAttention {
         src_kv_cache: Tensor,
         dst_kv_cache: Tensor,
         src_to_dst: Tensor,
-    ) -> Result<(), PagedAttentionError> {
+    ) -> Result<(), CandleError> {
         // 1. Handle block mapping tensor
         let (block_mapping, block_mapping_layour) = src_to_dst.storage_and_layout();
         let block_mapping = match block_mapping {
@@ -159,7 +159,7 @@ impl PagedAttention {
     pub fn copy_blocks(
         kv_caches: Vec<Tensor>,
         block_mapping: Tensor,
-    ) -> Result<(), PagedAttentionError> {
+    ) -> Result<(), CandleError> {
         // 1. Handle block mapping tensor
         let (block_mapping, block_mapping_layour) = block_mapping.storage_and_layout();
         let block_mapping = match block_mapping {
@@ -196,11 +196,11 @@ impl PagedAttention {
         // Get CUDA slices for all tensors
         let key_caches_slice = key_caches
             .iter()
-            .map(|(storage, layout)| storage.as_slice(layout))
+            .map(|(storage, layout): (&Storage, &Layout)| storage.as_cuda_slice(layout))
             .collect::<Result<Vec<_>, _>>()?;
         let value_caches_slice = value_caches
             .iter()
-            .map(|(storage, layout)| storage.as_slice(layout))
+            .map(|(storage, layout): (&Storage, &Layout)| storage.as_cuda_slice(layout))
             .collect::<Result<Vec<_>, _>>()?;
 
         // Get CUDA views for all tensors
@@ -227,8 +227,3 @@ impl PagedAttention {
     }
 }
 
-#[derive(Debug, Error)]
-pub enum PagedAttentionError {
-    #[error("Candle error: `{0}`")]
-    CandleError(#[from] CandleError),
-}
