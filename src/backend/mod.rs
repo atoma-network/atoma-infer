@@ -427,15 +427,15 @@ fn reshape_and_cache_t<T: CudaDType + DeviceRepr>(
     if (num_blocks, num_heads, head_size, block_size) != value_cache_layout.shape().dims4()? {
         candle_core::bail!(
             "shape mismatch key_cache {:?} and value_cache {:?}",
-            kc_l.shape(),
-            vc_l.shape()
+            key_cache_layout.shape(),
+            value_cache_layout.shape()
         )
     }
 
     if num_tokens != slot_mapping_layout.shape().dims1()? {
         candle_core::bail!(
             "shape mismatch slot_mapping {:?}, expected {:?}",
-            s_l.shape(),
+            slot_mapping_layout.shape(),
             (num_tokens)
         )
     }

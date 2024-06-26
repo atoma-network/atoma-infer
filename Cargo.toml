@@ -15,7 +15,6 @@ cudarc = { version = "0.9.14", features = ["f16"], optional = true }
 half = "2.4.1"
 intel-mkl-src = { version = "0.8.1", features = ["mkl-static-lp64-iomp"], optional = true }
 serde = { version = "1.0.203", features = ["derive"] }
-thiserror = "1.0.61"
 tracing = "0.1.40"
 
 [features]
