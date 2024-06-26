@@ -5,8 +5,8 @@ use crate::{
     paged_attention,
 };
 use candle_core::{
-    backend::BackendStorage,
-    CpuStorage, CudaStorage, CustomOp1, DType, Layout, Result, Shape, Storage, Tensor,
+    backend::BackendStorage, CpuStorage, CudaStorage, CustomOp1, DType, Layout, Result, Shape,
+    Storage, Tensor,
 };
 use half::{bf16, f16};
 use serde::de::value;
