@@ -1,4 +1,4 @@
-use crate::kernels::ffi::{copy_blocks, reshape_and_cache, swap_blocks};
+use crate::{kernels::ffi::{copy_blocks, swap_blocks}, backend::reshape_and_cache};
 use candle_core::{
     cuda::cudarc::driver::CudaSlice, Device, Error as CandleError, IndexOp, Layout, Storage,
     Tensor, D,
@@ -322,13 +322,22 @@ impl PagedAttention {
         // value_cache: &mut Tensor, // [num_blocks, num_heads, head_size, block_size] 48,32,128,16
         // slot_mapping: Tensor,     // [num_tokens]
         if key_cache.as_ref().is_some_and(|_| value_cache.is_some()) {
-            let _ = self.reshape_and_cache(
+            let _ = reshape_and_cache(
                 &key,
                 &value,
                 &key_cache.as_mut().unwrap(),
                 &value_cache.as_mut().unwrap(),
                 &slot_mapping,
+                self.scale,
             )?;
         }
+
+        // Attention has been already computed
+        if let Some(computed_attention) = attention {
+            // prefill prompts
+            return Ok(computed_attention);
+        }
+
+        
     }
 }
