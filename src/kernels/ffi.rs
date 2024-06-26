@@ -1,4 +1,4 @@
-use core::ffi::c_void;
+use core::ffi::{c_char, c_void};
 
 extern "C" {
     pub fn copy_blocks(
@@ -55,12 +55,12 @@ extern "C" {
     );
 
     pub fn reshape_and_cache(
-        key: *const c_void,
-        value: *const c_void,
+        key: *mut c_void,
+        value: *mut c_void,
         key_cache: *mut c_void,
         value_cache: *mut c_void,
-        slot_mapping: *const c_void,
-        kv_cache_dtype: *const i8,
+        slot_mapping: *mut c_void,
+        kv_cache_dtype: *const c_char,
         kv_scale: f64,
     );
 

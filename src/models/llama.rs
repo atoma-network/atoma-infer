@@ -1,9 +1,7 @@
 use crate::paged_attention::PagedAttention;
 use candle_core::{DType, Device, IndexOp, Module, Result, Tensor};
-use candle_nn::{embedding, VarBuilder, Embedding};
-use candle_transformers::models::with_tracing::{
-    linear_no_bias as linear, Linear, RmsNorm,
-};
+use candle_nn::{embedding, Embedding, VarBuilder};
+use candle_transformers::models::with_tracing::{linear_no_bias as linear, Linear, RmsNorm};
 use serde::Serialize;
 use std::collections::HashMap;
 
@@ -116,7 +114,7 @@ impl Cache {
     pub fn new(use_kv_cache: bool, dtype: DType, config: &Config, device: &Device) -> Result<Self> {
         // Precomputed frequency tensor for complex exponentials (cis)
         let n_elem = config.hidden_size / config.num_attention_heads;
-        let theta: Vec<_> = (0..n_elemt)
+        let theta: Vec<_> = (0..n_elem)
             .step_by(2)
             .map(|i| 1f32 / config.rope_theta.powf(i as f32 / n_elem as f32))
             .collect();
@@ -131,7 +129,7 @@ impl Cache {
             masks: HashMap::new(),
             cos,
             sin,
-            device,
+            device: device.clone(),
         })
     }
 }
@@ -148,6 +146,7 @@ struct CausalSelfAttention {
     span: tracing::Span,
     span_rot: tracing::Span,
     cos_sin_cache: Cache,
+    attention: PagedAttention,
 }
 
 #[cfg(feature = "flash-attn")]
@@ -184,7 +183,7 @@ impl CausalSelfAttention {
         input_metadata: &mut InputMetadata,
     ) -> Result<Tensor> {
         let _enter = self.span.enter();
-        let (b_sz, seq_len, hidden_size) = self.dims3()?;
+        let (b_sz, seq_len, hidden_size) = x.dims3()?;
         let q = self.q_proj.forward(x)?;
         let k = self.k_proj.forward(x)?;
         let v = self.v_proj.forward(x)?;
@@ -208,7 +207,7 @@ impl CausalSelfAttention {
         let k = self.repeat_kv(&k)?;
         let v = self.repeat_kv(&v)?;
 
-        let y = PagedAttention::forward(
+        let y = self.attention.forward(
             &q,
             &k,
             &v,
@@ -257,6 +256,15 @@ impl CausalSelfAttention {
             use_flash_attn: cfg.use_flash_attn,
             span,
             span_rot,
+            attention: PagedAttention::new(
+                cfg.num_attention_heads,
+                head_dim,
+                1. / ((head_dim as f32).sqrt()),
+                Some(cfg.num_key_value_heads),
+                None,
+                vb.device(),
+                None,
+            )?,
             cos_sin_cache: Cache::new(true, dtype, &cfg, device)?,
         })
     }

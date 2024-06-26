@@ -1,6 +1,54 @@
 use crate::kernels::ffi::{copy_blocks, reshape_and_cache, swap_blocks};
-use candle_core::{cuda::cudarc::driver::CudaSlice, Device, Error as CandleError, IndexOp, Layout, Storage, Tensor};
+use candle_core::{
+    cuda::cudarc::driver::CudaSlice, Device, Error as CandleError, IndexOp, Layout, Storage,
+    Tensor, D,
+};
 use thiserror::Error;
+
+/// `PagedAttentionMetadata` - Structure wrapping the metadata
+/// required for paged attention
+pub struct PagedAttentionMetadata {
+    /// Lengths of prompts
+    pub prompt_lengths: Vec<usize>,
+    /// The maximum sequence length
+    pub max_sequence_length: Option<usize>,
+    /// The block tables. (sequence_id -> vector of physical blocks)
+    pub block_tables: Option<Tensor>,
+    /// The length of attention context for each generation token
+    pub sequence_lengths: Option<Tensor>,
+    /// The address to write the new KV to of each token
+    pub slot_mapping: Tensor,
+    /// The attention bias
+    pub attn_bias: Option<Box<dyn AttentionBiasBlockDiagonal>>,
+    /// Is a prefill prompt
+    pub is_prompt: bool,
+    /// KV cache datatype (auto or fp8_e5m2)
+    pub kv_cache_dtype: String,
+}
+
+impl PagedAttentionMetadata {
+    /// Constructor
+    pub fn new(
+        prompt_lengths: Vec<usize>,
+        max_sequence_length: Option<usize>,
+        block_tables: Option<Tensor>,
+        sequence_lengths: Option<Tensor>,
+        slot_mapping: Tensor,
+        kv_cache_dtype: String,
+    ) -> Self {
+        let is_prompt = !prompt_lens.is_empty();
+        Self {
+            prompt_lengths,
+            max_sequence_length,
+            block_tables,
+            sequence_lengths,
+            slot_mapping,
+            attn_bias: None,
+            is_prompt,
+            kv_cache_dtype,
+        }
+    }
+}
 
 /// `PagedAttention` - Structure wrapping the CUDA
 /// kernels implementing the paged attention memory
@@ -193,15 +241,14 @@ impl PagedAttention {
         // Get CUDA slices for all tensors
         let key_caches_slice = key_caches
             .iter()
-            .map(|(storage, layout): &(Storage, layout)| match storage {
+            .map(|(storage, layout): &(Storage, Layout)| match storage {
                 Storage::Cuda(storage) => storage.as_cuda_slice().map(|s| (s, layout)),
                 _ => candle_core::bail!("Only CUDA storage is supported"),
             })
             .collect::<Result<Vec<_>, _>>()?;
         let value_caches_slice = value_caches
             .iter()
-            .map(|(storage, layout): &(Storage, Layout)| 
-            match storage {
+            .map(|(storage, layout): &(Storage, Layout)| match storage {
                 Storage::Cuda(storage) => storage.as_cuda_slice().map(|s| (s, layout)),
                 _ => candle_core::bail!("Only CUDA storage is supported"),
             })
@@ -228,5 +275,63 @@ impl PagedAttention {
         }
 
         Ok(())
+    }
+
+    pub fn forward(
+        &self,
+        query: &Tensor,
+        key: &Tensor,
+        value: &Tensor,
+        attention_mask: Option<&Tensor>,
+        mut key_cache: Option<&Tensor>,
+        mut value_cache: Option<&Tensor>,
+        attention_metadata: &mut PagedAttentionMetadata,
+    ) -> Result<Tensor> {
+        let dims = attention_metadata.slot_mapping.dims();
+
+        let slot_mapping = if dims.len() > 1 {
+            attention_metadata
+                .slot_mapping
+                .flatten(0, attention_metadata.slot_mapping.dims().len())?
+        } else {
+            attention_metadata.slot_mapping.clone()
+        };
+
+        let attention = match attention_mask {
+            None => None,
+            Some(attention_mask) => {
+                let attention = (query.matmul(&key.t()?)? * self.scale as f64)?;
+                let attention = attention.broadcast_add(attention_mask)?;
+                let attention = candle_nn::ops::softmax(&attention, D::Minus1)?;
+                Some(attention.matmul(&value)?)
+            }
+        };
+
+        // paged attention expects [b_sz, seq_len, nheads, head_dim]
+        let query = query.transpose(1, 2)?.contiguous()?;
+        let key = key.transpose(1, 2)?.contiguous()?;
+        let value = value.transpose(1, 2)?.contiguous()?;
+
+        // format [batch_size, num_tokens, num_heads, head_size]
+        let (batch_size, seq_len, attention_heads, head_size) = query.shape().dims4()?;
+        let (_, _, key_value_heads, _) = key.shape().dims4()?;
+        let query = query.reshape(((), attention_heads, head_size))?;
+        let key = key.reshape(((), key_value_heads, head_size))?;
+        let value = value.reshape(((), key_value_heads, head_size))?;
+
+        // key: Tensor,              // [num_tokens, num_heads, head_size]
+        // value: Tensor,            // [num_tokens, num_heads, head_size]
+        // key_cache: &mut Tensor,   // [num_blocks, num_heads, head_size/x, block_size, x] 48,32,16,16,8
+        // value_cache: &mut Tensor, // [num_blocks, num_heads, head_size, block_size] 48,32,128,16
+        // slot_mapping: Tensor,     // [num_tokens]
+        if key_cache.as_ref().is_some_and(|_| value_cache.is_some()) {
+            let _ = reshape_and_cache(
+                &key,
+                &value,
+                &key_cache.as_mut().unwrap(),
+                &value_cache.as_mut().unwrap(),
+                &slot_mapping,
+            )?;
+        }
     }
 }
