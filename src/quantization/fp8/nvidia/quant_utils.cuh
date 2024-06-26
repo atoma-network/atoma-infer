@@ -1,6 +1,6 @@
 #pragma once
 
-#include "src/kernels/attention_dtypes.h"
+#include "src/kernels/attention/attention_dtypes.h"
 #include <assert.h>
 #include <float.h>
 #include <stdint.h>
