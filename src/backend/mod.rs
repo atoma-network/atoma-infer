@@ -6,7 +6,10 @@ use crate::{
 };
 use candle_core::{
     backend::BackendStorage,
-    cuda_backend::{cudarc::driver::DeviceRepr, CudaDType, WrapErr},
+    cuda_backend::{
+        cudarc::driver::{DevicePtr, DeviceRepr},
+        CudaDType, WrapErr,
+    },
     CpuStorage, CudaStorage, CustomOp1, DType, Device, Layout, Result, Shape, Storage, Tensor,
 };
 use candle_nn::kv_cache;
