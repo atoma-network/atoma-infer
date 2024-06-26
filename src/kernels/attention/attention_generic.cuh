@@ -16,9 +16,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
-#ifndef VLLM_DECODER_MASKED_MULTIHEAD_ATTENTION_UTILS_H
-#define VLLM_DECODER_MASKED_MULTIHEAD_ATTENTION_UTILS_H
+#pragma once
 
 #include <stdint.h>
 
@@ -65,5 +63,3 @@ inline __device__ void zero(T& dst) {
 }
 
 }  // namespace vllm
-
-#endif // VLLM_DECODER_MASKED_MULTIHEAD_ATTENTION_UTILS_H

@@ -1,6 +1,6 @@
 /*
  * Adapted from
- * https://github.com/NVIDIA/FasterTransformer/blob/release/v5.3_tag/src/fastertransformer/kernels/decoder_masked_multihead_attention_utils.h
+ * https://github.com/NVIDIA/FasterTransformer/blob/release/v5.3_tag/src/fastertransformer/kernels/decoder_masked_multihead_attention/decoder_masked_multihead_attention_template.hpp
  * Copyright (c) 2023, The vLLM team.
  * Copyright (c) 2020-2023, NVIDIA CORPORATION.  All rights reserved.
  *
@@ -16,12 +16,13 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 #pragma once
+
+#include "../cuda_compat.h"
+#include "attention_dtypes.h"
 
 #include <float.h>
 #include <type_traits>
-#include "attention_dtypes.h"
 
 namespace vllm {
 
@@ -40,7 +41,7 @@ inline __device__ float qk_dot_(const Vec (&q)[N], const Vec (&k)[N]) {
   float qk = sum(qk_vec);
 #pragma unroll
   for (int mask = THREAD_GROUP_SIZE / 2; mask >= 1; mask /= 2) {
-    qk += __shfl_xor_sync(0xffffffff, qk, mask);
+    qk += VLLM_SHFL_XOR_SYNC(qk, mask);
   }
   return qk;
 }
@@ -54,5 +55,3 @@ struct Qk_dot {
 };
 
 }  // namespace vllm
-
-#endif // VLLM_QK_DOT_H
