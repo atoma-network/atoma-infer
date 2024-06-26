@@ -6,7 +6,7 @@ use crate::{
 };
 use candle_core::{
     backend::BackendStorage, CpuStorage, CudaStorage, CustomOp1, DType, Layout, Result, Shape,
-    Storage, Tensor, cuda_backend::CudaDType,
+    Storage, Tensor, cuda_backend::{CudaDType, cudarc::driver::DeviceRepr},
 };
 use half::{bf16, f16};
 use serde::de::value;
@@ -38,7 +38,7 @@ impl CustomOp1 for PagedAttention {
     }
 
     fn cuda_fwd(&self, storage: &CudaStorage, layout: &Layout) -> Result<(CudaStorage, Shape)> {
-        match q.dtype() {
+        match storage.dtype() {
             DType::F32 => self.cuda_fwd_t::<f32>(storage, layout),
             DType::F16 => self.cuda_fwd_t::<f16>(storage, layout),
             DType::BF16 => self.cuda_fwd_t::<bf16>(storage, layout),
@@ -194,11 +194,11 @@ impl PagedAttention {
         let use_v1 = (max_num_partitions == 1 || num_sequences * num_heads > PARTITION_SIZE)
             && PARTITION_SIZE % block_size == 0;
 
-        let elem_count = out_shape.elem_count();
+        let elem_count = output_shape.elem_count();
         let out = unsafe { device.alloc::<T>(elem_count) }.w()?;
 
         let out_ptr = out.device_ptr() as *const core::ffi::c_void;
-        let q_ptr = q.device_ptr() as *const core::ffi::c_void;
+        let query_ptr = q.device_ptr() as *const core::ffi::c_void;
         let key_cache_ptr = key_cache.device_ptr() as *const core::ffi::c_void;
         let value_cache_ptr = value_cache.device_ptr() as *const core::ffi::c_void;
         let block_tables_ptr = block_tables.device_ptr() as *const core::ffi::c_void;

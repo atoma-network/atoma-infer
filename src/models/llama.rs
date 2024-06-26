@@ -115,7 +115,7 @@ impl Cache {
     /// Constructor
     pub fn new(use_kv_cache: bool, dtype: DType, config: &Config, device: &Device) -> Result<Self> {
         // Precomputed frequency tensor for complex exponentials (cis)
-        let n_elemt = config.hidden_size / config.num_attention_heads;
+        let n_elem = config.hidden_size / config.num_attention_heads;
         let theta: Vec<_> = (0..n_elemt)
             .step_by(2)
             .map(|i| 1f32 / config.rope_theta.powf(i as f32 / n_elem as f32))
@@ -325,7 +325,7 @@ impl Block {
     fn load(vb: VarBuilder, cfg: &Config, dtype: DType, device: &Device) -> Result<Self> {
         let span = tracing::span!(tracing::Level::TRACE, "block");
         let attn = CausalSelfAttention::load(vb.pp("self_attn"), cfg, dtype, device)?;
-        let mlp = Mlp::load(vb.pp("mlp"), cfg)?;
+        let mlp = Mlp::load(&vb.pp("mlp"), cfg)?;
         let rms_1 = RmsNorm::new(cfg.hidden_size, cfg.rms_norm_eps, vb.pp("input_layernorm"))?;
         let rms_2 = RmsNorm::new(
             cfg.hidden_size,
@@ -379,7 +379,9 @@ impl Llama {
                 )?;
             }
         } else {
-            x = block.forward(&x, attention_mask.as_ref(), index_pos, None, input_metadata)?;
+            for block in &mut self.blocks {
+                x = block.forward(&x, attention_mask.as_ref(), index_pos, None, input_metadata)?;
+            }
         }
         let x = self.ln_f.forward(&x)?;
         let x = x.i((.., seq_len - 1, ..))?.contiguous()?;

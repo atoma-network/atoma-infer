@@ -1,4 +1,4 @@
-use core::ffi::{c_void, torch::Tensor};
+use core::ffi::c_void;
 
 extern "C" {
     pub fn copy_blocks(
