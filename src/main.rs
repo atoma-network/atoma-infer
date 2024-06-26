@@ -15,7 +15,7 @@ extern crate intel_mkl_src;
 use anyhow::{bail, Error as E, Result};
 use clap::{Parser, ValueEnum};
 
-use candle::{DType, Tensor};
+use candle_core::{DType, Tensor};
 use candle_nn::VarBuilder;
 use candle_transformers::generation::{LogitsProcessor, Sampling};
 use hf_hub::{api::sync::Api, Repo, RepoType};

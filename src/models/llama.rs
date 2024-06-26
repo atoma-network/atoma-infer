@@ -3,6 +3,7 @@ use candle_core::{DType, Device, IndexOp, Module, Result, Tensor};
 use candle_transformers::models::with_tracing::{
     linear_no_bias as linear, Embedding, Linear, RmsNorm,
 };
+use candle_nn::{embedding, VarBuilder};
 use serde::Serialize;
 use std::collections::HashMap;
 

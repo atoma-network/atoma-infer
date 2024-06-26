@@ -1,5 +1,5 @@
 use crate::kernels::ffi::{copy_blocks, reshape_and_cache, swap_blocks};
-use candle_core::{Error as CandleError, IndexOp, Tensor, Storage};
+use candle_core::{Error as CandleError, IndexOp, Tensor, Storage, Device};
 use thiserror::Error;
 
 /// `PagedAttention` - Structure wrapping the CUDA
@@ -23,7 +23,7 @@ impl PagedAttention {
         scale: f32,
         num_kv_heads: Option<usize>,
         sliding_window: Option<usize>,
-        device: Device,
+        device: &Device,
         alibi_slopes: Option<Vec<f64>>,
     ) -> Result<Self, PagedAttentionError> {
         let num_kv_heads = num_kv_heads.unwrap_or(num_attention_heads);
@@ -75,7 +75,7 @@ impl PagedAttention {
         let (block_mapping, block_mapping_layour) = src_to_dst.storage_and_layout();
         let block_mapping = match block_mapping {
             Storage::Cuda(storage) => storage.as_ptr(),
-            _ => candle::bail!("Only CUDA storage is supported"),
+            _ => candle_core::bail!("Only CUDA storage is supported"),
         };
 
         // Get CUDA slices for block_mapping tensor
@@ -90,13 +90,13 @@ impl PagedAttention {
         let (src_key_cache_storage, src_key_cache_layout) = src_key_cache.storage_and_layout();
         let src_key_cache = match src_key_cache_storage {
             Storage::Cuda(storage) => storage.as_mut_ptr(),
-            _ => candle::bail!("Only CUDA storage is supported"),
+            _ => candle_core::bail!("Only CUDA storage is supported"),
         };
 
         let (dst_key_cache_storage, dst_key_cache_layout) = dst_key_cache.storage_and_layout();
         let dst_key_cache = match dst_key_cache_storage {
             Storage::Cuda(storage) => storage.as_mut_ptr(),
-            _ => candle::bail!("Only CUDA storage is supported"),
+            _ => candle_core::bail!("Only CUDA storage is supported"),
         };
 
         // Get CUDA slices for both source and destiny key_cache tensors
@@ -125,14 +125,14 @@ impl PagedAttention {
             src_value_cache.storage_and_layout();
         let src_value_cache = match src_value_cache_storage {
             Storage::Cuda(storage) => storage.as_mut_ptr(),
-            _ => candle::bail!("Only CUDA storage is supported"),
+            _ => candle_core::bail!("Only CUDA storage is supported"),
         };
 
         let (dst_value_cache_storage, dst_value_cache_layout) =
             dst_value_cache.storage_and_layout();
         let dst_value_cache = match dst_value_cache_storage {
             Storage::Cuda(storage) => storage.as_mut_ptr(),
-            _ => candle::bail!("Only CUDA storage is supported"),
+            _ => candle_core::bail!("Only CUDA storage is supported"),
         };
 
         // Get CUDA slices for both source and destiny value_cache tensors
@@ -164,7 +164,7 @@ impl PagedAttention {
         let (block_mapping, block_mapping_layour) = block_mapping.storage_and_layout();
         let block_mapping = match block_mapping {
             Storage::Cuda(storage) => storage.as_ptr(),
-            _ => candle::bail!("Only CUDA storage is supported"),
+            _ => candle_core::bail!("Only CUDA storage is supported"),
         };
 
         // Get CUDA slices for block_mapping tensor

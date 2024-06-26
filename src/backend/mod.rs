@@ -6,7 +6,7 @@ use crate::{
 };
 use candle_core::{
     backend::BackendStorage, CpuStorage, CudaStorage, CustomOp1, DType, Layout, Result, Shape,
-    Storage, Tensor,
+    Storage, Tensor, cuda_backend::CudaDType,
 };
 use half::{bf16, f16};
 use serde::de::value;
@@ -59,7 +59,7 @@ impl PagedAttention {
             DType::F32 => 0,
             DType::F16 => 1,
             DType::BF16 => 2,
-            _ => candle::bail!("Unsupported dtype for paged attention: {}", dtype),
+            _ => candle_core::bail!("Unsupported dtype for paged attention: {}", dtype),
         };
 
         let device = storage.device();
@@ -68,32 +68,32 @@ impl PagedAttention {
         let (key_cache, key_cache_layout) = self.key_cache.storage_and_layout()?;
         let key_cache = match &*&key_cache {
             Storage::Cuda(kc) => kc,
-            _ => candle::bail!("key_cache must be a Cuda tensor"),
+            _ => candle_core::bail!("key_cache must be a Cuda tensor"),
         };
 
         let (value_cache, value_cache_layout) = self.value_cache.storage_and_layout()?;
         let value_cache = match &*&value_cache {
             Storage::Cuda(vc) => vc,
-            _ => candle::bail!("value_cache must be a Cuda tensor"),
+            _ => candle_core::bail!("value_cache must be a Cuda tensor"),
         };
 
         let (block_tables, block_tables_layout) = self.block_tables.storage_and_layout()?;
         let block_tables = match &*&block_tables {
             Storage::Cuda(bt) => bt,
-            _ => candle::bail!("block_tables must be a Cuda tensor"),
+            _ => candle_core::bail!("block_tables must be a Cuda tensor"),
         };
 
         let (sequence_lengths, sequence_lengths_layout) =
             self.sequence_lengths.storage_and_layout()?;
         let sequence_lengths = match &*&sequence_lengths {
             Storage::Cuda(sl) => sl,
-            _ => candle::bail!("sequence_lengths must be a Cuda tensor"),
+            _ => candle_core::bail!("sequence_lengths must be a Cuda tensor"),
         };
 
         // let (query, query_layout) = self.query.storage_and_layout()?;
         // let query = match &*&query {
         //     Storage::Cuda(q) => q,
-        //     _ => candle::bail!("query must be a Cuda tensor"),
+        //     _ => candle_core::bail!("query must be a Cuda tensor"),
         // };
 
         let q_rank = layout.stride().len();
@@ -101,21 +101,21 @@ impl PagedAttention {
         let value_cache_rank = value_cache_layout.stride().len();
 
         if q_rank != 3 {
-            candle::bail!(
+            candle_core::bail!(
                 "paged-attention expects `q` tensor to be of rank 3 \
                 (q: {layout:?})"
             )
         }
 
         if key_cache_rank != 5 {
-            candle::bail!(
+            candle_core::bail!(
                 "paged-attention expects `key_cache` tensor to be of rank 5 \
                 (key_cache: {key_cache_layout:?})"
             )
         }
 
         if value_cache_rank != 4 {
-            candle::bail!(
+            candle_core::bail!(
                 "paged-attention expects `value_cache` tensor to be of rank 4 \
                 (value_cache: {value_cache_layout:?})"
             )
@@ -140,14 +140,14 @@ impl PagedAttention {
         let (num_sequences, num_heads, head_size) = layout.shape().dims3()?;
 
         if !matches!(head_size, 64 | 80 | 96 | 112 | 128 | 256) {
-            candle::bail!("`head_size` must be one of 64, 80, 96, 112, 128 or 256");
+            candle_core::bail!("`head_size` must be one of 64, 80, 96, 112, 128 or 256");
         }
 
         let (num_sequences_block_table, max_num_blocks_per_sequence) =
             block_tables_layout.dims2()?;
 
         if num_sequences_block_table != num_sequences {
-            candle::bail!(
+            candle_core::bail!(
                 "block_tables shape mismatch {:?}, expected {:?}",
                 block_tables_layout.shape(),
                 (num_sequences, num_sequences_block_table)
@@ -157,7 +157,7 @@ impl PagedAttention {
         let (num_blocks, num_kv_heads, head_size_kc, block_size, x) =
             key_cache_layout.shape().dims5()?;
         if head_size_kc != head_size / x {
-            candle::bail!(
+            candle_core::bail!(
                 "key_cache shape mismatch {:?}, expected {:?}",
                 key_cache_layout.shape(),
                 (num_blocks, num_kv_heads, head_size / x, block_size, x)
@@ -165,7 +165,7 @@ impl PagedAttention {
         }
 
         if (num_blocks, num_kv_heads, head_size, block_size) != value_cache_layout.shape().dims4() {
-            candle::bail!(
+            candle_core::bail!(
                 "value_cache shape mismatch {:?} key_cache shape {:?}",
                 value_cache_layout.shape(),
                 key_cache_layout.shape()
@@ -173,7 +173,7 @@ impl PagedAttention {
         }
 
         if num_sequences != sequence_lengths_layout.shape().dims1()? {
-            candle::bail!(
+            candle_core::bail!(
                 "sequence_lengths shape mismatch {:?}, expected {:?}",
                 sequence_lengths_layout.shape(),
                 num_sequences
