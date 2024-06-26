@@ -1,5 +1,5 @@
 use crate::kernels::ffi::{copy_blocks, reshape_and_cache, swap_blocks};
-use candle_core::{Error as CandleError, IndexOp, Tensor, Storage, Device, Layout};
+use candle_core::{Device, Error as CandleError, IndexOp, Layout, Storage, Tensor};
 use thiserror::Error;
 
 /// `PagedAttention` - Structure wrapping the CUDA
@@ -156,10 +156,7 @@ impl PagedAttention {
         Ok(())
     }
 
-    pub fn copy_blocks(
-        kv_caches: Vec<Tensor>,
-        block_mapping: Tensor,
-    ) -> Result<(), CandleError> {
+    pub fn copy_blocks(kv_caches: Vec<Tensor>, block_mapping: Tensor) -> Result<(), CandleError> {
         // 1. Handle block mapping tensor
         let (block_mapping, block_mapping_layour) = block_mapping.storage_and_layout();
         let block_mapping = match block_mapping {
@@ -196,11 +193,17 @@ impl PagedAttention {
         // Get CUDA slices for all tensors
         let key_caches_slice = key_caches
             .iter()
-            .map(|(storage, layout): (&Storage, &Layout)| storage.as_cuda_slice(layout))
+            .map(|(storage, _enter): (&Storage, _)| match storage {
+                Storage::Cuda(storage) => storage.as_cuda_slice(),
+                _ => candle_core::bail!("Only CUDA storage is supported"),
+            })
             .collect::<Result<Vec<_>, _>>()?;
         let value_caches_slice = value_caches
             .iter()
-            .map(|(storage, layout): (&Storage, &Layout)| storage.as_cuda_slice(layout))
+            .map(|(storage, _): (&Storage, _)| match storage {
+                Storage::Cuda(storage) => storage.as_cuda_slice(),
+                _ => candle_core::bail!("Only CUDA storage is supported"),
+            })
             .collect::<Result<Vec<_>, _>>()?;
 
         // Get CUDA views for all tensors
@@ -226,4 +229,3 @@ impl PagedAttention {
         Ok(())
     }
 }
-
