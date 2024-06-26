@@ -1,4 +1,4 @@
-use crate::paged_attention::PagedAttention;
+use crate::paged_attention::{PagedAttention, PagedAttentionMetadata};
 use candle_core::{DType, Device, IndexOp, Module, Result, Tensor};
 use candle_nn::{embedding, Embedding, VarBuilder};
 use candle_transformers::models::with_tracing::{linear_no_bias as linear, Linear, RmsNorm};
@@ -180,7 +180,7 @@ impl CausalSelfAttention {
         attention_mask: Option<&Tensor>,
         index_pos: usize,
         cache: Option<(&Tensor, &Tensor)>,
-        input_metadata: &mut InputMetadata,
+        input_metadata: &mut PagedAttentionMetadata,
     ) -> Result<Tensor> {
         let _enter = self.span.enter();
         let (b_sz, seq_len, hidden_size) = x.dims3()?;
@@ -316,7 +316,7 @@ impl Block {
         attention_mask: Option<&Tensor>,
         index_pos: usize,
         cache: Option<(&Tensor, &Tensor)>,
-        input_metadata: &mut InputMetadata,
+        attention_metadata: &mut PagedAttentionMetadata,
     ) -> Result<Tensor> {
         let _enter = self.span.enter();
         let residual = x;
@@ -366,7 +366,7 @@ impl Llama {
         x: &Tensor,
         index_pos: Tensor,
         kv_caches: Option<&Vec<(Tensor, Tensor)>>,
-        input_metadata: &mut InputMetadata,
+        attention_metadata: &mut PagedAttentionMetadata,
     ) -> Result<Tensor> {
         let (_b_sz, seq_len, _) = x.dims3()?;
         let attention_mask = if seq_len <= 1 {

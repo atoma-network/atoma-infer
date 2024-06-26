@@ -36,7 +36,7 @@ impl PagedAttentionMetadata {
         slot_mapping: Tensor,
         kv_cache_dtype: String,
     ) -> Self {
-        let is_prompt = !prompt_lens.is_empty();
+        let is_prompt = !prompt_lengths.is_empty();
         Self {
             prompt_lengths,
             max_sequence_length,
