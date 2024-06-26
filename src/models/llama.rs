@@ -1,5 +1,5 @@
 use crate::paged_attention::PagedAttention;
-use candle::{CudaDevice, DType, Device, IndexOp, Module, Result, Tensor, D};
+use candle_core::{CudaDevice, DType, Device, IndexOp, Module, Result, Tensor, D};
 use candle_transformers::models::with_tracing::{
     linear_no_bias as linear, Embedding, Linear, RmsNorm,
 };

@@ -1,5 +1,5 @@
 use crate::kernels::ffi::{copy_blocks, reshape_and_cache, swap_blocks};
-use candle::{Error as CandleError, IndexOp, Tensor};
+use candle_core::{Error as CandleError, IndexOp, Tensor};
 use thiserror::Error;
 
 /// `PagedAttention` - Structure wrapping the CUDA

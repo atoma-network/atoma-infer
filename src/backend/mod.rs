@@ -4,9 +4,8 @@ use crate::{
     kernels::ffi::{paged_attention_v1, paged_attention_v2},
     paged_attention,
 };
-use candle::{
+use candle_core::{
     backend::BackendStorage,
-    cuda::{cudarc::driver::DeviceRepr, CudaDType},
     CpuStorage, CudaStorage, CustomOp1, DType, Layout, Result, Shape, Storage, Tensor,
 };
 use half::{bf16, f16};
@@ -35,7 +34,7 @@ impl CustomOp1 for PagedAttention {
     }
 
     fn cpu_fwd(&self, storage: &CpuStorage, layout: &Layout) -> Result<(CpuStorage, Shape)> {
-        candle::bail!("PagedAttention is not implemented for CPU");
+        candle_core::bail!("PagedAttention is not implemented for CPU");
     }
 
     fn cuda_fwd(&self, storage: &CudaStorage, layout: &Layout) -> Result<(CudaStorage, Shape)> {
@@ -43,7 +42,7 @@ impl CustomOp1 for PagedAttention {
             DType::F32 => self.cuda_fwd_t::<f32>(storage, layout),
             DType::F16 => self.cuda_fwd_t::<f16>(storage, layout),
             DType::BF16 => self.cuda_fwd_t::<bf16>(storage, layout),
-            dtype => candle::bail!("Unsupported dtype for paged attention: {}", dtype),
+            dtype => candle_core::bail!("Unsupported dtype for paged attention: {}", dtype),
         }
     }
 }
