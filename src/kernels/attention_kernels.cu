@@ -8,7 +8,7 @@
   #include "../quantization/fp8/amd/quant_utils.cuh"
 typedef __hip_bfloat16 __nv_bfloat16;
 #else
-  #include "src/quantizations/quant_utils.cuh"
+  #include "src/deps/quant_utils.cuh"
 #endif
 
 #ifndef USE_ROCM
