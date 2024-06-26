@@ -1,8 +1,8 @@
 use crate::paged_attention::PagedAttention;
 use candle_core::{DType, Device, IndexOp, Module, Result, Tensor};
-use candle_nn::{embedding, VarBuilder};
+use candle_nn::{embedding, VarBuilder, Embedding};
 use candle_transformers::models::with_tracing::{
-    linear_no_bias as linear, Embedding, Linear, RmsNorm,
+    linear_no_bias as linear, Linear, RmsNorm,
 };
 use serde::Serialize;
 use std::collections::HashMap;

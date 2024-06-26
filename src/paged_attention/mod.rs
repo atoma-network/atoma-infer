@@ -55,7 +55,7 @@ impl PagedAttention {
         num_blocks: usize,
         block_size: usize,
         num_kv_heads: usize,
-        head_size: u32,
+        head_size: usize,
     ) -> Vec<usize> {
         vec![2, num_blocks, block_size * num_kv_heads * head_size]
     }
