@@ -3,7 +3,6 @@ use candle_core::{
     cuda::cudarc::driver::CudaSlice, Device, Error as CandleError, IndexOp, Layout, Storage,
     Tensor, D,
 };
-use thiserror::Error;
 
 /// `PagedAttentionMetadata` - Structure wrapping the metadata
 /// required for paged attention
