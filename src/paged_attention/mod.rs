@@ -17,8 +17,8 @@ pub struct PagedAttentionMetadata {
     pub sequence_lengths: Option<Tensor>,
     /// The address to write the new KV to of each token
     pub slot_mapping: Tensor,
-    /// The attention bias
-    pub attn_bias: Option<Box<dyn AttentionBiasBlockDiagonal>>,
+    // /// The attention bias
+    // pub attn_bias: Option<Box<dyn AttentionBiasBlockDiagonal>>,
     /// Is a prefill prompt
     pub is_prompt: bool,
     /// KV cache datatype (auto or fp8_e5m2)
@@ -42,7 +42,7 @@ impl PagedAttentionMetadata {
             block_tables,
             sequence_lengths,
             slot_mapping,
-            attn_bias: None,
+            // attn_bias: None,
             is_prompt,
             kv_cache_dtype,
         }
