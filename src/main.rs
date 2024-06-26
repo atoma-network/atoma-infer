@@ -21,7 +21,7 @@ use candle_transformers::generation::{LogitsProcessor, Sampling};
 use hf_hub::{api::sync::Api, Repo, RepoType};
 use std::io::Write;
 
-use candle_transformers::models::llama as model;
+use crate::models::llama as model;
 use model::{Llama, LlamaConfig};
 
 const EOS_TOKEN: &str = "</s>";

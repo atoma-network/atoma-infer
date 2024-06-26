@@ -355,7 +355,7 @@ impl Llama {
     pub fn forward(
         &mut self,
         x: &Tensor,
-        index_pos: usize,
+        index_pos: Tensor,
         kv_caches: Option<&Vec<(Tensor, Tensor)>>,
         input_metadata: &mut InputMetadata,
     ) -> Result<Tensor> {
