@@ -56,7 +56,7 @@ pub struct PagedAttention {
     num_attention_heads: usize,
     head_dim: usize,
     num_kv_heads: usize,
-    scale: f32,
+    scale: f64,
     sliding_window: Option<usize>,
     num_queries_per_kv: usize,
     alibi_slopes: Option<Tensor>,
@@ -67,7 +67,7 @@ impl PagedAttention {
     pub fn new(
         num_attention_heads: usize,
         head_dim: usize,
-        scale: f32,
+        scale: f64,
         num_kv_heads: Option<usize>,
         sliding_window: Option<usize>,
         device: &Device,
@@ -338,6 +338,6 @@ impl PagedAttention {
             return Ok(computed_attention);
         }
 
-        
+
     }
 }
