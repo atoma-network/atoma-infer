@@ -219,9 +219,9 @@ impl PagedAttention {
 
         unsafe {
             copy_blocks(
-                key_caches as *const *const core::ffi::c_void,
+                key_caches_view as *const *const core::ffi::c_void,
                 key_caches_length,
-                value_caches as *const *const core::ffi::c_void,
+                value_caches_view as *const *const core::ffi::c_void,
                 value_caches_length,
                 block_mapping_view as *const core::ffi::c_void,
             )
