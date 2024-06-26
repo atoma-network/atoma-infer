@@ -6,6 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+accelerate-src = { version = "0.3.2", optional = true }
 candle-core = { git = "https://github.com/huggingface/candle.git", version = "0.6.0" }
 candle-examples = { git = "https://github.com/huggingface/candle.git", version = "0.6.0" }
 candle-nn = { git = "https://github.com/huggingface/candle.git", version = "0.6.0" }
