@@ -10,6 +10,14 @@ candle-core = { git = "https://github.com/huggingface/candle.git", version = "0.
 candle-examples = { git = "https://github.com/huggingface/candle.git", version = "0.6.0" }
 candle-nn = { git = "https://github.com/huggingface/candle.git", version = "0.6.0" }
 candle-transformers = { git = "https://github.com/huggingface/candle.git", version = "0.6.0" }
-cudarc = "0.11.6"
 half = "2.4.1"
 serde = { version = "1.0.203", features = ["derive"] }
+
+[features]
+default = ["cuda"]
+accelerate = ["dep:accelerate-src", "candle-core/accelerate", "candle-nn/accelerate", "candle-transformers/accelerate"]
+cuda = ["candle-core/cuda", "candle-nn/cuda", "candle-transformers/cuda"]
+cudnn = ["candle-core/cudnn"]
+flash-attn = ["cuda", "candle-transformers/flash-attn"]
+mkl = ["dep:intel-mkl-src", "candle-core/mkl", "candle-nn/mkl", "candle-transformers/mkl"]
+nccl = ["cuda", "cudarc/nccl"]
