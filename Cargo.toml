@@ -7,7 +7,6 @@ edition = "2021"
 
 [dependencies]
 candle = { git = "https://github.com/huggingface/candle", package = "candle-core", branch = "main", features = ["cuda"] }
-candle-flash-attn = { git = "https://github.com/huggingface/candle", package = "candle-flash-attn", branch = "main" }
 candle-nn = { git = "https://github.com/huggingface/candle", package = "candle-nn", branch = "main", features = ["cuda"] }
 candle-transformers = { git = "https://github.com/huggingface/candle", package = "candle-transformers", branch = "main", features = ["cuda", "flash-attn"] }
 half = "2.4.1"
