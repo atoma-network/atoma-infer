@@ -180,7 +180,7 @@ impl CausalSelfAttention {
         attention_mask: Option<&Tensor>,
         index_pos: usize,
         cache: Option<(&Tensor, &Tensor)>,
-        input_metadata: &mut PagedAttentionMetadata,
+        attention_metadata: &mut PagedAttentionMetadata,
     ) -> Result<Tensor> {
         let _enter = self.span.enter();
         let (b_sz, seq_len, hidden_size) = x.dims3()?;
@@ -214,7 +214,7 @@ impl CausalSelfAttention {
             attention_mask,
             cache.map(|(k, _)| k.clone()),
             cache.map(|(_, v)| v.clone()),
-            input_metadata,
+            attention_metadata,
         )?;
 
         let y = if attention_mask.is_some() {
@@ -323,7 +323,7 @@ impl Block {
         let x = self.rms_1.forward(&x)?;
         let x = (self
             .attn
-            .forward(&x, attention_mask, index_pos, cache, input_metadata)?
+            .forward(&x, attention_mask, index_pos, cache, attention_metadata)?
             + residual)?;
         let residual = &x;
         let x = (self.mlp.forward(&self.rms_2.forward(&x)?)? + residual)?;
@@ -383,12 +383,18 @@ impl Llama {
                     attention_mask.as_ref(),
                     index_pos,
                     Some((k_cache, v_cache)),
-                    input_metadata,
+                    attention_metadata,
                 )?;
             }
         } else {
             for block in &mut self.blocks {
-                x = block.forward(&x, attention_mask.as_ref(), index_pos, None, input_metadata)?;
+                x = block.forward(
+                    &x,
+                    attention_mask.as_ref(),
+                    index_pos,
+                    None,
+                    attention_metadata,
+                )?;
             }
         }
         let x = self.ln_f.forward(&x)?;
