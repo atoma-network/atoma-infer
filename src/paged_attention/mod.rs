@@ -267,9 +267,7 @@ impl PagedAttention {
         unsafe {
             copy_blocks(
                 key_caches_view as *const *const core::ffi::c_void,
-                key_caches_length,
                 value_caches_view as *const *const core::ffi::c_void,
-                value_caches_length,
                 block_mapping_view as *const core::ffi::c_void,
             )
         }
@@ -325,7 +323,7 @@ impl PagedAttention {
         // value_cache: &mut Tensor, // [num_blocks, num_heads, head_size, block_size] 48,32,128,16
         // slot_mapping: Tensor,     // [num_tokens]
         if key_cache.as_ref().is_some_and(|_| value_cache.is_some()) {
-            let _ = reshape_and_cache(
+            let _ = self.reshape_and_cache(
                 &key,
                 &value,
                 &key_cache.as_mut().unwrap(),

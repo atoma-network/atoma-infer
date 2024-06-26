@@ -3,9 +3,7 @@ use core::ffi::{c_char, c_void};
 extern "C" {
     pub fn copy_blocks(
         key_caches: *const *const c_void,
-        key_caches_len: usize,
         value_caches: *const *const c_void,
-        value_caches_len: usize,
         block_mapping: *const c_void,
     );
 
@@ -64,5 +62,5 @@ extern "C" {
         kv_scale: f64,
     );
 
-    pub fn swap_blocks(src: *const c_void, dst: *mut c_void, block_mapping: *const c_void);
+    pub fn swap_blocks(src: *mut c_void, dst: *mut c_void, block_mapping: *const c_void);
 }
