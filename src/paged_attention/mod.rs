@@ -350,11 +350,11 @@ fn copy_blocks_t<T: CudaDType + DeviceRepr>(
     // Get CUDA views for all tensors
     let key_caches_view = key_caches_slice
         .iter()
-        .map(|(slice, layout): &(CudaSlice<_>, Layout)| slice.slice(layout.start_offset()..))
+        .map(|(slice, layout): &(CudaSlice<T>, Layout)| slice.slice(layout.start_offset()..))
         .collect::<Result<Vec<_>, _>>()?;
     let value_caches_view = value_caches_slice
         .iter()
-        .map(|(slice, layout): &(CudaSlice<_>, Layout)| slice.slice(layout.start_offset()..))
+        .map(|(slice, layout): &(CudaSlice<T>, Layout)| slice.slice(layout.start_offset()..))
         .collect::<Result<Vec<_>, _>>()?;
 
     unsafe {
