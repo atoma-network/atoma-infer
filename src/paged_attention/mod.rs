@@ -193,14 +193,14 @@ impl PagedAttention {
         // Get CUDA slices for all tensors
         let key_caches_slice = key_caches
             .iter()
-            .map(|(storage, _enter): (&Storage, _)| match storage {
+            .map(|(storage, _enter): (&Storage, &Layout)| match storage {
                 Storage::Cuda(storage) => storage.as_cuda_slice(),
                 _ => candle_core::bail!("Only CUDA storage is supported"),
             })
             .collect::<Result<Vec<_>, _>>()?;
         let value_caches_slice = value_caches
             .iter()
-            .map(|(storage, _): (&Storage, _)| match storage {
+            .map(|(storage, _): (&Storage, &Layout)| match storage {
                 Storage::Cuda(storage) => storage.as_cuda_slice(),
                 _ => candle_core::bail!("Only CUDA storage is supported"),
             })
