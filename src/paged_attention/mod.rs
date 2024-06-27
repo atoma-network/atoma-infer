@@ -3,9 +3,7 @@ use crate::{
     kernels::ffi::{copy_blocks, swap_blocks},
 };
 use candle_core::{
-    cuda::cudarc::driver::CudaSlice,
-    cuda_backend::{cudarc::driver::DeviceRepr, CudaDType},
-    DType, Device, Error as CandleError, IndexOp, Layout, Storage, Tensor, D,
+    cuda::cudarc::driver::{CudaSlice, DevicePtr}, cuda_backend::{cudarc::driver::DeviceRepr, CudaDType}, DType, Device, Error as CandleError, IndexOp, Layout, Storage, Tensor, WithDType, D
 };
 use half::{bf16, f16};
 
@@ -210,6 +208,113 @@ impl PagedAttention {
     }
 }
 
+/// Swaps blocks in the key and value cache from CPU to GPU,
+/// or GPU to CPU.
+fn swap_blocks_t<T: CudaDType + DeviceRepr + WithDType>(
+    src_kv_cache: &Tensor,
+    dst_kv_cache: &Tensor,
+    src_to_dst: &Tensor,
+) -> Result<(), CandleError> {
+    let block_size_in_bytes = src_kv_cache.dims1()? * src_kv_cache.dtype().size_in_bytes();
+    match (src_kv_cache.device(), dst_kv_cache.device()) {
+        (Device::Cuda(src_device), Device::Cuda(dst_device)) => {
+            if src_device.ordinal() != dst_device.ordinal() {
+                candle_core::bail!(
+                    "Source and destiny KV cache tensors must be on the same GPU device"
+                );
+            }
+            let (source_storage, source_layout) = src_kv_cache.storage_and_layout();
+            let source = match source_storage {
+                Storage::Cuda(storage) => storage,
+                _ => candle_core::bail!("Only CUDA storage is supported"),
+            };
+
+            let (destiny_storage, destiny_layout) = dst_kv_cache.storage_and_layout();
+            let destiny = match destiny_storage {
+                Storage::Cuda(storage) => storage,
+                _ => candle_core::bail!("Only CUDA storage is supported"),
+            };
+
+            let source_slice = source.as_cuda_slice::<T>()?;
+            let destiny_slice = destiny.as_cuda_slice::<T>()?;
+
+            let source_view = source_slice.slice(source_layout.start_offset()..);
+            let destiny_view = destiny_slice.slice(destiny_layout.start_offset()..);
+
+            let source_ptr = source_view.device_ptr() as *mut core::ffi::c_void;
+            let destiny_ptr = destiny_view.device_ptr() as *mut core::ffi::c_void;
+
+            unsafe {
+                swap_blocks(
+                    source_ptr,
+                    destiny_ptr,
+                    block_mapping_view.device_ptr() as *const core::ffi::c_void,
+                )
+            }
+        }
+        (Device::Cpu, Device::Cuda(dst_device)) => {
+            let (source_storage, source_layout) = src_kv_cache.storage_and_layout();
+            let source = match source_storage {
+                Storage::Cpu(storage) => storage,
+                _ => candle_core::bail!("Source tensor storage should be available on CPU device"),
+            };
+
+            let (destiny_storage, destiny_layout) = dst_kv_cache.storage_and_layout();
+            let destiny = match destiny_storage {
+                Storage::Cuda(storage) => storage,
+                _ => candle_core::bail!("Destiny tensor storage should be available on CUDA device"),
+            };
+
+            let source_slice = source.as_slice::<T>()?;
+            let destiny_slice = destiny.as_cuda_slice::<T>()?;
+
+            let destiny_view = destiny_slice.slice(destiny_layout.start_offset()..);
+
+            let source_ptr = source_slice.as_ptr() as *mut T as *mut core::ffi::c_void;
+            let destiny_ptr = destiny_view.device_ptr() as *mut core::ffi::c_void;
+
+            unsafe {
+                swap_blocks(
+                    source_ptr,
+                    destiny_ptr,
+                    block_mapping_view.device_ptr() as *const core::ffi::c_void,
+                )
+            }
+        },
+        (Device::Cuda(src_device), Device::Cpu) => {
+            let (source_storage, source_layout) = src_kv_cache.storage_and_layout();
+            let source = match source_storage {
+                Storage::Cuda(storage) => storage,
+                _ => candle_core::bail!("Source tensor storage should be available on CUDA device"),
+            };
+
+            let (destiny_storage, destiny_layout) = dst_kv_cache.storage_and_layout();
+            let destiny = match destiny_storage {
+                Storage::Cpu(storage) => storage,
+                _ => candle_core::bail!("Destiny tensor storage should be available on CPU device"),
+            };
+
+            let source_slice = source.as_cuda_slice::<T>()?;
+            let destiny_slice = destiny.as_slice::<T>()?;
+
+            let source_view = source_slice.slice(source_layout.start_offset()..);
+
+            let source_ptr = source_slice.device_ptr() as *mut core::ffi::c_void;
+            let destiny_ptr = destiny_view.as_ptr() as *mut T as *mut core::ffi::c_void;
+
+            unsafe {
+                swap_blocks(
+                    source_ptr,
+                    destiny_ptr,
+                    block_mapping_view.device_ptr() as *const core::ffi::c_void,
+                )
+            }
+        },
+        _ => candle_core::bail!("Only CPU and CUDA devices are supported"),
+    }
+    Ok(())
+}
+
 fn swap_blocks_t<T: CudaDType + DeviceRepr>(
     src_kv_cache: Tensor,
     dst_kv_cache: Tensor,
@@ -332,14 +437,14 @@ fn copy_blocks_t<T: CudaDType + DeviceRepr>(
         .collect::<Vec<_>>();
 
     // Get CUDA slices for all tensors
-    let key_caches_slice = key_caches
+    let key_caches_slices = key_caches
         .iter()
         .map(|(storage, layout): &(Storage, Layout)| match storage {
             Storage::Cuda(storage) => storage.as_cuda_slice::<T>().map(|s| (s, layout)),
             _ => candle_core::bail!("Only CUDA storage is supported"),
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let value_caches_slice = value_caches
+    let value_caches_slices = value_caches
         .iter()
         .map(|(storage, layout): &(Storage, Layout)| match storage {
             Storage::Cuda(storage) => storage.as_cuda_slice::<T>().map(|s| (s, layout)),
@@ -357,23 +462,11 @@ fn copy_blocks_t<T: CudaDType + DeviceRepr>(
         .map(|(slice, layout): &(&CudaSlice<T>, &Layout)| slice.slice(layout.start_offset()..))
         .collect::<Vec<_>>();
 
-    let key_caches_ptr = if !key_caches_view.is_empty() {
-        key_caches_view.as_ptr() as *const *const core::ffi::c_void
-    } else {
-        std::ptr::null()
-    };
-
-    let value_caches_ptr = if !value_caches_view.is_empty() {
-        value_caches_view.as_ptr() as *const *const core::ffi::c_void
-    } else {
-        std::ptr::null()
-    };
-
     unsafe {
         copy_blocks(
             key_caches_ptr,
             value_caches_ptr,
-            block_mapping_view as *const core::ffi::c_void,
+            block_mapping_view.device_ptr() as *const core::ffi::c_void,
         )
     }
 
