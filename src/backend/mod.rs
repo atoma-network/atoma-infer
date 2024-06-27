@@ -202,12 +202,12 @@ impl PagedAttention {
         let elem_count = output_shape.elem_count();
         let out = unsafe { device.alloc::<T>(elem_count) }.w()?;
 
-        let out_ptr = out.device_ptr() as *const core::ffi::c_void;
-        let query_ptr = q.device_ptr() as *const core::ffi::c_void;
-        let key_cache_ptr = key_cache.device_ptr() as *const core::ffi::c_void;
-        let value_cache_ptr = value_cache.device_ptr() as *const core::ffi::c_void;
-        let block_tables_ptr = block_tables.device_ptr() as *const core::ffi::c_void;
-        let sequence_lengths_ptr = sequence_lengths.device_ptr() as *const core::ffi::c_void;
+        let out_ptr = *out.device_ptr() as *const core::ffi::c_void;
+        let query_ptr = *q.device_ptr() as *const core::ffi::c_void;
+        let key_cache_ptr = *key_cache.device_ptr() as *const core::ffi::c_void;
+        let value_cache_ptr = *value_cache.device_ptr() as *const core::ffi::c_void;
+        let block_tables_ptr = *block_tables.device_ptr() as *const core::ffi::c_void;
+        let sequence_lengths_ptr = *sequence_lengths.device_ptr() as *const core::ffi::c_void;
 
         if use_v1 {
             unsafe {
@@ -224,7 +224,7 @@ impl PagedAttention {
                     self.max_sequence_length as i64,
                     self.alibi_slopes
                         .as_ref()
-                        .map(|t| t.device_ptr() as *const core::ffi::c_void),
+                        .map(|t| *t.device_ptr() as *const core::ffi::c_void),
                     internal_type as *const i8,
                     self.kv_scale,
                     0,
@@ -243,9 +243,9 @@ impl PagedAttention {
             let exp_sums = unsafe { device.alloc::<T>(exp_sums_shape.elem_count())? }.w()?;
             let max_logits = unsafe { device.alloc::<T>(exp_sums_shape.elem_count())? }.w()?;
 
-            let tmp_out_ptr = tmp_out.device_ptr() as *mut core::ffi::c_void;
-            let exp_sums_ptr = exp_sums.device_ptr() as *mut core::ffi::c_void;
-            let max_logits_ptr = max_logits.device_ptr() as *mut core::ffi::c_void;
+            let tmp_out_ptr = *tmp_out.device_ptr() as *mut core::ffi::c_void;
+            let exp_sums_ptr = *exp_sums.device_ptr() as *mut core::ffi::c_void;
+            let max_logits_ptr = *max_logits.device_ptr() as *mut core::ffi::c_void;
 
             unsafe {
                 paged_attention_v2(
@@ -264,7 +264,7 @@ impl PagedAttention {
                     self.max_sequence_length as i64,
                     self.alibi_slopes
                         .as_ref()
-                        .map(|t| t.device_ptr() as *const core::ffi::c_void),
+                        .map(|t| *t.device_ptr() as *const core::ffi::c_void),
                     internal_type as *const i8,
                     self.kv_scale,
                     0,

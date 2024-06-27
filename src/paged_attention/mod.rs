@@ -245,14 +245,14 @@ fn swap_blocks_t<T: CudaDType + DeviceRepr + WithDType>(
             let source_view = source_slice.slice(source_layout.start_offset()..);
             let destiny_view = destiny_slice.slice(destiny_layout.start_offset()..);
 
-            let source_ptr = source_view.device_ptr() as *mut u64 as *mut core::ffi::c_void;
-            let destiny_ptr = destiny_view.device_ptr() as *mut u64 as *mut core::ffi::c_void;
+            let source_ptr = *source_view.device_ptr() as *mut core::ffi::c_void;
+            let destiny_ptr = *destiny_view.device_ptr() as *mut core::ffi::c_void;
 
             unsafe {
                 swap_blocks(
                     source_ptr,
                     destiny_ptr,
-                    block_mapping_view.device_ptr() as *const core::ffi::c_void,
+                    *block_mapping_view.device_ptr() as *const core::ffi::c_void,
                 )
             }
         }
@@ -275,13 +275,13 @@ fn swap_blocks_t<T: CudaDType + DeviceRepr + WithDType>(
             let destiny_view = destiny_slice.slice(destiny_layout.start_offset()..);
 
             let source_ptr = source_slice.as_ptr() as *mut T as *mut core::ffi::c_void;
-            let destiny_ptr = destiny_view.device_ptr() as *mut u64 as *mut core::ffi::c_void;
+            let destiny_ptr = *destiny_view.device_ptr() as *mut core::ffi::c_void;
 
             unsafe {
                 swap_blocks(
                     source_ptr,
                     destiny_ptr,
-                    block_mapping_view.device_ptr() as *const core::ffi::c_void,
+                    *block_mapping_view.device_ptr() as *const core::ffi::c_void,
                 )
             }
         }
@@ -303,14 +303,14 @@ fn swap_blocks_t<T: CudaDType + DeviceRepr + WithDType>(
 
             let source_view = source_slice.slice(source_layout.start_offset()..);
 
-            let source_ptr = source_slice.device_ptr() as *mut u64 as *mut core::ffi::c_void;
+            let source_ptr = *source_slice.device_ptr() as *mut core::ffi::c_void;
             let destiny_ptr = destiny_view.as_ptr() as *mut T as *mut core::ffi::c_void;
 
             unsafe {
                 swap_blocks(
                     source_ptr,
                     destiny_ptr,
-                    block_mapping_view.device_ptr() as *const core::ffi::c_void,
+                    *block_mapping_view.device_ptr() as *const core::ffi::c_void,
                 )
             }
         }
@@ -340,7 +340,7 @@ fn copy_blocks_t<T: CudaDType + DeviceRepr>(
 
     // Extract block_mapping pointer
     let block_mapping_ptr =
-        block_mapping_view.device_ptr() as *const u64 as *const core::ffi::c_void;
+        *block_mapping_view.device_ptr() as *const core::ffi::c_void;
 
     let key_caches = kv_caches
         .iter()
@@ -390,12 +390,12 @@ fn copy_blocks_t<T: CudaDType + DeviceRepr>(
     // Get pointers to key_caches and value_caches
     let key_caches_ptrs = key_caches_views
         .iter()
-        .map(|v| v.device_ptr() as *const u64 as *const core::ffi::c_void)
+        .map(|v| *v.device_ptr() as *const core::ffi::c_void)
         .collect::<Vec<_>>()
         .as_ptr() as *const *const core::ffi::c_void;
     let value_caches_ptrs = value_caches_views
         .iter()
-        .map(|v| v.device_ptr() as *const u64 as *const core::ffi::c_void)
+        .map(|v| *v.device_ptr() as *const core::ffi::c_void)
         .collect::<Vec<_>>()
         .as_ptr() as *const *const core::ffi::c_void;
 
