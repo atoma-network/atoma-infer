@@ -245,8 +245,8 @@ fn swap_blocks_t<T: CudaDType + DeviceRepr + WithDType>(
             let source_view = source_slice.slice(source_layout.start_offset()..);
             let destiny_view = destiny_slice.slice(destiny_layout.start_offset()..);
 
-            let source_ptr = source_view.device_ptr() as *mut core::ffi::c_void;
-            let destiny_ptr = destiny_view.device_ptr() as *mut T as *mut core::ffi::c_void;
+            let source_ptr = source_view.device_ptr() as *mut u64 as *mut core::ffi::c_void;
+            let destiny_ptr = destiny_view.device_ptr() as *mut u64 as *mut core::ffi::c_void;
 
             unsafe {
                 swap_blocks(
@@ -275,7 +275,7 @@ fn swap_blocks_t<T: CudaDType + DeviceRepr + WithDType>(
             let destiny_view = destiny_slice.slice(destiny_layout.start_offset()..);
 
             let source_ptr = source_slice.as_ptr() as *mut T as *mut core::ffi::c_void;
-            let destiny_ptr = destiny_view.device_ptr() as *mut T as *mut core::ffi::c_void;
+            let destiny_ptr = destiny_view.device_ptr() as *mut u64 as *mut core::ffi::c_void;
 
             unsafe {
                 swap_blocks(
@@ -303,7 +303,7 @@ fn swap_blocks_t<T: CudaDType + DeviceRepr + WithDType>(
 
             let source_view = source_slice.slice(source_layout.start_offset()..);
 
-            let source_ptr = source_slice.device_ptr() as *mut core::ffi::c_void;
+            let source_ptr = source_slice.device_ptr() as *mut u64 as *mut core::ffi::c_void;
             let destiny_ptr = destiny_view.as_ptr() as *mut T as *mut core::ffi::c_void;
 
             unsafe {
