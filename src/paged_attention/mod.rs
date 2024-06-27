@@ -325,11 +325,11 @@ fn copy_blocks_t<T: CudaDType + DeviceRepr>(
     let key_caches = key_caches
         .iter()
         .map(|t| t.storage_and_layout())
-        .collect::<Result<Vec<_>, _>>()?;
+        .collect::<Vec<_>>()?;
     let value_caches = value_caches
         .iter()
         .map(|t| t.storage_and_layout())
-        .collect::<Result<Vec<_>, _>>()?;
+        .collect::<Vec<_>>()?;
 
     // Get CUDA slices for all tensors
     let key_caches_slice = key_caches
@@ -357,17 +357,17 @@ fn copy_blocks_t<T: CudaDType + DeviceRepr>(
         .map(|(slice, layout): &(&CudaSlice<T>, &Layout)| slice.slice(layout.start_offset()..))
         .collect::<Vec<_>>();
 
-        let key_caches_ptr = if !key_caches_view.is_empty() {
-            key_caches_view.as_ptr() as *const *const core::ffi::c_void
-        } else {
-            std::ptr::null()
-        };
-        
-        let value_caches_ptr = if !value_caches_view.is_empty() {
-            value_caches_view.as_ptr() as *const *const core::ffi::c_void
-        } else {
-            std::ptr::null()
-        };
+    let key_caches_ptr = if !key_caches_view.is_empty() {
+        key_caches_view.as_ptr() as *const *const core::ffi::c_void
+    } else {
+        std::ptr::null()
+    };
+
+    let value_caches_ptr = if !value_caches_view.is_empty() {
+        value_caches_view.as_ptr() as *const *const core::ffi::c_void
+    } else {
+        std::ptr::null()
+    };
 
     unsafe {
         copy_blocks(
