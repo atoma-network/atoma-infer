@@ -308,7 +308,7 @@ fn copy_blocks_t<T: CudaDType + DeviceRepr>(
 
     // Get CUDA slices for block_mapping tensor
     let block_mapping_slice = block_mapping.as_cuda_slice::<T>()?;
-    let block_mapping_view = block_mapping_slice.slice(block_mapping_layout.start_offset()..)?;
+    let block_mapping_view = block_mapping_slice.slice(block_mapping_layout.start_offset()..);
     let key_caches = kv_caches
         .iter()
         .map(|t| t.i(0))
@@ -325,11 +325,11 @@ fn copy_blocks_t<T: CudaDType + DeviceRepr>(
     let key_caches = key_caches
         .iter()
         .map(|t| t.storage_and_layout())
-        .collect::<Vec<_>>()?;
+        .collect::<Vec<_>>();
     let value_caches = value_caches
         .iter()
         .map(|t| t.storage_and_layout())
-        .collect::<Vec<_>>()?;
+        .collect::<Vec<_>>();
 
     // Get CUDA slices for all tensors
     let key_caches_slice = key_caches
