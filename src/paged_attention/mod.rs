@@ -257,13 +257,13 @@ fn swap_blocks_t<T: CudaDType + DeviceRepr + WithDType>(
             }
         }
         (Device::Cpu, Device::Cuda(dst_device)) => {
-            let (source_storage, source_layout) = src_kv_cache.storage_and_layout();
+            let (source_storage, source_layout) = &*src_kv_cache.storage_and_layout();
             let source = match source_storage {
                 Storage::Cpu(storage) => storage,
                 _ => candle_core::bail!("Source tensor storage should be available on CUDA device"),
             };
 
-            let (destiny_storage, destiny_layout) = dst_kv_cache.storage_and_layout();
+            let (destiny_storage, destiny_layout) = &*dst_kv_cache.storage_and_layout();
             let destiny = match destiny_storage {
                 Storage::Cuda(storage) => storage,
                 _ => candle_core::bail!("Destiny tensor storage should be available on CPU device"),
@@ -287,13 +287,13 @@ fn swap_blocks_t<T: CudaDType + DeviceRepr + WithDType>(
         }
         (Device::Cuda(src_device), Device::Cpu) => {
             let (source_storage, source_layout) = src_kv_cache.storage_and_layout();
-            let source = match source_storage {
+            let source = match &*source_storage {
                 Storage::Cuda(storage) => storage,
                 _ => candle_core::bail!("Source tensor storage should be available on CUDA device"),
             };
 
             let (destiny_storage, destiny_layout) = dst_kv_cache.storage_and_layout();
-            let destiny = match destiny_storage {
+            let destiny = match &*destiny_storage {
                 Storage::Cpu(storage) => storage,
                 _ => candle_core::bail!("Destiny tensor storage should be available on CPU device"),
             };
