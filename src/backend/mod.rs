@@ -38,7 +38,7 @@ impl CustomOp1 for PagedAttention {
         "paged-attention"
     }
 
-    fn cpu_fwd(&self, storage: &CpuStorage, layout: &Layout) -> Result<(CpuStorage, Shape)> {
+    fn cpu_fwd(&self, _: &CpuStorage, _: &Layout) -> Result<(CpuStorage, Shape)> {
         candle_core::bail!("PagedAttention is not implemented for CPU");
     }
 
