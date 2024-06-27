@@ -329,7 +329,7 @@ fn copy_blocks_t<T: CudaDType + DeviceRepr>(
 
     // 1. Handle block mapping tensor
     let (block_mapping, block_mapping_layout) = block_mapping.storage_and_layout();
-    let block_mapping = match block_mapping {
+    let block_mapping = match *block_mapping {
         Storage::Cuda(storage) => storage,
         _ => candle_core::bail!("Only CUDA storage is supported"),
     };
@@ -363,14 +363,14 @@ fn copy_blocks_t<T: CudaDType + DeviceRepr>(
     // Get CUDA slices for all tensors
     let key_caches_slices = key_caches
         .iter()
-        .map(|(storage, layout)| match &*storage {
+        .map(|(storage, layout)| match *storage {
             Storage::Cuda(storage) => storage.as_cuda_slice::<T>().map(|s| (s, layout)),
             _ => candle_core::bail!("Only CUDA storage is supported"),
         })
         .collect::<Result<Vec<_>, _>>()?;
     let value_caches_slices = value_caches
         .iter()
-        .map(|(storage, layout)| match &*storage {
+        .map(|(storage, layout)| match *storage {
             Storage::Cuda(storage) => storage.as_cuda_slice::<T>().map(|s| (s, layout)),
             _ => candle_core::bail!("Only CUDA storage is supported"),
         })
