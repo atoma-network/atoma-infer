@@ -7,9 +7,9 @@ use candle_core::{
     cuda_backend::{cudarc::driver::DeviceRepr, CudaDType},
     DType, Device, Error as CandleError, IndexOp, Layout, Storage, Tensor, WithDType, D,
 };
-use std::sync::RwLockReadGuard;
 use candle_nn::kv_cache;
 use half::{bf16, f16};
+use std::sync::RwLockReadGuard;
 
 /// `PagedAttentionMetadata` - Structure wrapping the metadata
 /// required for paged attention
@@ -363,14 +363,14 @@ fn copy_blocks_t<T: CudaDType + DeviceRepr>(
     // Get CUDA slices for all tensors
     let key_caches_slices = key_caches
         .iter()
-        .map(|(storage, layout): &(RwLockReadGuard<Storage>, &Layout)| match storage {
+        .map(|(storage, layout)| match storage {
             Storage::Cuda(storage) => storage.as_cuda_slice::<T>().map(|s| (s, layout)),
             _ => candle_core::bail!("Only CUDA storage is supported"),
         })
         .collect::<Result<Vec<_>, _>>()?;
     let value_caches_slices = value_caches
         .iter()
-        .map(|(storage, layout): &(RwLockReadGuard<Storage>, &Layout)| match storage {
+        .map(|(storage, layout)| match storage {
             Storage::Cuda(storage) => storage.as_cuda_slice::<T>().map(|s| (s, layout)),
             _ => candle_core::bail!("Only CUDA storage is supported"),
         })
@@ -379,11 +379,11 @@ fn copy_blocks_t<T: CudaDType + DeviceRepr>(
     // Get CUDA views for all tensors
     let key_caches_views = key_caches_slices
         .iter()
-        .map(|(slice, layout): &(&CudaSlice<T>, &Layout)| slice.slice(layout.start_offset()..))
+        .map(|(slice, layout)| slice.slice(layout.start_offset()..))
         .collect::<Vec<_>>();
     let value_caches_views = value_caches_slices
         .iter()
-        .map(|(slice, layout): &(&CudaSlice<T>, &Layout)| slice.slice(layout.start_offset()..))
+        .map(|(slice, layout)| slice.slice(layout.start_offset()..))
         .collect::<Vec<_>>();
 
     // Get pointers to key_caches and value_caches
