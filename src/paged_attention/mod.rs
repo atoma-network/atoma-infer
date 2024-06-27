@@ -329,7 +329,7 @@ fn copy_blocks_t<T: CudaDType + DeviceRepr>(
 
     // 1. Handle block mapping tensor
     let (block_mapping, block_mapping_layout) = block_mapping.storage_and_layout();
-    let block_mapping = match *block_mapping {
+    let block_mapping = match **block_mapping {
         Storage::Cuda(storage) => storage,
         _ => candle_core::bail!("Only CUDA storage is supported"),
     };
