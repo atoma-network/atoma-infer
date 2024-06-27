@@ -357,10 +357,22 @@ fn copy_blocks_t<T: CudaDType + DeviceRepr>(
         .map(|(slice, layout): &(&CudaSlice<T>, &Layout)| slice.slice(layout.start_offset()..))
         .collect::<Vec<_>>();
 
+        let key_caches_ptr = if !key_caches_view.is_empty() {
+            key_caches_view.as_ptr() as *const *const core::ffi::c_void
+        } else {
+            std::ptr::null()
+        };
+        
+        let value_caches_ptr = if !value_caches_view.is_empty() {
+            value_caches_view.as_ptr() as *const *const core::ffi::c_void
+        } else {
+            std::ptr::null()
+        };
+
     unsafe {
         copy_blocks(
-            key_caches_view as *const *const core::ffi::c_void,
-            value_caches_view as *const *const core::ffi::c_void,
+            key_caches_ptr,
+            value_caches_ptr,
             block_mapping_view as *const core::ffi::c_void,
         )
     }
