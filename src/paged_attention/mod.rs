@@ -339,7 +339,7 @@ fn copy_blocks_t<T: CudaDType + DeviceRepr>(
     let block_mapping_view = block_mapping_slice.slice(block_mapping_layout.start_offset()..);
 
     // Extract block_mapping pointer
-    let block_mapping_ptr = block_mapping_view.device_ptr() as *const core::ffi::c_void;
+    let block_mapping_ptr = block_mapping_view.device_ptr() as *const u64 as *const core::ffi::c_void;
 
     let key_caches = kv_caches
         .iter()
@@ -389,11 +389,11 @@ fn copy_blocks_t<T: CudaDType + DeviceRepr>(
     // Get pointers to key_caches and value_caches
     let key_caches_ptrs = key_caches_views
         .iter()
-        .map(|v| v.device_ptr() as *const core::ffi::c_void)
+        .map(|v| v.device_ptr() as *const u64 as *const core::ffi::c_void)
         .collect::<Vec<_>>();
     let value_caches_ptrs = value_caches_views
         .iter()
-        .map(|v| v.device_ptr() as *const core::ffi::c_void)
+        .map(|v| v.device_ptr() as *const u64 as *const core::ffi::c_void)
         .collect::<Vec<_>>();
 
     unsafe {
