@@ -1,5 +1,5 @@
 use crate::{
-    backend::reshape_and_cache,
+    backend::{paged_attention, reshape_and_cache},
     kernels::ffi::{copy_blocks, swap_blocks},
 };
 use candle_core::{
@@ -176,6 +176,12 @@ impl PagedAttention {
             }
         };
 
+        // Attention has been already computed
+        if let Some(computed_attention) = attention {
+            // prefill prompts, as both the key and value caches are None
+            return Ok(computed_attention);
+        }
+
         // paged attention expects [b_sz, seq_len, nheads, head_dim]
         let query = query.transpose(1, 2)?.contiguous()?;
         let key = key.transpose(1, 2)?.contiguous()?;
@@ -200,15 +206,40 @@ impl PagedAttention {
                 &key_cache.as_mut().unwrap(),
                 &value_cache.as_mut().unwrap(),
                 &slot_mapping,
-                self.scale,
+                1.0, // TODO: support kv_scale in the future, for quantized KV cache
             )?;
         }
 
-        // Attention has been already computed
-        if let Some(computed_attention) = attention {
-            // prefill prompts
-            return Ok(computed_attention);
-        }
+        // At this point, we are
+        let key_cache =
+            key_cache.expect("key_cache should be available, for decode only sequences");
+        let value_cache =
+            value_cache.expect("value_cache should be available, for decode only sequences");
+        let block_tables = attention_metadata
+            .block_tables
+            .as_ref()
+            .expect("block_tables should be available, for decode only sequences");
+        let sequence_lengths = attention_metadata
+            .sequence_lengths
+            .as_ref()
+            .expect("sequence_lengths should be available, for decode only sequences");
+        let max_sequence_length = attention_metadata
+            .max_sequence_length
+            .expect("Max sequence length should be available, for decode only sequences");
+
+        paged_attention(
+            &query,
+            key_cache,
+            value_cache,
+            block_tables,
+            sequence_lengths,
+            max_sequence_length,
+            attention_metadata.kv_cache_dtype,
+            self.num_kv_heads,
+            self.scale,
+            self.alibi_slopes,
+            1.0, // TODO: support kv_scale in the future, for quantized KV cache
+        )
     }
 }
 
