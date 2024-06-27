@@ -364,7 +364,7 @@ fn copy_blocks_t<T: CudaDType + DeviceRepr>(
     let key_caches_slices = key_caches
         .iter()
         .map(|(storage, layout)| match &**storage {
-            &Storage::Cuda(storage) => storage.as_cuda_slice::<T>().map(|s| (s, layout)),
+            Storage::Cuda(storage) => storage.as_cuda_slice::<T>().map(|s| (s, layout)),
             _ => candle_core::bail!("Only CUDA storage is supported"),
         })
         .collect::<Result<Vec<_>, _>>()?;
