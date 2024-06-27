@@ -3,8 +3,11 @@ use crate::{
     kernels::ffi::{copy_blocks, swap_blocks},
 };
 use candle_core::{
-    cuda::cudarc::driver::{CudaSlice, DevicePtr}, cuda_backend::{cudarc::driver::DeviceRepr, CudaDType}, DType, Device, Error as CandleError, IndexOp, Layout, Storage, Tensor, WithDType, D
+    cuda::cudarc::driver::{CudaSlice, DevicePtr},
+    cuda_backend::{cudarc::driver::DeviceRepr, CudaDType},
+    DType, Device, Error as CandleError, IndexOp, Layout, Storage, Tensor, WithDType, D,
 };
+use candle_nn::kv_cache;
 use half::{bf16, f16};
 
 /// `PagedAttentionMetadata` - Structure wrapping the metadata
@@ -211,9 +214,9 @@ impl PagedAttention {
 /// Swaps blocks in the key and value cache from CPU to GPU,
 /// or GPU to CPU.
 fn swap_blocks_t<T: CudaDType + DeviceRepr + WithDType>(
-    src_kv_cache: &Tensor,
-    dst_kv_cache: &Tensor,
-    src_to_dst: &Tensor,
+    src_kv_cache: Tensor,
+    dst_kv_cache: Tensor,
+    src_to_dst: Tensor,
 ) -> Result<(), CandleError> {
     let block_size_in_bytes = src_kv_cache.dims1()? * src_kv_cache.dtype().size_in_bytes();
     match (src_kv_cache.device(), dst_kv_cache.device()) {
@@ -256,13 +259,13 @@ fn swap_blocks_t<T: CudaDType + DeviceRepr + WithDType>(
             let (source_storage, source_layout) = src_kv_cache.storage_and_layout();
             let source = match source_storage {
                 Storage::Cpu(storage) => storage,
-                _ => candle_core::bail!("Source tensor storage should be available on CPU device"),
+                _ => candle_core::bail!("Source tensor storage should be available on CUDA device"),
             };
 
             let (destiny_storage, destiny_layout) = dst_kv_cache.storage_and_layout();
             let destiny = match destiny_storage {
                 Storage::Cuda(storage) => storage,
-                _ => candle_core::bail!("Destiny tensor storage should be available on CUDA device"),
+                _ => candle_core::bail!("Destiny tensor storage should be available on CPU device"),
             };
 
             let source_slice = source.as_slice::<T>()?;
@@ -280,7 +283,7 @@ fn swap_blocks_t<T: CudaDType + DeviceRepr + WithDType>(
                     block_mapping_view.device_ptr() as *const core::ffi::c_void,
                 )
             }
-        },
+        }
         (Device::Cuda(src_device), Device::Cpu) => {
             let (source_storage, source_layout) = src_kv_cache.storage_and_layout();
             let source = match source_storage {
@@ -309,94 +312,9 @@ fn swap_blocks_t<T: CudaDType + DeviceRepr + WithDType>(
                     block_mapping_view.device_ptr() as *const core::ffi::c_void,
                 )
             }
-        },
+        }
         _ => candle_core::bail!("Only CPU and CUDA devices are supported"),
     }
-    Ok(())
-}
-
-fn swap_blocks_t<T: CudaDType + DeviceRepr>(
-    src_kv_cache: Tensor,
-    dst_kv_cache: Tensor,
-    src_to_dst: Tensor,
-) -> Result<(), CandleError> {
-    // 1. Handle block mapping tensor
-    let (block_mapping, block_mapping_layour) = src_to_dst.storage_and_layout();
-    let block_mapping = match block_mapping {
-        Storage::Cuda(storage) => storage,
-        _ => candle_core::bail!("Only CUDA storage is supported"),
-    };
-
-    // Get CUDA slices for block_mapping tensor
-    let block_mapping_slice = block_mapping.as_cuda_slice::<T>()?;
-    let block_mapping_view = block_mapping_slice.slice(block_mapping_layour.start_offset()..)?;
-
-    // 2. Handle source and destination key_cache tensor
-    let src_key_cache = src_kv_cache.i(0)?;
-    let dst_key_cache = dst_kv_cache.i(0)?;
-
-    let (src_key_cache_storage, src_key_cache_layout) = src_key_cache.storage_and_layout();
-    let src_key_cache = match src_key_cache_storage {
-        Storage::Cuda(storage) => storage,
-        _ => candle_core::bail!("Only CUDA storage is supported"),
-    };
-
-    let (dst_key_cache_storage, dst_key_cache_layout) = dst_key_cache.storage_and_layout();
-    let dst_key_cache = match dst_key_cache_storage {
-        Storage::Cuda(storage) => storage,
-        _ => candle_core::bail!("Only CUDA storage is supported"),
-    };
-
-    // Get CUDA slices for both source and destiny key_cache tensors
-    let src_key_cache_slice = src_key_cache.as_cuda_slice::<T>()?;
-    let dst_key_cache_slice = dst_key_cache.as_cuda_slice::<T>()?;
-
-    // Get CUDA views for all tensors
-    let src_key_cache_view = src_key_cache_slice.slice(src_key_cache_layout.start_offset()..)?;
-    let dst_key_cache_view = dst_key_cache_slice.slice(dst_key_cache_layout.start_offset()..)?;
-
-    unsafe {
-        swap_blocks(
-            src_key_cache_view as *const core::ffi::c_void,
-            dst_key_cache_view as *const core::ffi::c_void,
-            block_mapping_view as *const core::ffi::c_void,
-        )
-    };
-
-    // 3. Handle source and destination value_cache tensor
-    let src_value_cache = src_kv_cache.i(1)?;
-    let dst_value_cache = dst_kv_cache.i(1)?;
-
-    let (src_value_cache_storage, src_value_cache_layout) = src_value_cache.storage_and_layout();
-    let src_value_cache = match src_value_cache_storage {
-        Storage::Cuda(storage) => storage,
-        _ => candle_core::bail!("Only CUDA storage is supported"),
-    };
-
-    let (dst_value_cache_storage, dst_value_cache_layout) = dst_value_cache.storage_and_layout();
-    let dst_value_cache = match dst_value_cache_storage {
-        Storage::Cuda(storage) => storage,
-        _ => candle_core::bail!("Only CUDA storage is supported"),
-    };
-
-    // Get CUDA slices for both source and destiny value_cache tensors
-    let src_value_cache_slice = src_value_cache_storage.as_cuda_slice::<T>()?;
-    let dst_value_cache_slice = dst_value_cache_storage.as_cuda_slice::<T>()?;
-
-    // Get CUDA views for all tensors
-    let src_value_cache_view =
-        src_value_cache_slice.slice(src_value_cache_layout.start_offset()..)?;
-    let dst_value_cache_view =
-        dst_value_cache_slice.slice(dst_value_cache_layout.start_offset()..)?;
-
-    unsafe {
-        swap_blocks(
-            src_value_cache_view as *const core::ffi::c_void,
-            dst_value_cache_view as *const core::ffi::c_void,
-            block_mapping_view as *const core::ffi::c_void,
-        )
-    };
-
     Ok(())
 }
 
@@ -404,6 +322,10 @@ fn copy_blocks_t<T: CudaDType + DeviceRepr>(
     kv_caches: Vec<Tensor>,
     block_mapping: Tensor,
 ) -> Result<(), CandleError> {
+    if kv_caches.len() == 0 {
+        return Ok(());
+    }
+
     // 1. Handle block mapping tensor
     let (block_mapping, block_mapping_layout) = block_mapping.storage_and_layout();
     let block_mapping = match block_mapping {
@@ -414,6 +336,10 @@ fn copy_blocks_t<T: CudaDType + DeviceRepr>(
     // Get CUDA slices for block_mapping tensor
     let block_mapping_slice = block_mapping.as_cuda_slice::<T>()?;
     let block_mapping_view = block_mapping_slice.slice(block_mapping_layout.start_offset()..);
+
+    // Extract block_mapping pointer
+    let block_mapping_ptr = block_mapping_view.device_ptr() as *const core::ffi::c_void;
+
     let key_caches = kv_caches
         .iter()
         .map(|t| t.i(0))
@@ -422,9 +348,6 @@ fn copy_blocks_t<T: CudaDType + DeviceRepr>(
         .iter()
         .map(|t| t.i(1))
         .collect::<Result<Vec<_>, _>>()?;
-
-    let key_caches_length = key_caches.len();
-    let value_caches_length = value_caches.len();
 
     // 2. Handle key_caches and value_caches tensors
     let key_caches = key_caches
@@ -453,20 +376,30 @@ fn copy_blocks_t<T: CudaDType + DeviceRepr>(
         .collect::<Result<Vec<_>, _>>()?;
 
     // Get CUDA views for all tensors
-    let key_caches_view = key_caches_slice
+    let key_caches_views = key_caches_slices
         .iter()
         .map(|(slice, layout): &(&CudaSlice<T>, &Layout)| slice.slice(layout.start_offset()..))
         .collect::<Vec<_>>();
-    let value_caches_view = value_caches_slice
+    let value_caches_views = value_caches_slices
         .iter()
         .map(|(slice, layout): &(&CudaSlice<T>, &Layout)| slice.slice(layout.start_offset()..))
         .collect::<Vec<_>>();
 
+    // Get pointers to key_caches and value_caches
+    let key_caches_ptrs = key_caches_views
+        .iter()
+        .map(|v| v.device_ptr() as *const core::ffi::c_void)
+        .collect::<Vec<_>>();
+    let value_caches_ptrs = value_caches_views
+        .iter()
+        .map(|v| v.device_ptr() as *const core::ffi::c_void)
+        .collect::<Vec<_>>();
+
     unsafe {
         copy_blocks(
-            key_caches_ptr,
-            value_caches_ptr,
-            block_mapping_view.device_ptr() as *const core::ffi::c_void,
+            key_caches_ptrs as *const *const core::ffi::c_void,
+            value_caches_ptrs as *const *const core::ffi::c_void,
+            block_mapping_ptr,
         )
     }
 
