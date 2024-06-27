@@ -351,11 +351,11 @@ fn copy_blocks_t<T: CudaDType + DeviceRepr>(
     let key_caches_view = key_caches_slice
         .iter()
         .map(|(slice, layout): &(&CudaSlice<T>, &Layout)| slice.slice(layout.start_offset()..))
-        .collect::<Vec<_>>()?;
+        .collect::<Vec<_>>();
     let value_caches_view = value_caches_slice
         .iter()
         .map(|(slice, layout): &(&CudaSlice<T>, &Layout)| slice.slice(layout.start_offset()..))
-        .collect::<Vec<_>>()?;
+        .collect::<Vec<_>>();
 
     unsafe {
         copy_blocks(
