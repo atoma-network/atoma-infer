@@ -267,7 +267,7 @@ impl PagedAttention {
                 let attention = attention.broadcast_add(&mask.unwrap())?;
                 let attention = candle_nn::ops::softmax(&attention, D::Minus1)?;
                 let attention = attention.matmul(&value)?;
-                output.slice_assign(&[start_index..end_index, 0.., 0..], &attention)?;
+                output.slice_assign(&[start_index..end_index, 0..output.dim(1)?, 0..output.dim(2)?], &attention)?;
                 start_index = end_index;
             }
 
