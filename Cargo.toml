@@ -7,10 +7,10 @@ edition = "2021"
 
 [dependencies]
 accelerate-src = { version = "0.3.2", optional = true }
-candle-core = { git = "https://github.com/huggingface/candle.git", version = "0.6.0" }
-candle-examples = { git = "https://github.com/huggingface/candle.git", version = "0.6.0" }
-candle-nn = { git = "https://github.com/huggingface/candle.git", version = "0.6.0" }
-candle-transformers = { git = "https://github.com/huggingface/candle.git", version = "0.6.0" }
+candle-core = "0.5.1"
+candle-examples = "0.5.1"
+candle-nn = "0.5.1"
+candle-transformers = "0.5.1"
 cudarc = { version = "0.9.14", features = ["f16"], optional = true }
 half = "2.4.1"
 intel-mkl-src = { version = "0.8.1", features = ["mkl-static-lp64-iomp"], optional = true }

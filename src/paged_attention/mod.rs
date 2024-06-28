@@ -9,7 +9,7 @@ use candle_core::{
 };
 use candle_nn::kv_cache;
 use half::{bf16, f16};
-use std::sync::RwLockReadGuard;
+use std::{iter::zip, sync::RwLockReadGuard};
 
 /// `PagedAttentionMetadata` - Structure wrapping the metadata
 /// required for paged attention
@@ -21,15 +21,17 @@ pub struct PagedAttentionMetadata {
     /// The block tables. (sequence_id -> vector of physical blocks)
     pub block_tables: Option<Tensor>,
     /// The length of attention context for each generation token
-    pub sequence_lengths: Option<Tensor>,
+    pub sequence_lengths: Vec<usize>,
+    /// The sequence lengths tensor
+    pub sequence_lens_tensor: Tensor,
     /// The address to write the new KV to of each token
     pub slot_mapping: Tensor,
-    // /// The attention bias
-    // pub attn_bias: Option<Box<dyn AttentionBiasBlockDiagonal>>,
     /// Is a prefill prompt
     pub is_prompt: bool,
     /// KV cache datatype (auto or fp8_e5m2)
     pub kv_cache_dtype: String,
+    /// Attention bias, one per input prompt
+    pub attention_bias: Vec<Option<Tensor>>,
 }
 
 impl PagedAttentionMetadata {
@@ -39,6 +41,7 @@ impl PagedAttentionMetadata {
         max_sequence_length: Option<usize>,
         block_tables: Option<Tensor>,
         sequence_lengths: Option<Tensor>,
+        sequence_lens_tensor: Tensor,
         slot_mapping: Tensor,
         kv_cache_dtype: String,
     ) -> Self {
@@ -48,10 +51,11 @@ impl PagedAttentionMetadata {
             max_sequence_length,
             block_tables,
             sequence_lengths,
+            sequence_lens_tensor,
             slot_mapping,
-            // attn_bias: None,
             is_prompt,
             kv_cache_dtype,
+            attention_bias: vec![],
         }
     }
 }
@@ -115,8 +119,23 @@ impl PagedAttention {
     }
 
     /// Splits the KV cache
-    pub fn split_kv_cache() {
-        todo!()
+    pub fn split_kv_cache(
+        kv_cache: &Tensor,
+        num_kv_heads: usize,
+        head_size: usize,
+    ) -> Result<(Tensor, Tensor), CandleError> {
+        let x = 16 / kv_cache.dtype().size_in_bytes();
+        let num_blocks = kv_cache.dim(1)?;
+
+        let key_cache =
+            kv_cache
+                .i(0)?
+                .reshape(&[num_blocks, num_kv_heads, head_size / x, (), x])?;
+        let value_cache = kv_cache
+            .i(1)?
+            .reshape(&[num_blocks, num_kv_heads, head_size, ()])?;
+
+        Ok((key_cache, value_cache))
     }
 
     /// Initiates a swap blocks operation on the current CUDA device
@@ -146,101 +165,228 @@ impl PagedAttention {
         }
     }
 
+    /// Forward pass with Paged Attention.
+    ///
+    /// Arguments shapes:
+    /// - `query`: [num_tokens, num_heads * head_size]
+    /// - `key`: [num_tokens, num_kv_heads * head_size]
+    /// - `value`: [num_tokens, num_kv_heads * head_size]
+    /// - `kv_cache`: [2, num_blocks, block_size * num_kv_heads * head_size]
+    ///
+    /// Output shape:
+    /// [num_tokens, num_heads * head_size]
     pub fn forward(
         &self,
         query: &Tensor,
         key: &Tensor,
         value: &Tensor,
-        attention_mask: Option<&Tensor>,
-        mut key_cache: Option<&Tensor>,
-        mut value_cache: Option<&Tensor>,
-        attention_metadata: &mut PagedAttentionMetadata,
+        kv_cache: Option<&Tensor>,
+        attention_metadata: &PagedAttentionMetadata,
     ) -> Result<Tensor, CandleError> {
-        let dims = attention_metadata.slot_mapping.dims();
+        let (num_tokens, _hidden_size) = query.dims2()?;
+        // Reshape the query, key and value tensors to [num_tokens, num_heads, head_size]
+        let query = query.reshape((num_tokens, self.num_attention_heads, self.head_dim))?;
+        let key = key.reshape((num_tokens, self.num_kv_heads, self.head_dim))?;
+        let value = value.reshape((num_tokens, self.num_kv_heads, self.head_dim))?;
 
-        let slot_mapping = if dims.len() > 1 {
-            attention_metadata
-                .slot_mapping
-                .flatten(0, attention_metadata.slot_mapping.dims().len())?
-        } else {
-            attention_metadata.slot_mapping.clone()
-        };
-
-        let attention = match attention_mask {
-            None => None,
-            Some(attention_mask) => {
-                let attention = (query.matmul(&key.t()?)? * self.scale as f64)?;
-                let attention = attention.broadcast_add(attention_mask)?;
-                let attention = candle_nn::ops::softmax(&attention, D::Minus1)?;
-                Some(attention.matmul(&value)?)
-            }
-        };
-
-        // Attention has been already computed
-        if let Some(computed_attention) = attention {
-            // prefill prompts, as both the key and value caches are None
-            return Ok(computed_attention);
-        }
-
-        // paged attention expects [b_sz, seq_len, nheads, head_dim]
-        let query = query.transpose(1, 2)?.contiguous()?;
-        let key = key.transpose(1, 2)?.contiguous()?;
-        let value = value.transpose(1, 2)?.contiguous()?;
-
-        // format [batch_size, num_tokens, num_heads, head_size]
-        let (batch_size, seq_len, attention_heads, head_size) = query.shape().dims4()?;
-        let (_, _, key_value_heads, _) = key.shape().dims4()?;
-        let query = query.reshape(((), attention_heads, head_size))?;
-        let key = key.reshape(((), key_value_heads, head_size))?;
-        let value = value.reshape(((), key_value_heads, head_size))?;
-
-        // key: Tensor,              // [num_tokens, num_heads, head_size]
-        // value: Tensor,            // [num_tokens, num_heads, head_size]
-        // key_cache: &mut Tensor,   // [num_blocks, num_heads, head_size/x, block_size, x] 48,32,16,16,8
-        // value_cache: &mut Tensor, // [num_blocks, num_heads, head_size, block_size] 48,32,128,16
-        // slot_mapping: Tensor,     // [num_tokens]
-        if key_cache.as_ref().is_some_and(|_| value_cache.is_some()) {
-            let _ = reshape_and_cache(
+        let (key_cache, value_cache) = if let Some(kv_cache) = kv_cache {
+            let (key_cache, value_cache) =
+                Self::split_kv_cache(kv_cache, self.num_kv_heads, self.head_dim)?;
+            reshape_and_cache(
                 &key,
                 &value,
-                &key_cache.as_mut().unwrap(),
-                &value_cache.as_mut().unwrap(),
-                &slot_mapping,
-                1.0, // TODO: support kv_scale in the future, for quantized KV cache
+                &key_cache,
+                &value_cache,
+                &attention_metadata.slot_mapping,
+                1.0,
             )?;
+            (key_cache, value_cache)
+        };
+
+        if attention_metadata.is_prompt {
+            debug_assert!(
+                attention_metadata.sequence_lengths.is_some(),
+                "sequence_lengths should be available, for prefill sequences"
+            );
+            if (kv_cache.is_none()
+                || attention_metadata
+                    .block_tables
+                    .map_or(true, |bt| bt.elem_count() == 0))
+            {
+                let (key, value) = if self.num_kv_heads != self.num_attention_heads {
+                    (
+                        key.repeat([1, self.num_queries_per_kv])?,
+                        value.repeat([1, self.num_queries_per_kv])?,
+                    )
+                } else {
+                    (key, value)
+                };
+
+                if attention_metadata.attention_bias.is_empty() {
+                    let attention_masks = if let Some(alibi_slopes) = self.alibi_slopes {
+                        make_alibi_bias(
+                            alibi_slopes,
+                            query.dtype(),
+                            attention_metadata.sequence_lengths,
+                        )
+                    } else if let Some(sliding_window) = self.sliding_window {
+                        make_sliding_window_bias(
+                            attention_metadata.sequence_lengths,
+                            sliding_window,
+                            query_dtype,
+                            &query.device(),
+                        )
+                    } else {
+                        vec![None; attention_metadata.sequence_lengths.len()]
+                    };
+                    attention_metadata.attention_bias = attention_masks;
+                }
+
+                let query = utils::move_dim_to_second_last(&query);
+                let key = utils::move_dim_to_second_last(&key);
+                let value = utils::move_dim_to_second_last(&value);
+
+                let mut start_index = 0;
+                let output = Tensor::zeros(
+                    [num_tokens, self.num_attention_heads, self.head_dim],
+                    query.dtype(),
+                    query.device(),
+                )?;
+
+                for (seq_len, mask) in attention_metadata
+                    .sequence_lengths
+                    .iter()
+                    .zip(attention_metadata.attention_bias.iter())
+                {
+                    let end_index = start_index + seq_len;
+
+                    // Scaled dot product attention
+                    let attention = (query
+                        .narrow(1, start, seq_len)?
+                        .unsqueeze(0)?
+                        .matmul(&key.narrow(1, start, seq_len)?.unsqueeze(0)?.t()?)?
+                        * self.scale as f64)?;
+                    let attention = attention.broadcast_add(&mask.unwrap())?;
+                    let attention = candle_nn::ops::softmax(&attention, D::Minus1)?;
+                    let attention = attention.matmul(&value)?;
+                    output.slice_assign(&[start_index..end_index, .., ..], &attention)?;
+                    start_index = end_index;
+                }
+            } else {
+                candle_core::bail!("Unsupported prefix decoding for attention layer");
+            }
+        } else {
+            paged_attention(
+                &query,
+                &key_cache,
+                &value_cache,
+                &attention_metadata.block_tables.unwrap(),
+                &attention_metadata.sequence_lens_tensor,
+                attention_metadata.max_sequence_length,
+                attention_metadata.kv_cache_dtype.clone(),
+                self.num_kv_heads,
+                self.scale,
+                self.alibi_slopes.clone(),
+                1.0, // TODO: support kv_scale in the future, for quantized KV cache
+            )
         }
-
-        // At this point, we are
-        let key_cache =
-            key_cache.expect("key_cache should be available, for decode only sequences");
-        let value_cache =
-            value_cache.expect("value_cache should be available, for decode only sequences");
-        let block_tables = attention_metadata
-            .block_tables
-            .as_ref()
-            .expect("block_tables should be available, for decode only sequences");
-        let sequence_lengths = attention_metadata
-            .sequence_lengths
-            .as_ref()
-            .expect("sequence_lengths should be available, for decode only sequences");
-        let max_sequence_length = attention_metadata
-            .max_sequence_length
-            .expect("Max sequence length should be available, for decode only sequences");
-
-        paged_attention(
-            &query,
-            key_cache,
-            value_cache,
-            block_tables,
-            sequence_lengths,
-            max_sequence_length,
-            attention_metadata.kv_cache_dtype,
-            self.num_kv_heads,
-            self.scale,
-            self.alibi_slopes,
-            1.0, // TODO: support kv_scale in the future, for quantized KV cache
-        )
     }
+
+    // pub fn forward(
+    //     &self,
+    //     query: &Tensor,
+    //     key: &Tensor,
+    //     value: &Tensor,
+    //     attention_mask: Option<&Tensor>,
+    //     mut key_cache: Option<&Tensor>,
+    //     mut value_cache: Option<&Tensor>,
+    //     attention_metadata: &mut PagedAttentionMetadata,
+    // ) -> Result<Tensor, CandleError> {
+    //     let dims = attention_metadata.slot_mapping.dims();
+
+    //     let slot_mapping = if dims.len() > 1 {
+    //         attention_metadata
+    //             .slot_mapping
+    //             .flatten(0, attention_metadata.slot_mapping.dims().len())?
+    //     } else {
+    //         attention_metadata.slot_mapping.clone()
+    //     };
+
+    //     let attention = match attention_mask {
+    //         None => None,
+    //         Some(attention_mask) => {
+    //             let attention = (query.matmul(&key.t()?)? * self.scale as f64)?;
+    //             let attention = attention.broadcast_add(attention_mask)?;
+    //             let attention = candle_nn::ops::softmax(&attention, D::Minus1)?;
+    //             Some(attention.matmul(&value)?)
+    //         }
+    //     };
+
+    //     // Attention has been already computed
+    //     if let Some(computed_attention) = attention {
+    //         // prefill prompts, as both the key and value caches are None
+    //         return Ok(computed_attention);
+    //     }
+
+    //     // paged attention expects [b_sz, seq_len, nheads, head_dim]
+    //     let query = query.transpose(1, 2)?.contiguous()?;
+    //     let key = key.transpose(1, 2)?.contiguous()?;
+    //     let value = value.transpose(1, 2)?.contiguous()?;
+
+    //     // format [batch_size, num_tokens, num_heads, head_size]
+    //     let (batch_size, seq_len, attention_heads, head_size) = query.shape().dims4()?;
+    //     let (_, _, key_value_heads, _) = key.shape().dims4()?;
+    //     let query = query.reshape(((), attention_heads, head_size))?;
+    //     let key = key.reshape(((), key_value_heads, head_size))?;
+    //     let value = value.reshape(((), key_value_heads, head_size))?;
+
+    //     // key: Tensor,              // [num_tokens, num_heads, head_size]
+    //     // value: Tensor,            // [num_tokens, num_heads, head_size]
+    //     // key_cache: &mut Tensor,   // [num_blocks, num_heads, head_size/x, block_size, x] 48,32,16,16,8
+    //     // value_cache: &mut Tensor, // [num_blocks, num_heads, head_size, block_size] 48,32,128,16
+    //     // slot_mapping: Tensor,     // [num_tokens]
+    //     if key_cache.as_ref().is_some_and(|_| value_cache.is_some()) {
+    //         let _ = reshape_and_cache(
+    //             &key,
+    //             &value,
+    //             &key_cache.as_mut().unwrap(),
+    //             &value_cache.as_mut().unwrap(),
+    //             &slot_mapping,
+    //             1.0, // TODO: support kv_scale in the future, for quantized KV cache
+    //         )?;
+    //     }
+
+    //     // At this point, we are
+    //     let key_cache =
+    //         key_cache.expect("key_cache should be available, for decode only sequences");
+    //     let value_cache =
+    //         value_cache.expect("value_cache should be available, for decode only sequences");
+    //     let block_tables = attention_metadata
+    //         .block_tables
+    //         .as_ref()
+    //         .expect("block_tables should be available, for decode only sequences");
+    //     let sequence_lengths = attention_metadata
+    //         .sequence_lengths
+    //         .as_ref()
+    //         .expect("sequence_lengths should be available, for decode only sequences");
+    //     let max_sequence_length = attention_metadata
+    //         .max_sequence_length
+    //         .expect("Max sequence length should be available, for decode only sequences");
+
+    //     paged_attention(
+    //         &query,
+    //         key_cache,
+    //         value_cache,
+    //         block_tables,
+    //         sequence_lengths,
+    //         max_sequence_length,
+    //         attention_metadata.kv_cache_dtype.clone(),
+    //         self.num_kv_heads,
+    //         self.scale,
+    //         self.alibi_slopes.clone(),
+    //         1.0, // TODO: support kv_scale in the future, for quantized KV cache
+    //     )
+    // }
 }
 
 /// Swaps blocks in the key and value cache from CPU to GPU,
@@ -250,7 +396,15 @@ fn swap_blocks_t<T: CudaDType + DeviceRepr + WithDType>(
     dst_kv_cache: Tensor,
     src_to_dst: Tensor,
 ) -> Result<(), CandleError> {
-    let block_size_in_bytes = src_kv_cache.dims1()? * src_kv_cache.dtype().size_in_bytes();
+    let (block_mapping_storage, block_mapping_layout) = src_to_dst.storage_and_layout();
+    let block_mapping = match &*block_mapping_storage {
+        Storage::Cpu(storage) => storage,
+        _ => candle_core::bail!("Only CUDA storage is supported"),
+    };
+
+    let block_mapping_slice = block_mapping.as_slice::<i64>()?;
+    let block_mapping_ptr = block_mapping_slice as *const i64 as *const core::ffi::c_void;
+
     match (src_kv_cache.device(), dst_kv_cache.device()) {
         (Device::Cuda(src_device), Device::Cuda(dst_device)) => {
             if src_device.ordinal() != dst_device.ordinal() {
@@ -279,13 +433,7 @@ fn swap_blocks_t<T: CudaDType + DeviceRepr + WithDType>(
             let source_ptr = *source_view.device_ptr() as *mut core::ffi::c_void;
             let destiny_ptr = *destiny_view.device_ptr() as *mut core::ffi::c_void;
 
-            unsafe {
-                swap_blocks(
-                    source_ptr,
-                    destiny_ptr,
-                    *block_mapping_view.device_ptr() as *const core::ffi::c_void,
-                )
-            }
+            unsafe { swap_blocks(source_ptr, destiny_ptr, block_mapping_ptr) }
         }
         (Device::Cpu, Device::Cuda(dst_device)) => {
             let (source_storage, source_layout) = src_kv_cache.storage_and_layout();
@@ -308,13 +456,7 @@ fn swap_blocks_t<T: CudaDType + DeviceRepr + WithDType>(
             let source_ptr = source_slice.as_ptr() as *mut T as *mut core::ffi::c_void;
             let destiny_ptr = *destiny_view.device_ptr() as *mut core::ffi::c_void;
 
-            unsafe {
-                swap_blocks(
-                    source_ptr,
-                    destiny_ptr,
-                    *block_mapping_view.device_ptr() as *const core::ffi::c_void,
-                )
-            }
+            unsafe { swap_blocks(source_ptr, destiny_ptr, block_mapping_ptr) }
         }
         (Device::Cuda(src_device), Device::Cpu) => {
             let (source_storage, source_layout) = src_kv_cache.storage_and_layout();
@@ -337,13 +479,7 @@ fn swap_blocks_t<T: CudaDType + DeviceRepr + WithDType>(
             let source_ptr = *source_slice.device_ptr() as *mut core::ffi::c_void;
             let destiny_ptr = destiny_view.as_ptr() as *mut T as *mut core::ffi::c_void;
 
-            unsafe {
-                swap_blocks(
-                    source_ptr,
-                    destiny_ptr,
-                    *block_mapping_view.device_ptr() as *const core::ffi::c_void,
-                )
-            }
+            unsafe { swap_blocks(source_ptr, destiny_ptr, block_mapping_ptr) }
         }
         _ => candle_core::bail!("Only CPU and CUDA devices are supported"),
     }
@@ -438,4 +574,67 @@ fn copy_blocks_t<T: CudaDType + DeviceRepr>(
     }
 
     Ok(())
+}
+
+mod utils {
+    use super::*;
+
+    pub(crate) fn make_alibi_bias(
+        alibi_slopes: Tensor,
+        dtype: DType,
+        sequence_lengths: Vec<usize>,
+    ) -> Vec<Tensor> {
+        let mut bias = vec![];
+        for seq_len in sequence_lengths {
+            let bias = Tensor::arange(0, seq_len, alibi_slopes.device())?.to_dtype(DType::I64)?;
+            let bias_2d = bias.unsqueeze(0)?.broadcast_sub(&bias.unsqueeze(1)?)?;
+            let num_heads = alibi_slopes.dim(0)?;
+            let bias_3d = bias_2d.unsqueeze(0)?.repeat((num_heads, 1, 1))?;
+            let slopes_3d = alibi_slopes.unsqueeze(1)?.unsqueeze(2)?;
+            let bias_with_slopes = bias_3d.mul(&slopes_3d)?;
+            let inf_mask = Tensor::full(
+                f32::NEG_INFINITY,
+                &[1, seq_len, seq_len],
+                alibi_slopes.device(),
+            )?
+            .to_dtype(dtype)?;
+            let inf_mask = inf_mask.triu2(1)?;
+            let final_bias = bias_with_slopes.broadcast_add(&inf_mask)?;
+            biases.push(final_bias.to_dtype(dtype)?)
+        }
+        biases
+    }
+
+    pub(crate) fn make_sliding_window_bias(
+        sequence_lengths: Vec<usize>,
+        window_size: usize,
+        dtype: DType,
+        device: &Device,
+    ) -> Vec<Tensor> {
+        let mut biases = vec![];
+        for seq_len in sequence_lengths {
+            let bias = Tensor::full(1.0, &[1, seq_len, seq_len], device)?.to_dtype(dtype)?;
+            let shift = 0;
+            let mask = bias.tril2(shift)?;
+            let mask = mask.triu(shift as i64 - window_size as i64 + 1)?;
+            let mask = mask.log()?;
+            biases.push(mask.to_dtype(dtype)?)
+        }
+        biases
+    }
+
+    pub(crate) fn move_dim_to_second_last(tensor: &Tensor) -> Tensor {
+        let dims = tensor.dims();
+        let ndim = dims.len();
+
+        if ndim <= 2 {
+            return tensor.clone();
+        }
+
+        let mut permutation: Vec<usize> = (1..ndim).collect();
+        permutation.swap(0, ndim - 2);
+
+        // Apply the permutation
+        tensor.permute(permutation)
+    }
 }

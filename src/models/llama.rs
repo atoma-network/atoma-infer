@@ -166,62 +166,63 @@ fn flash_attn(_: &Tensor, _: &Tensor, _: &Tensor, _: f32, _: bool) -> Result<Ten
 }
 
 impl CausalSelfAttention {
-    fn apply_rotary_embed(&self, x: &Tensor, index_pos: usize) -> Result<Tensor> {
+    fn apply_rotary_embed(&self, x: &Tensor, input_positions: &Tensor) -> Result<Tensor> {
         let _enter = self.span_rot.enter();
-        let (_b_sz, _, seq_len, _hidden_size) = x.dims4()?; // [batch_size, _, sequence_length, hidden_size]
-        let cos = self.cos_sin_cache.cos.narrow(0, index_pos, seq_len)?;
-        let sin = self.cos_sin_cache.sin.narrow(0, index_pos, seq_len)?;
+        let (b_sz, _, seq_len, hidden_size) = x.dims4()?; // [batch_size, _, sequence_length, hidden_size]
+
+        if input_positions.dims() != [b_sz, seq_len] {
+            candle_core::bail!(
+            "index_positions must be of shape [batch_size, sequence_length] = [{}, {}], got {:?}",
+            b_sz,
+            seq_len,
+            input_positions.dims()
+        );
+        }
+        if input_positions.dtype() != DType::I64 {
+            candle_core::bail!(
+                "index_positions must be of dtype i64, got {:?}",
+                input_positions.dtype()
+            );
+        }
+
+        let cos = self
+            .cos_sin_cache
+            .cos
+            .index_select(&input_positions.flatten(0, 1)?, 0)?;
+        let sin = self
+            .cos_sin_cache
+            .sin
+            .index_select(&input_positions.flatten(0, 1)?, 0)?;
+
+        // Reshape cos and sin to match the input tensor shape
+        let cos = cos.reshape((b_sz, seq_len, hidden_size))?;
+        let sin = sin.reshape((b_sz, seq_len, hidden_size))?;
+
         candle_nn::rotary_emb::rope(x, &cos, &sin)
     }
 
     fn forward(
         &mut self,
         x: &Tensor,
-        attention_mask: Option<&Tensor>,
-        index_pos: usize,
-        cache: Option<(&Tensor, &Tensor)>,
+        input_positions: &Tensor,
+        cache: Option<&Tensor>,
         attention_metadata: &mut PagedAttentionMetadata,
     ) -> Result<Tensor> {
         let _enter = self.span.enter();
-        let (b_sz, seq_len, hidden_size) = x.dims3()?;
         let q = self.q_proj.forward(x)?;
         let k = self.k_proj.forward(x)?;
         let v = self.v_proj.forward(x)?;
 
-        let q = q
-            .reshape((b_sz, seq_len, self.num_attention_heads, self.head_dim))?
-            .transpose(1, 2)?
-            .contiguous()?;
-        let k = k
-            .reshape((b_sz, seq_len, self.num_attention_heads))?
-            .transpose(1, 2)?
-            .contiguous()?;
-        let v = v
-            .reshape((b_sz, seq_len, self.num_attention_heads, self.head_dim))?
-            .transpose(1, 2)?
-            .contiguous()?;
-
-        let q = self.apply_rotary_embed(&q, index_pos)?;
-        let k = self.apply_rotary_embed(&k, index_pos)?;
-
-        let k = self.repeat_kv(&k)?;
-        let v = self.repeat_kv(&v)?;
+        let q = self.apply_rotary_embed(&q, input_positions)?;
+        let k = self.apply_rotary_embed(&k, input_positions)?;
 
         let y = self.attention.forward(
             &q,
             &k,
             &v,
-            attention_mask,
-            cache.map(|(k, _)| k.clone()),
-            cache.map(|(_, v)| v.clone()),
-            attention_metadata,
+            cache,
+            &attention_metadata,
         )?;
-
-        let y = if attention_mask.is_some() {
-            y.transpose(1, 2)?.reshape(&[b_sz, seq_len, hidden_size])?
-        } else {
-            y.reshape(&[b_sz, seq_len, hidden_size])?
-        };
 
         let y = self.o_proj.forward(&y)?;
         Ok(y)
@@ -313,18 +314,19 @@ impl Block {
     fn forward(
         &mut self,
         x: &Tensor,
-        attention_mask: Option<&Tensor>,
-        index_pos: usize,
-        cache: Option<(&Tensor, &Tensor)>,
+        input_positions: &Tensor,
+        cache: Option<&Tensor>,
         attention_metadata: &mut PagedAttentionMetadata,
     ) -> Result<Tensor> {
         let _enter = self.span.enter();
         let residual = x;
         let x = self.rms_1.forward(&x)?;
-        let x = (self
-            .attn
-            .forward(&x, attention_mask, index_pos, cache, attention_metadata)?
-            + residual)?;
+        let x = (self.attn.forward(
+            &x,
+            input_positions,
+            cache,
+            attention_metadata,
+        )? + residual)?;
         let residual = &x;
         let x = (self.mlp.forward(&self.rms_2.forward(&x)?)? + residual)?;
         Ok(x)
@@ -364,41 +366,15 @@ impl Llama {
     pub fn forward(
         &mut self,
         x: &Tensor,
-        index_pos: Tensor,
-        kv_caches: Option<&Vec<(Tensor, Tensor)>>,
+        input_positions: &Tensor,
+        selected_token_indices: &Tensor,
+        kv_caches: Vec<Tensor>,
         attention_metadata: &mut PagedAttentionMetadata,
     ) -> Result<Tensor> {
-        let (_b_sz, seq_len, _) = x.dims3()?;
-        let attention_mask = if seq_len <= 1 {
-            None
-        } else {
-            let mask = self.prepare_decoder_attention_mask(_b_sz, seq_len, index_pos)?;
-            Some(mask)
-        };
         let mut x = self.wte.forward(x)?;
-        if let Some(kv_caches) = kv_caches {
-            for ((k_cache, v_cache), block) in kv_caches.iter().zip(self.blocks.iter_mut()) {
-                x = block.forward(
-                    &x,
-                    attention_mask.as_ref(),
-                    index_pos,
-                    Some((k_cache, v_cache)),
-                    attention_metadata,
-                )?;
-            }
-        } else {
-            for block in &mut self.blocks {
-                x = block.forward(
-                    &x,
-                    attention_mask.as_ref(),
-                    index_pos,
-                    None,
-                    attention_metadata,
-                )?;
-            }
-        }
+        let x = block.forward(&x, input_positions, kv_caches, attention_metadata)?;
         let x = self.ln_f.forward(&x)?;
-        let x = x.i((.., seq_len - 1, ..))?.contiguous()?;
+        let x = x.index_select(selected_token_indices, 1)?.contiguous()?;
         let logits = self.lm_head.forward(&x)?;
         logits.to_dtype(DType::F32)
     }
