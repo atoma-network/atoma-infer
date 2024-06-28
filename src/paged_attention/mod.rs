@@ -288,7 +288,7 @@ impl PagedAttention {
             )?
         };
 
-        Ok(output.reshape(((), self.num_attention_heads * self.head_dim)))
+        output.reshape(((), self.num_attention_heads * self.head_dim))
     }
 
     // pub fn forward(
