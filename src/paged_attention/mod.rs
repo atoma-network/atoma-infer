@@ -191,7 +191,7 @@ impl PagedAttention {
 
         let (key_cache, value_cache) =
             Self::split_kv_cache(kv_cache, self.num_kv_heads, self.head_dim)?;
-        
+
         reshape_and_cache(
             &key,
             &value,
@@ -616,10 +616,11 @@ mod utils {
         let mut biases = vec![];
         for seq_len in sequence_lengths {
             let bias = Tensor::full(1.0, &[1, seq_len, seq_len], device)?.to_dtype(dtype)?;
-            let shift = 0;
+            let bias_tril = Tensor::tril2(seq_len, dtype, device)?
+                .broadcast_mul(&Tensor::new(f32::NEG_INFINITY, device)?)?;
             let mask = Tensor::tril2(seq_len, dtype, device)?
                 .unsqueeze(0)?
-                .broadcast_mul(&bias.tril2(shift)?)?;
+                .broadcast_mul(&bias_tril)?;
             let mask = mask.broadcast_mul(&Tensor::triu2(seq_len, dtype, device)?.unsqueeze(0)?)?;
             let mask = mask.log()?;
             biases.push(mask.to_dtype(dtype)?)

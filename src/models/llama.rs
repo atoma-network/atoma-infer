@@ -366,7 +366,7 @@ impl Llama {
         attention_metadata: &mut PagedAttentionMetadata,
     ) -> Result<Tensor> {
         let mut x = self.wte.forward(x)?;
-        for (i, block) in self.blocks.iter().enumerate() {
+        for (i, block) in self.blocks.iter_mut().enumerate() {
             x = block.forward(&x, input_positions, &kv_caches[i], attention_metadata)?;
         }
         let x = self.ln_f.forward(&x)?;
