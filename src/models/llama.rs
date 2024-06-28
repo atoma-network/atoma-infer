@@ -205,7 +205,7 @@ impl CausalSelfAttention {
         &mut self,
         x: &Tensor,
         input_positions: &Tensor,
-        cache: Option<&Tensor>,
+        cache: &Tensor,
         attention_metadata: &mut PagedAttentionMetadata,
     ) -> Result<Tensor> {
         let _enter = self.span.enter();
@@ -216,13 +216,9 @@ impl CausalSelfAttention {
         let q = self.apply_rotary_embed(&q, input_positions)?;
         let k = self.apply_rotary_embed(&k, input_positions)?;
 
-        let y = self.attention.forward(
-            &q,
-            &k,
-            &v,
-            cache,
-            &attention_metadata,
-        )?;
+        let y = self
+            .attention
+            .forward(&q, &k, &v, cache, &attention_metadata)?;
 
         let y = self.o_proj.forward(&y)?;
         Ok(y)
@@ -315,18 +311,16 @@ impl Block {
         &mut self,
         x: &Tensor,
         input_positions: &Tensor,
-        cache: Option<&Tensor>,
+        cache: &Tensor,
         attention_metadata: &mut PagedAttentionMetadata,
     ) -> Result<Tensor> {
         let _enter = self.span.enter();
         let residual = x;
         let x = self.rms_1.forward(&x)?;
-        let x = (self.attn.forward(
-            &x,
-            input_positions,
-            cache,
-            attention_metadata,
-        )? + residual)?;
+        let x = (self
+            .attn
+            .forward(&x, input_positions, cache, attention_metadata)?
+            + residual)?;
         let residual = &x;
         let x = (self.mlp.forward(&self.rms_2.forward(&x)?)? + residual)?;
         Ok(x)
@@ -372,7 +366,9 @@ impl Llama {
         attention_metadata: &mut PagedAttentionMetadata,
     ) -> Result<Tensor> {
         let mut x = self.wte.forward(x)?;
-        let x = block.forward(&x, input_positions, kv_caches, attention_metadata)?;
+        for (i, block) in self.blocks.iter().enumerate() {
+            x = block.forward(&x, input_positions, &kv_caches[i], attention_metadata)?;
+        }
         let x = self.ln_f.forward(&x)?;
         let x = x.index_select(selected_token_indices, 1)?.contiguous()?;
         let logits = self.lm_head.forward(&x)?;

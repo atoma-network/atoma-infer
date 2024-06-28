@@ -17,7 +17,7 @@ pub struct PagedAttentionMetadata {
     /// Lengths of prompts
     pub prompt_lengths: Vec<usize>,
     /// The maximum sequence length
-    pub max_sequence_length: Option<usize>,
+    pub max_sequence_length: usize,
     /// The block tables. (sequence_id -> vector of physical blocks)
     pub block_tables: Option<Tensor>,
     /// The length of attention context for each generation token
@@ -38,7 +38,7 @@ impl PagedAttentionMetadata {
     /// Constructor
     pub fn new(
         prompt_lengths: Vec<usize>,
-        max_sequence_length: Option<usize>,
+        max_sequence_length: usize,
         block_tables: Option<Tensor>,
         sequence_lengths: Option<Tensor>,
         sequence_lens_tensor: Tensor,
@@ -180,7 +180,7 @@ impl PagedAttention {
         query: &Tensor,
         key: &Tensor,
         value: &Tensor,
-        kv_cache: Option<&Tensor>,
+        kv_cache: &Tensor,
         attention_metadata: &PagedAttentionMetadata,
     ) -> Result<Tensor, CandleError> {
         let (num_tokens, _hidden_size) = query.dims2()?;
@@ -189,92 +189,89 @@ impl PagedAttention {
         let key = key.reshape((num_tokens, self.num_kv_heads, self.head_dim))?;
         let value = value.reshape((num_tokens, self.num_kv_heads, self.head_dim))?;
 
-        let (key_cache, value_cache) = if let Some(kv_cache) = kv_cache {
-            let (key_cache, value_cache) =
-                Self::split_kv_cache(kv_cache, self.num_kv_heads, self.head_dim)?;
-            reshape_and_cache(
-                &key,
-                &value,
-                &key_cache,
-                &value_cache,
-                &attention_metadata.slot_mapping,
-                1.0,
-            )?;
-            (key_cache, value_cache)
-        };
+        let (key_cache, value_cache) =
+            Self::split_kv_cache(kv_cache, self.num_kv_heads, self.head_dim)?;
+        
+        reshape_and_cache(
+            &key,
+            &value,
+            &key_cache,
+            &value_cache,
+            &attention_metadata.slot_mapping,
+            1.0,
+        )?;
 
-        if attention_metadata.is_prompt {
+        let output = if attention_metadata.is_prompt {
             debug_assert!(
-                attention_metadata.sequence_lengths.is_some(),
+                attention_metadata.sequence_lengths.len() > 0,
                 "sequence_lengths should be available, for prefill sequences"
             );
-            if (kv_cache.is_none()
-                || attention_metadata
-                    .block_tables
-                    .map_or(true, |bt| bt.elem_count() == 0))
-            {
-                let (key, value) = if self.num_kv_heads != self.num_attention_heads {
-                    (
-                        key.repeat([1, self.num_queries_per_kv])?,
-                        value.repeat([1, self.num_queries_per_kv])?,
+            debug_assert!(attention_metadata
+                .block_tables
+                .map_or(true, |bt| bt.elem_count() == 0),
+                "block_tables should be empty, for prefill sequences as we do not support prefix decoding");
+
+            let (key, value) = if self.num_kv_heads != self.num_attention_heads {
+                (
+                    key.repeat(&[1, self.num_queries_per_kv])?,
+                    value.repeat(&[1, self.num_queries_per_kv])?,
+                )
+            } else {
+                (key, value)
+            };
+
+            if attention_metadata.attention_bias.is_empty() {
+                let attention_masks = if let Some(alibi_slopes) = self.alibi_slopes {
+                    utils::make_alibi_bias(
+                        alibi_slopes,
+                        query.dtype(),
+                        attention_metadata.sequence_lengths,
+                    )
+                } else if let Some(sliding_window) = self.sliding_window {
+                    utils::make_sliding_window_bias(
+                        attention_metadata.sequence_lengths,
+                        sliding_window,
+                        query.dtype(),
+                        &query.device(),
                     )
                 } else {
-                    (key, value)
+                    vec![None; attention_metadata.sequence_lengths.len()]
                 };
-
-                if attention_metadata.attention_bias.is_empty() {
-                    let attention_masks = if let Some(alibi_slopes) = self.alibi_slopes {
-                        make_alibi_bias(
-                            alibi_slopes,
-                            query.dtype(),
-                            attention_metadata.sequence_lengths,
-                        )
-                    } else if let Some(sliding_window) = self.sliding_window {
-                        make_sliding_window_bias(
-                            attention_metadata.sequence_lengths,
-                            sliding_window,
-                            query_dtype,
-                            &query.device(),
-                        )
-                    } else {
-                        vec![None; attention_metadata.sequence_lengths.len()]
-                    };
-                    attention_metadata.attention_bias = attention_masks;
-                }
-
-                let query = utils::move_dim_to_second_last(&query);
-                let key = utils::move_dim_to_second_last(&key);
-                let value = utils::move_dim_to_second_last(&value);
-
-                let mut start_index = 0;
-                let output = Tensor::zeros(
-                    [num_tokens, self.num_attention_heads, self.head_dim],
-                    query.dtype(),
-                    query.device(),
-                )?;
-
-                for (seq_len, mask) in attention_metadata
-                    .sequence_lengths
-                    .iter()
-                    .zip(attention_metadata.attention_bias.iter())
-                {
-                    let end_index = start_index + seq_len;
-
-                    // Scaled dot product attention
-                    let attention = (query
-                        .narrow(1, start, seq_len)?
-                        .unsqueeze(0)?
-                        .matmul(&key.narrow(1, start, seq_len)?.unsqueeze(0)?.t()?)?
-                        * self.scale as f64)?;
-                    let attention = attention.broadcast_add(&mask.unwrap())?;
-                    let attention = candle_nn::ops::softmax(&attention, D::Minus1)?;
-                    let attention = attention.matmul(&value)?;
-                    output.slice_assign(&[start_index..end_index, .., ..], &attention)?;
-                    start_index = end_index;
-                }
-            } else {
-                candle_core::bail!("Unsupported prefix decoding for attention layer");
+                attention_metadata.attention_bias = attention_masks;
             }
+
+            let query = utils::move_dim_to_second_last(&query)?;
+            let key = utils::move_dim_to_second_last(&key)?;
+            let value = utils::move_dim_to_second_last(&value)?;
+
+            let mut start_index = 0;
+            let output = Tensor::zeros(
+                &[num_tokens, self.num_attention_heads, self.head_dim],
+                query.dtype(),
+                query.device(),
+            )?;
+
+            for (seq_len, mask) in attention_metadata
+                .sequence_lengths
+                .iter()
+                .zip(attention_metadata.attention_bias.iter())
+            {
+                let end_index = start_index + seq_len;
+
+                // Scaled dot product attention
+                let attention = (query
+                    .narrow(1, start_index, *seq_len)?
+                    .unsqueeze(0)?
+                    .matmul(&key.narrow(1, start_index, *seq_len)?.unsqueeze(0)?.t()?)?
+                    * self.scale as f64)?;
+                let attention = attention.broadcast_add(&mask.unwrap())?;
+                let attention = candle_nn::ops::softmax(&attention, D::Minus1)?;
+                let attention = attention.matmul(&value)?;
+                output.slice_assign(&[start_index..end_index, 0.., 0..], &attention)?;
+                start_index = end_index;
+            }
+
+            output
         } else {
             paged_attention(
                 &query,
@@ -289,7 +286,9 @@ impl PagedAttention {
                 self.alibi_slopes.clone(),
                 1.0, // TODO: support kv_scale in the future, for quantized KV cache
             )
-        }
+        };
+
+        Ok(output.reshape(((), self.num_attention_heads * self.head_dim)))
     }
 
     // pub fn forward(
@@ -477,7 +476,7 @@ fn swap_blocks_t<T: CudaDType + DeviceRepr + WithDType>(
             let source_view = source_slice.slice(source_layout.start_offset()..);
 
             let source_ptr = *source_slice.device_ptr() as *mut core::ffi::c_void;
-            let destiny_ptr = destiny_view.as_ptr() as *mut T as *mut core::ffi::c_void;
+            let destiny_ptr = destiny_slice.as_ptr() as *mut T as *mut core::ffi::c_void;
 
             unsafe { swap_blocks(source_ptr, destiny_ptr, block_mapping_ptr) }
         }
@@ -583,10 +582,11 @@ mod utils {
         alibi_slopes: Tensor,
         dtype: DType,
         sequence_lengths: Vec<usize>,
-    ) -> Vec<Tensor> {
-        let mut bias = vec![];
+    ) -> Result<Vec<Tensor>, CandleError> {
+        let mut biases = vec![];
         for seq_len in sequence_lengths {
-            let bias = Tensor::arange(0, seq_len, alibi_slopes.device())?.to_dtype(DType::I64)?;
+            let bias =
+                Tensor::arange(0, seq_len as i64, alibi_slopes.device())?.to_dtype(DType::I64)?;
             let bias_2d = bias.unsqueeze(0)?.broadcast_sub(&bias.unsqueeze(1)?)?;
             let num_heads = alibi_slopes.dim(0)?;
             let bias_3d = bias_2d.unsqueeze(0)?.repeat((num_heads, 1, 1))?;
@@ -598,11 +598,13 @@ mod utils {
                 alibi_slopes.device(),
             )?
             .to_dtype(dtype)?;
-            let inf_mask = inf_mask.triu2(1)?;
+            let inf_mask = Tensor::triu2(seq_len, dtype, &alibi_slopes.device())?
+                .unsqueeze(0)?
+                .broadcast_mul(&Tensor::new(f32::NEG_INFINITY, &alibi_slopes.device())?)?;
             let final_bias = bias_with_slopes.broadcast_add(&inf_mask)?;
             biases.push(final_bias.to_dtype(dtype)?)
         }
-        biases
+        Ok(biases)
     }
 
     pub(crate) fn make_sliding_window_bias(
@@ -610,25 +612,27 @@ mod utils {
         window_size: usize,
         dtype: DType,
         device: &Device,
-    ) -> Vec<Tensor> {
+    ) -> Result<Vec<Tensor>, CandleError> {
         let mut biases = vec![];
         for seq_len in sequence_lengths {
             let bias = Tensor::full(1.0, &[1, seq_len, seq_len], device)?.to_dtype(dtype)?;
             let shift = 0;
-            let mask = bias.tril2(shift)?;
-            let mask = mask.triu(shift as i64 - window_size as i64 + 1)?;
+            let mask = Tensor::tril2(seq_len, dtype, device)?
+                .unsqueeze(0)?
+                .broadcast_mul(&bias.tril2(shift)?)?;
+            let mask = mask.broadcast_mul(&Tensor::triu2(seq_len, dtype, device)?.unsqueeze(0)?)?;
             let mask = mask.log()?;
             biases.push(mask.to_dtype(dtype)?)
         }
-        biases
+        Ok(biases)
     }
 
-    pub(crate) fn move_dim_to_second_last(tensor: &Tensor) -> Tensor {
+    pub(crate) fn move_dim_to_second_last(tensor: &Tensor) -> Result<Tensor, CandleError> {
         let dims = tensor.dims();
         let ndim = dims.len();
 
         if ndim <= 2 {
-            return tensor.clone();
+            return Ok(tensor.clone());
         }
 
         let mut permutation: Vec<usize> = (1..ndim).collect();
