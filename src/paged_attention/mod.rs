@@ -285,7 +285,7 @@ impl PagedAttention {
                 self.scale,
                 self.alibi_slopes.clone(),
                 1.0, // TODO: support kv_scale in the future, for quantized KV cache
-            )
+            )?
         };
 
         Ok(output.reshape(((), self.num_attention_heads * self.head_dim)))
@@ -402,7 +402,7 @@ fn swap_blocks_t<T: CudaDType + DeviceRepr + WithDType>(
     };
 
     let block_mapping_slice = block_mapping.as_slice::<i64>()?;
-    let block_mapping_ptr = block_mapping_slice as *const i64 as *const core::ffi::c_void;
+    let block_mapping_ptr = block_mapping_slice.as_ptr()as *const core::ffi::c_void;
 
     match (src_kv_cache.device(), dst_kv_cache.device()) {
         (Device::Cuda(src_device), Device::Cuda(dst_device)) => {
