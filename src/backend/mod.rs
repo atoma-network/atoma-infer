@@ -71,26 +71,26 @@ impl PagedAttention {
         let output_shape = layout.shape();
 
         let (key_cache, key_cache_layout) = self.key_cache.storage_and_layout();
-        let key_cache = match &*&key_cache {
+        let key_cache = match &*key_cache {
             Storage::Cuda(kc) => kc,
             _ => candle_core::bail!("key_cache must be a Cuda tensor"),
         };
 
         let (value_cache, value_cache_layout) = self.value_cache.storage_and_layout();
-        let value_cache = match &*&value_cache {
+        let value_cache = match &*value_cache {
             Storage::Cuda(vc) => vc,
             _ => candle_core::bail!("value_cache must be a Cuda tensor"),
         };
 
         let (block_tables, block_tables_layout) = self.block_tables.storage_and_layout();
-        let block_tables = match &*&block_tables {
+        let block_tables = match &*block_tables {
             Storage::Cuda(bt) => bt,
             _ => candle_core::bail!("block_tables must be a Cuda tensor"),
         };
 
         let (sequence_lengths, sequence_lengths_layout) =
             self.sequence_lengths.storage_and_layout();
-        let sequence_lengths = match &*&sequence_lengths {
+        let sequence_lengths = match &*sequence_lengths {
             Storage::Cuda(sl) => sl,
             _ => candle_core::bail!("sequence_lengths must be a Cuda tensor"),
         };
