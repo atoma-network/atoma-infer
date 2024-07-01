@@ -291,7 +291,7 @@ impl PagedAttention {
                 attention_metadata.kv_cache_dtype.clone(),
                 self.num_kv_heads,
                 self.scale,
-                self.alibi_slopes.as_ref(),
+                self.alibi_slopes.clone(),
                 1.0, // TODO: support kv_scale in the future, for quantized KV cache
             )?
         };
@@ -594,7 +594,7 @@ mod utils {
         let mut biases = vec![];
         for seq_len in sequence_lengths {
             let bias =
-                Tensor::arange(0, seq_len as i64, alibi_slopes.device())?.to_dtype(DType::I64)?;
+                Tensor::arange(0, *seq_len as i64, alibi_slopes.device())?.to_dtype(DType::I64)?;
             let bias_2d = bias.unsqueeze(0)?.broadcast_sub(&bias.unsqueeze(1)?)?;
             let num_heads = alibi_slopes.dim(0)?;
             let bias_3d = bias_2d.unsqueeze(0)?.repeat((num_heads, 1, 1))?;
@@ -606,7 +606,7 @@ mod utils {
                 alibi_slopes.device(),
             )?
             .to_dtype(dtype)?;
-            let inf_mask = Tensor::triu2(seq_len, dtype, &alibi_slopes.device())?
+            let inf_mask = Tensor::triu2(*seq_len, dtype, &alibi_slopes.device())?
                 .unsqueeze(0)?
                 .broadcast_mul(&Tensor::new(f32::NEG_INFINITY, &alibi_slopes.device())?)?;
             let final_bias = bias_with_slopes.broadcast_add(&inf_mask)?;
@@ -624,9 +624,9 @@ mod utils {
         let mut biases = vec![];
         for seq_len in sequence_lengths {
             let bias = Tensor::full(1.0, &[1, seq_len, seq_len], device)?.to_dtype(dtype)?;
-            let bias_tril = Tensor::tril2(seq_len, dtype, device)?
+            let bias_tril = Tensor::tril2(*seq_len, dtype, device)?
                 .broadcast_mul(&Tensor::new(f32::NEG_INFINITY, device)?)?;
-            let mask = Tensor::tril2(seq_len, dtype, device)?
+            let mask = Tensor::tril2(*seq_len, dtype, device)?
                 .unsqueeze(0)?
                 .broadcast_mul(&bias_tril)?;
             let mask = mask.broadcast_mul(&Tensor::triu2(seq_len, dtype, device)?.unsqueeze(0)?)?;

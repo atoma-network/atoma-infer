@@ -325,7 +325,7 @@ pub fn paged_attention(
     kv_cache_dtype: String,
     num_kv_heads: usize,
     scale: f64,
-    alibi_slopes: Option<&Tensor>,
+    alibi_slopes: Option<Tensor>,
     kv_scale: f64,
 ) -> Result<Tensor> {
     let attention = PagedAttention {
