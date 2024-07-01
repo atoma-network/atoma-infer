@@ -2,7 +2,6 @@ use std::ffi::{c_int, CString};
 
 use crate::{
     kernels::ffi::{paged_attention_v1, paged_attention_v2},
-    paged_attention,
 };
 use candle_core::{
     backend::BackendStorage,
@@ -10,11 +9,9 @@ use candle_core::{
         cudarc::driver::{DevicePtr, DeviceRepr},
         CudaDType, WrapErr,
     },
-    CpuStorage, CudaStorage, CustomOp1, DType, Device, Layout, Result, Shape, Storage, Tensor,
+    CpuStorage, CudaStorage, CustomOp1, DType, Layout, Result, Shape, Storage, Tensor,
 };
-use candle_nn::kv_cache;
 use half::{bf16, f16};
-use serde::de::value;
 
 const PARTITION_SIZE: usize = 512;
 
@@ -148,7 +145,7 @@ impl PagedAttention {
             candle_core::bail!("`head_size` must be one of 64, 80, 96, 112, 128 or 256");
         }
 
-        let (num_sequences_block_table, max_num_blocks_per_sequence) =
+        let (num_sequences_block_table, _max_num_blocks_per_sequence) =
             (block_tables_layout.dims()[0], block_tables_layout.dims()[1]);
 
         if num_sequences_block_table != num_sequences {
@@ -186,10 +183,6 @@ impl PagedAttention {
                 num_sequences
             );
         }
-
-        let q_stride = layout.stride()[0];
-        let kv_block_stride = key_cache_layout.stride()[0];
-        let kv_head_stride = key_cache_layout.stride()[1];
 
         let max_num_partitions = (self.max_sequence_length + PARTITION_SIZE - 1) / PARTITION_SIZE;
 

@@ -3,13 +3,11 @@ use crate::{
     kernels::ffi::{copy_blocks, swap_blocks},
 };
 use candle_core::{
-    cuda::cudarc::driver::{CudaSlice, DevicePtr},
+    cuda::cudarc::driver::DevicePtr,
     cuda_backend::{cudarc::driver::DeviceRepr, CudaDType},
-    DType, Device, Error as CandleError, IndexOp, Layout, Storage, Tensor, WithDType, D,
+    DType, Device, Error as CandleError, IndexOp, Storage, Tensor, WithDType, D,
 };
-use candle_nn::kv_cache;
 use half::{bf16, f16};
-use std::{iter::zip, sync::RwLockReadGuard};
 
 /// `PagedAttentionMetadata` - Structure wrapping the metadata
 /// required for paged attention
@@ -402,7 +400,7 @@ fn swap_blocks_t<T: CudaDType + DeviceRepr + WithDType>(
     dst_kv_cache: Tensor,
     src_to_dst: Tensor,
 ) -> Result<(), CandleError> {
-    let (block_mapping_storage, block_mapping_layout) = src_to_dst.storage_and_layout();
+    let (block_mapping_storage, _block_mapping_layout) = src_to_dst.storage_and_layout();
     let block_mapping = match &*block_mapping_storage {
         Storage::Cpu(storage) => storage,
         _ => candle_core::bail!("Only CUDA storage is supported"),

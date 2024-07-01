@@ -1,5 +1,5 @@
 use crate::paged_attention::{PagedAttention, PagedAttentionMetadata};
-use candle_core::{DType, Device, IndexOp, Module, Result, Tensor};
+use candle_core::{DType, Device, Module, Result, Tensor};
 use candle_nn::{embedding, Embedding, VarBuilder};
 use candle_transformers::models::with_tracing::{linear_no_bias as linear, Linear, RmsNorm};
 use serde::Serialize;
@@ -111,7 +111,7 @@ pub struct Cache {
 
 impl Cache {
     /// Constructor
-    pub fn new(use_kv_cache: bool, dtype: DType, config: &Config, device: &Device) -> Result<Self> {
+    pub fn new(config: &Config, device: &Device, dtype: DType) -> Result<Self> {
         // Precomputed frequency tensor for complex exponentials (cis)
         let n_elem = config.hidden_size / config.num_attention_heads;
         let theta: Vec<_> = (0..n_elem)
@@ -262,7 +262,7 @@ impl CausalSelfAttention {
                 vb.device(),
                 None,
             )?,
-            cos_sin_cache: Cache::new(true, dtype, &cfg, device)?,
+            cos_sin_cache: Cache::new( &cfg, device, dtype,)?,
         })
     }
 }
