@@ -226,14 +226,14 @@ impl PagedAttention {
                         alibi_slopes,
                         query.dtype(),
                         attention_metadata.sequence_lengths,
-                    )
+                    )?
                 } else if let Some(sliding_window) = self.sliding_window {
                     utils::make_sliding_window_bias(
                         attention_metadata.sequence_lengths,
                         sliding_window,
                         query.dtype(),
                         &query.device(),
-                    )
+                    )?
                 } else {
                     vec![None; attention_metadata.sequence_lengths.len()]
                 };
@@ -264,10 +264,17 @@ impl PagedAttention {
                     .unsqueeze(0)?
                     .matmul(&key.narrow(1, start_index, *seq_len)?.unsqueeze(0)?.t()?)?
                     * self.scale as f64)?;
-                let attention = attention.broadcast_add(&mask.unwrap())?;
+                let attention = if let Some(mask) = mask {
+                    attention.broadcast_add(&mask.unwrap())?;
+                } else {
+                    attention
+                };
                 let attention = candle_nn::ops::softmax(&attention, D::Minus1)?;
                 let attention = attention.matmul(&value)?;
-                output.slice_assign(&[start_index..end_index, 0..output.dim(1)?, 0..output.dim(2)?], &attention)?;
+                output.slice_assign(
+                    &[start_index..end_index, 0..output.dim(1)?, 0..output.dim(2)?],
+                    &attention,
+                )?;
                 start_index = end_index;
             }
 
@@ -402,7 +409,7 @@ fn swap_blocks_t<T: CudaDType + DeviceRepr + WithDType>(
     };
 
     let block_mapping_slice = block_mapping.as_slice::<i64>()?;
-    let block_mapping_ptr = block_mapping_slice.as_ptr()as *const core::ffi::c_void;
+    let block_mapping_ptr = block_mapping_slice.as_ptr() as *const core::ffi::c_void;
 
     match (src_kv_cache.device(), dst_kv_cache.device()) {
         (Device::Cuda(src_device), Device::Cuda(dst_device)) => {
@@ -582,7 +589,7 @@ mod utils {
         alibi_slopes: Tensor,
         dtype: DType,
         sequence_lengths: Vec<usize>,
-    ) -> Result<Vec<Tensor>, CandleError> {
+    ) -> Result<Vec<Option<Tensor>>, CandleError> {
         let mut biases = vec![];
         for seq_len in sequence_lengths {
             let bias =
@@ -602,7 +609,7 @@ mod utils {
                 .unsqueeze(0)?
                 .broadcast_mul(&Tensor::new(f32::NEG_INFINITY, &alibi_slopes.device())?)?;
             let final_bias = bias_with_slopes.broadcast_add(&inf_mask)?;
-            biases.push(final_bias.to_dtype(dtype)?)
+            biases.push(Some(final_bias.to_dtype(dtype)?))
         }
         Ok(biases)
     }
@@ -612,7 +619,7 @@ mod utils {
         window_size: usize,
         dtype: DType,
         device: &Device,
-    ) -> Result<Vec<Tensor>, CandleError> {
+    ) -> Result<Vec<Option<Tensor>>, CandleError> {
         let mut biases = vec![];
         for seq_len in sequence_lengths {
             let bias = Tensor::full(1.0, &[1, seq_len, seq_len], device)?.to_dtype(dtype)?;
@@ -623,7 +630,7 @@ mod utils {
                 .broadcast_mul(&bias_tril)?;
             let mask = mask.broadcast_mul(&Tensor::triu2(seq_len, dtype, device)?.unsqueeze(0)?)?;
             let mask = mask.log()?;
-            biases.push(mask.to_dtype(dtype)?)
+            biases.push(Some(mask.to_dtype(dtype)?))
         }
         Ok(biases)
     }
