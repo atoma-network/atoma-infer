@@ -215,9 +215,9 @@ impl PagedAttention {
             .and_then(|t| {
                 let (t, layout) = t.storage_and_layout();
                 let t = match &*t {
-                    Storage::Cuda(s) => s.as_cuda_slice::<T>()?,
-                    _ => None,
-                };
+                    Storage::Cuda(s) => s.as_cuda_slice::<T>(),
+                    _ => candle_core::Error("Only CUDA storage is supported"),
+                }?;
                 let t = t.slice(layout.start_offset()..);
                 *t.device_ptr() as *const core::ffi::c_void
             })
@@ -236,9 +236,7 @@ impl PagedAttention {
                     sequence_lengths_ptr,
                     block_size,
                     self.max_sequence_length as i64,
-                    self.alibi_slopes
-                        .as_ref()
-                        .map(|t| *t.device_ptr() as *const core::ffi::c_void),
+                    alibi_slopes_ptrs,
                     internal_type as *const i8,
                     self.kv_scale,
                     0,
@@ -253,9 +251,9 @@ impl PagedAttention {
                 Shape::from((num_sequences, num_heads, max_num_partitions, head_size));
             let exp_sums_shape = Shape::from((num_sequences, num_heads, max_num_partitions));
 
-            let tmp_out = unsafe { device.alloc::<T>(temp_out_shape.elem_count())? }.w()?;
-            let exp_sums = unsafe { device.alloc::<T>(exp_sums_shape.elem_count())? }.w()?;
-            let max_logits = unsafe { device.alloc::<T>(exp_sums_shape.elem_count())? }.w()?;
+            let tmp_out = unsafe { device.alloc::<T>(temp_out_shape.elem_count()) }.w()?;
+            let exp_sums = unsafe { device.alloc::<T>(exp_sums_shape.elem_count()) }.w()?;
+            let max_logits = unsafe { device.alloc::<T>(exp_sums_shape.elem_count()) }.w()?;
 
             let tmp_out_ptr = *tmp_out.device_ptr() as *mut core::ffi::c_void;
             let exp_sums_ptr = *exp_sums.device_ptr() as *mut core::ffi::c_void;
@@ -276,9 +274,7 @@ impl PagedAttention {
                     sequence_lengths_ptr,
                     block_size,
                     self.max_sequence_length as i64,
-                    self.alibi_slopes
-                        .as_ref()
-                        .map(|t| *t.device_ptr() as *const core::ffi::c_void),
+                    alibi_slopes_ptrs,
                     internal_type as *const i8,
                     self.kv_scale,
                     0,
