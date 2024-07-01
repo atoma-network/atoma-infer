@@ -218,7 +218,7 @@ impl PagedAttention {
                 let (t, layout) = t.storage_and_layout();
                 let t = match &*t {
                     Storage::Cuda(s) => s.as_cuda_slice::<T>(),
-                    _ => candle_core::Error::Msg(format!("Only CUDA storage is supported")),
+                    _ => Err(candle_core::Error::Msg(format!("Only CUDA storage is supported"))),
                 }?;
                 let t = t.slice(layout.start_offset()..);
                 *t.device_ptr() as *const core::ffi::c_void

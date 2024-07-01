@@ -601,7 +601,7 @@ mod utils {
             let bias_with_slopes = bias_3d.mul(&slopes_3d)?;
             let inf_mask = Tensor::full(
                 f32::NEG_INFINITY,
-                &[1, seq_len, seq_len],
+                &[1, *seq_len, *seq_len],
                 alibi_slopes.device(),
             )?
             .to_dtype(dtype)?;
