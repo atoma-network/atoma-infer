@@ -448,9 +448,6 @@ fn reshape_and_cache_t<T: CudaDType + DeviceRepr>(
         )
     }
 
-    let key_stride = key_layout.stride()[0] as c_int;
-    let value_stride = value_layout.stride()[0] as c_int;
-
     let k_ptr = *key_view.device_ptr() as *mut core::ffi::c_void;
     let v_ptr = *value_view.device_ptr() as *mut core::ffi::c_void;
     let kc_ptr = *key_cache_view.device_ptr() as *mut core::ffi::c_void;

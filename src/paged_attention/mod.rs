@@ -439,7 +439,7 @@ fn swap_blocks_t<T: CudaDType + DeviceRepr + WithDType>(
 
             unsafe { swap_blocks(source_ptr, destiny_ptr, block_mapping_ptr) }
         }
-        (Device::Cpu, Device::Cuda(dst_device)) => {
+        (Device::Cpu, Device::Cuda(_)) => {
             let (source_storage, source_layout) = src_kv_cache.storage_and_layout();
             let source = match &*source_storage {
                 Storage::Cpu(storage) => storage,
@@ -462,7 +462,7 @@ fn swap_blocks_t<T: CudaDType + DeviceRepr + WithDType>(
 
             unsafe { swap_blocks(source_ptr, destiny_ptr, block_mapping_ptr) }
         }
-        (Device::Cuda(src_device), Device::Cpu) => {
+        (Device::Cuda(_), Device::Cpu) => {
             let (source_storage, source_layout) = src_kv_cache.storage_and_layout();
             let source = match &*source_storage {
                 Storage::Cuda(storage) => storage,
