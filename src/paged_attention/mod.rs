@@ -440,7 +440,7 @@ fn swap_blocks_t<T: CudaDType + DeviceRepr + WithDType>(
             unsafe { swap_blocks(source_ptr, destiny_ptr, block_mapping_ptr) }
         }
         (Device::Cpu, Device::Cuda(_)) => {
-            let (source_storage, source_layout) = src_kv_cache.storage_and_layout();
+            let (source_storage, _) = src_kv_cache.storage_and_layout();
             let source = match &*source_storage {
                 Storage::Cpu(storage) => storage,
                 _ => candle_core::bail!("Source tensor storage should be available on CUDA device"),
@@ -469,7 +469,7 @@ fn swap_blocks_t<T: CudaDType + DeviceRepr + WithDType>(
                 _ => candle_core::bail!("Source tensor storage should be available on CUDA device"),
             };
 
-            let (destiny_storage, destiny_layout) = dst_kv_cache.storage_and_layout();
+            let (destiny_storage, _) = dst_kv_cache.storage_and_layout();
             let destiny = match &*destiny_storage {
                 Storage::Cpu(storage) => storage,
                 _ => candle_core::bail!("Destiny tensor storage should be available on CPU device"),
@@ -589,9 +589,9 @@ mod utils {
         sequence_lengths: &Vec<usize>,
     ) -> Result<Vec<Option<Tensor>>, CandleError> {
         let mut biases = vec![];
-        for seq_len in sequence_lengths {
+        for &seq_len in sequence_lengths {
             let bias =
-                Tensor::arange(0, *seq_len as i64, alibi_slopes.device())?.to_dtype(DType::I64)?;
+                Tensor::arange(0, seq_len as i64, alibi_slopes.device())?.to_dtype(DType::I64)?;
             let bias_2d = bias.unsqueeze(0)?.broadcast_sub(&bias.unsqueeze(1)?)?;
             let num_heads = alibi_slopes.dim(0)?;
             let bias_3d = bias_2d.unsqueeze(0)?.repeat((num_heads, 1, 1))?;
@@ -599,11 +599,11 @@ mod utils {
             let bias_with_slopes = bias_3d.mul(&slopes_3d)?;
             let inf_mask = Tensor::full(
                 f32::NEG_INFINITY,
-                &[1, *seq_len, *seq_len],
+                &[1, seq_len, seq_len],
                 alibi_slopes.device(),
             )?
             .to_dtype(dtype)?;
-            let inf_mask = Tensor::triu2(*seq_len, dtype, &alibi_slopes.device())?
+            let inf_mask = Tensor::triu2(seq_len, dtype, &alibi_slopes.device())?
                 .unsqueeze(0)?
                 .broadcast_mul(&Tensor::new(f32::NEG_INFINITY, &alibi_slopes.device())?)?;
             let final_bias = bias_with_slopes.broadcast_add(&inf_mask)?;
@@ -619,15 +619,15 @@ mod utils {
         device: &Device,
     ) -> Result<Vec<Option<Tensor>>, CandleError> {
         let mut biases = vec![];
-        for seq_len in sequence_lengths {
-            let bias = Tensor::full(1.0, &[1, *seq_len, *seq_len], device)?.to_dtype(dtype)?;
-            let bias_tril = Tensor::tril2(*seq_len, dtype, device)?
+        for &seq_len in sequence_lengths {
+            let bias = Tensor::full(1.0, &[1, seq_len, seq_len], device)?.to_dtype(dtype)?;
+            let bias_tril = Tensor::tril2(seq_len, dtype, device)?
                 .broadcast_mul(&Tensor::new(f32::NEG_INFINITY, device)?)?;
-            let mask = Tensor::tril2(*seq_len, dtype, device)?
+            let mask = Tensor::tril2(seq_len, dtype, device)?
                 .unsqueeze(0)?
                 .broadcast_mul(&bias_tril)?;
             let mask =
-                mask.broadcast_mul(&Tensor::triu2(*seq_len, dtype, device)?.unsqueeze(0)?)?;
+                mask.broadcast_mul(&Tensor::triu2(seq_len, dtype, device)?.unsqueeze(0)?)?;
             let mask = mask.log()?;
             biases.push(Some(mask.to_dtype(dtype)?))
         }
