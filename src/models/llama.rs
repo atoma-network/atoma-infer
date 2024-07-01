@@ -224,7 +224,7 @@ impl CausalSelfAttention {
         Ok(y)
     }
 
-    fn repeat_kv(&self, x: &Tensor) -> Result<Tensor> {
+    fn repeat_kv(&self, x: Tensor) -> Result<Tensor> {
         candle_transformers::utils::repeat_kv(
             x,
             self.num_attention_heads / self.num_key_value_heads,
@@ -256,7 +256,7 @@ impl CausalSelfAttention {
             attention: PagedAttention::new(
                 cfg.num_attention_heads,
                 head_dim,
-                1. / ((head_dim as f32).sqrt()),
+                1. / ((head_dim as f64).sqrt()),
                 Some(cfg.num_key_value_heads),
                 None,
                 vb.device(),

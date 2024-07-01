@@ -276,7 +276,7 @@ impl PagedAttention {
             };
         }
 
-        let output = CudaStorage::wrap_cuda_slice(out, device.clone())?;
+        let output = CudaStorage::wrap_cuda_slice(out, device.clone());
         Ok((output, output_shape.clone()))
     }
 }
@@ -396,8 +396,8 @@ fn reshape_and_cache_t<T: CudaDType + DeviceRepr>(
     }
 
     // Get CUDA slices for all tensors
-    let key_slice = key.as_cuda_slice()?;
-    let value_slice = value.as_cuda_slice()?;
+    let key_slice = key.as_cuda_slice::<T>()?;
+    let value_slice = value.as_cuda_slice::<T>()?;
     let key_cache_slice = key_cache.as_cuda_slice::<T>()?;
     let value_cache_slice = value_cache.as_cuda_slice::<T>()?;
     let slot_mapping_slice = slot_mapping.as_cuda_slice::<i64>()?;

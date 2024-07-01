@@ -40,7 +40,7 @@ impl PagedAttentionMetadata {
         prompt_lengths: Vec<usize>,
         max_sequence_length: usize,
         block_tables: Option<Tensor>,
-        sequence_lengths: Option<Tensor>,
+        sequence_lengths: Vec<usize>,
         sequence_lens_tensor: Tensor,
         slot_mapping: Tensor,
         kv_cache_dtype: String,
@@ -130,10 +130,10 @@ impl PagedAttention {
         let key_cache =
             kv_cache
                 .i(0)?
-                .reshape(&[num_blocks, num_kv_heads, head_size / x, (), x])?;
+                .reshape((num_blocks, num_kv_heads, head_size / x, (), x))?;
         let value_cache = kv_cache
             .i(1)?
-            .reshape(&[num_blocks, num_kv_heads, head_size, ()])?;
+            .reshape((num_blocks, num_kv_heads, head_size, ()))?;
 
         Ok((key_cache, value_cache))
     }
@@ -265,7 +265,7 @@ impl PagedAttention {
                     .matmul(&key.narrow(1, start_index, *seq_len)?.unsqueeze(0)?.t()?)?
                     * self.scale as f64)?;
                 let attention = if let Some(mask) = mask {
-                    attention.broadcast_add(&mask.unwrap())?;
+                    attention.broadcast_add(&mask)?
                 } else {
                     attention
                 };
@@ -275,6 +275,7 @@ impl PagedAttention {
                     &[start_index..end_index, 0..output.dim(1)?, 0..output.dim(2)?],
                     &attention,
                 )?;
+
                 start_index = end_index;
             }
 
