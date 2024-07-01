@@ -149,7 +149,7 @@ impl PagedAttention {
         }
 
         let (num_sequences_block_table, max_num_blocks_per_sequence) =
-            block_tables_layout.dims2()?;
+            (block_tables_layout.dims()[0], block_tables_layout.dims()[1]);
 
         if num_sequences_block_table != num_sequences {
             candle_core::bail!(
@@ -169,7 +169,9 @@ impl PagedAttention {
             );
         }
 
-        if (num_blocks, num_kv_heads, head_size, block_size) != value_cache_layout.shape().dims4() {
+        if (num_blocks, num_kv_heads, head_size, block_size)
+            != value_cache_layout.shape().dims4()?
+        {
             candle_core::bail!(
                 "value_cache shape mismatch {:?} key_cache shape {:?}",
                 value_cache_layout.shape(),
@@ -216,7 +218,7 @@ impl PagedAttention {
                 let (t, layout) = t.storage_and_layout();
                 let t = match &*t {
                     Storage::Cuda(s) => s.as_cuda_slice::<T>(),
-                    _ => candle_core::Error("Only CUDA storage is supported"),
+                    _ => candle_core::Error::Msg(format!("Only CUDA storage is supported")),
                 }?;
                 let t = t.slice(layout.start_offset()..);
                 *t.device_ptr() as *const core::ffi::c_void
@@ -234,7 +236,7 @@ impl PagedAttention {
                     self.scale,
                     block_tables_ptr,
                     sequence_lengths_ptr,
-                    block_size,
+                    block_size as i64,
                     self.max_sequence_length as i64,
                     alibi_slopes_ptrs,
                     internal_type as *const i8,
@@ -272,7 +274,7 @@ impl PagedAttention {
                     self.scale,
                     block_tables_ptr,
                     sequence_lengths_ptr,
-                    block_size,
+                    block_size as i64,
                     self.max_sequence_length as i64,
                     alibi_slopes_ptrs,
                     internal_type as *const i8,
