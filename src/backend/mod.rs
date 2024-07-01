@@ -1,8 +1,6 @@
 use std::ffi::{c_int, CString};
 
-use crate::{
-    kernels::ffi::{paged_attention_v1, paged_attention_v2},
-};
+use crate::kernels::ffi::{paged_attention_v1, paged_attention_v2};
 use candle_core::{
     backend::BackendStorage,
     cuda_backend::{
@@ -211,7 +209,9 @@ impl PagedAttention {
                 let (t, layout) = t.storage_and_layout();
                 let t = match &*t {
                     Storage::Cuda(s) => s.as_cuda_slice::<T>(),
-                    _ => Err(candle_core::Error::Msg(format!("Only CUDA storage is supported"))),
+                    _ => Err(candle_core::Error::Msg(format!(
+                        "Only CUDA storage is supported"
+                    ))),
                 }?;
                 let t = t.slice(layout.start_offset()..);
                 Ok::<_, candle_core::Error>(*t.device_ptr() as *const core::ffi::c_void)

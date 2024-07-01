@@ -262,7 +262,7 @@ impl CausalSelfAttention {
                 vb.device(),
                 None,
             )?,
-            cos_sin_cache: Cache::new( &cfg, device, dtype,)?,
+            cos_sin_cache: Cache::new(&cfg, device, dtype)?,
         })
     }
 }

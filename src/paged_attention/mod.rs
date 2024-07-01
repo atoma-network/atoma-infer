@@ -626,8 +626,7 @@ mod utils {
             let mask = Tensor::tril2(seq_len, dtype, device)?
                 .unsqueeze(0)?
                 .broadcast_mul(&bias_tril)?;
-            let mask =
-                mask.broadcast_mul(&Tensor::triu2(seq_len, dtype, device)?.unsqueeze(0)?)?;
+            let mask = mask.broadcast_mul(&Tensor::triu2(seq_len, dtype, device)?.unsqueeze(0)?)?;
             let mask = mask.log()?;
             biases.push(Some(mask.to_dtype(dtype)?))
         }
