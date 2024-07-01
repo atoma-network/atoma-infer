@@ -221,7 +221,7 @@ impl PagedAttention {
                     _ => Err(candle_core::Error::Msg(format!("Only CUDA storage is supported"))),
                 }?;
                 let t = t.slice(layout.start_offset()..);
-                Ok(*t.device_ptr() as *const core::ffi::c_void)
+                Ok::<_, candle_core::Error>(*t.device_ptr() as *const core::ffi::c_void)
             })
             .transpose()?;
 
