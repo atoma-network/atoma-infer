@@ -214,14 +214,14 @@ impl PagedAttention {
         let alibi_slopes_ptrs = self
             .alibi_slopes
             .as_ref()
-            .and_then(|t| {
+            .map(|t| {
                 let (t, layout) = t.storage_and_layout();
                 let t = match &*t {
                     Storage::Cuda(s) => s.as_cuda_slice::<T>(),
                     _ => Err(candle_core::Error::Msg(format!("Only CUDA storage is supported"))),
-                }.ok()?;
+                }?;
                 let t = t.slice(layout.start_offset()..);
-                Some(*t.device_ptr() as *const core::ffi::c_void)
+                *t.device_ptr() as *const core::ffi::c_void
             })
             .transpose()?;
 
