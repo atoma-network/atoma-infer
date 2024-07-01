@@ -202,12 +202,26 @@ impl PagedAttention {
         let elem_count = output_shape.elem_count();
         let out = unsafe { device.alloc::<T>(elem_count) }.w()?;
 
-        let out_ptr = *out.device_ptr() as *const core::ffi::c_void;
-        let query_ptr = *q.device_ptr() as *const core::ffi::c_void;
-        let key_cache_ptr = *key_cache.device_ptr() as *const core::ffi::c_void;
-        let value_cache_ptr = *value_cache.device_ptr() as *const core::ffi::c_void;
-        let block_tables_ptr = *block_tables.device_ptr() as *const core::ffi::c_void;
-        let sequence_lengths_ptr = *sequence_lengths.device_ptr() as *const core::ffi::c_void;
+        let out_ptr = *out.device_ptr() as *mut core::ffi::c_void;
+        let query_ptr = *q.device_ptr() as *mut core::ffi::c_void;
+        let key_cache_ptr = *key_cache.device_ptr() as *mut core::ffi::c_void;
+        let value_cache_ptr = *value_cache.device_ptr() as *mut core::ffi::c_void;
+        let block_tables_ptr = *block_tables.device_ptr() as *mut core::ffi::c_void;
+        let sequence_lengths_ptr = *sequence_lengths.device_ptr() as *mut core::ffi::c_void;
+
+        let alibi_slopes_ptrs = self
+            .alibi_slopes
+            .as_ref()
+            .and_then(|t| {
+                let (t, layout) = t.storage_and_layout();
+                let t = match &*t {
+                    Storage::Cuda(s) => s.as_cuda_slice::<T>()?,
+                    _ => None,
+                };
+                let t = t.slice(layout.start_offset()..);
+                *t.device_ptr() as *const core::ffi::c_void
+            })
+            .transpose()?;
 
         if use_v1 {
             unsafe {
@@ -311,7 +325,7 @@ pub fn paged_attention(
     kv_cache_dtype: String,
     num_kv_heads: usize,
     scale: f64,
-    alibi_slopes: Option<Tensor>,
+    alibi_slopes: Option<&Tensor>,
     kv_scale: f64,
 ) -> Result<Tensor> {
     let attention = PagedAttention {

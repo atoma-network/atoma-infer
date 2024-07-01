@@ -19,7 +19,7 @@ pub struct PagedAttentionMetadata {
     /// The maximum sequence length
     pub max_sequence_length: usize,
     /// The block tables. (sequence_id -> vector of physical blocks)
-    pub block_tables: Option<Tensor>,
+    pub block_tables: Tensor,
     /// The length of attention context for each generation token
     pub sequence_lengths: Vec<usize>,
     /// The sequence lengths tensor
@@ -39,7 +39,7 @@ impl PagedAttentionMetadata {
     pub fn new(
         prompt_lengths: Vec<usize>,
         max_sequence_length: usize,
-        block_tables: Option<Tensor>,
+        block_tables: Tensor,
         sequence_lengths: Vec<usize>,
         sequence_lens_tensor: Tensor,
         slot_mapping: Tensor,
@@ -127,10 +127,9 @@ impl PagedAttention {
         let x = 16 / kv_cache.dtype().size_in_bytes();
         let num_blocks = kv_cache.dim(1)?;
 
-        let key_cache =
-            kv_cache
-                .i(0)?
-                .reshape((num_blocks, num_kv_heads, head_size / x, (), x))?;
+        let key_cache = kv_cache
+            .i(0)?
+            .reshape((num_blocks, num_kv_heads, head_size / x, (), x))?;
         let value_cache = kv_cache
             .i(1)?
             .reshape((num_blocks, num_kv_heads, head_size, ()))?;
@@ -181,7 +180,7 @@ impl PagedAttention {
         key: &Tensor,
         value: &Tensor,
         kv_cache: &Tensor,
-        attention_metadata: &PagedAttentionMetadata,
+        attention_metadata: &mut PagedAttentionMetadata,
     ) -> Result<Tensor, CandleError> {
         let (num_tokens, _hidden_size) = query.dims2()?;
         // Reshape the query, key and value tensors to [num_tokens, num_heads, head_size]
@@ -208,6 +207,7 @@ impl PagedAttention {
             );
             debug_assert!(attention_metadata
                 .block_tables
+                .as_ref()
                 .map_or(true, |bt| bt.elem_count() == 0),
                 "block_tables should be empty, for prefill sequences as we do not support prefix decoding");
 
@@ -221,15 +221,15 @@ impl PagedAttention {
             };
 
             if attention_metadata.attention_bias.is_empty() {
-                let attention_masks = if let Some(alibi_slopes) = self.alibi_slopes {
+                let attention_masks = if let Some(alibi_slopes) = self.alibi_slopes.as_ref() {
                     utils::make_alibi_bias(
                         alibi_slopes,
                         query.dtype(),
-                        attention_metadata.sequence_lengths,
+                        &attention_metadata.sequence_lengths,
                     )?
                 } else if let Some(sliding_window) = self.sliding_window {
                     utils::make_sliding_window_bias(
-                        attention_metadata.sequence_lengths,
+                        &attention_metadata.sequence_lengths,
                         sliding_window,
                         query.dtype(),
                         &query.device(),
@@ -285,13 +285,13 @@ impl PagedAttention {
                 &query,
                 &key_cache,
                 &value_cache,
-                &attention_metadata.block_tables.unwrap(),
+                &attention_metadata.block_tables,
                 &attention_metadata.sequence_lens_tensor,
                 attention_metadata.max_sequence_length,
                 attention_metadata.kv_cache_dtype.clone(),
                 self.num_kv_heads,
                 self.scale,
-                self.alibi_slopes.clone(),
+                self.alibi_slopes.as_ref(),
                 1.0, // TODO: support kv_scale in the future, for quantized KV cache
             )?
         };
@@ -587,9 +587,9 @@ mod utils {
     use super::*;
 
     pub(crate) fn make_alibi_bias(
-        alibi_slopes: Tensor,
+        alibi_slopes: &Tensor,
         dtype: DType,
-        sequence_lengths: Vec<usize>,
+        sequence_lengths: &Vec<usize>,
     ) -> Result<Vec<Option<Tensor>>, CandleError> {
         let mut biases = vec![];
         for seq_len in sequence_lengths {
@@ -616,7 +616,7 @@ mod utils {
     }
 
     pub(crate) fn make_sliding_window_bias(
-        sequence_lengths: Vec<usize>,
+        sequence_lengths: &Vec<usize>,
         window_size: usize,
         dtype: DType,
         device: &Device,

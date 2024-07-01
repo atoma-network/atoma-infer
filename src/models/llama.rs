@@ -218,7 +218,7 @@ impl CausalSelfAttention {
 
         let y = self
             .attention
-            .forward(&q, &k, &v, cache, &attention_metadata)?;
+            .forward(&q, &k, &v, cache, attention_metadata)?;
 
         let y = self.o_proj.forward(&y)?;
         Ok(y)
