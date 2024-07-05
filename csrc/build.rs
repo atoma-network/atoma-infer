@@ -1,5 +1,6 @@
 use anyhow::Result;
 use std::fs::OpenOptions;
+use std::io::Write;
 
 fn read_lines(filename: &str) -> Vec<String> {
     let mut result = Vec::new();
@@ -18,7 +19,7 @@ fn main() -> Result<()> {
 
     let builder = bindgen_cuda::Builder::default();
     println!("cargo:info={builder:?}");
-    builder.build_lib("libpagedattention.a");
+    // builder.build_lib("libpagedattention.a");
 
     let bindings = builder.build_ptx().unwrap();
     bindings.write("src/lib.rs").unwrap();
@@ -50,6 +51,4 @@ fn main() -> Result<()> {
     } else {
         Ok(())
     }
-
-    Ok(())
 }
