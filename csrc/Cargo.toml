@@ -1,5 +1,5 @@
 [package]
-name = "kernels"
+name = "csrc"
 version = "0.1.0"
 edition = "2021"
 description = "Paged attention kernels for Atoma"
