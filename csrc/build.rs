@@ -1,3 +1,6 @@
+use anyhow::Result;
+use std::fs::OpenOptions;
+
 fn read_lines(filename: &str) -> Vec<String> {
     let mut result = Vec::new();
 
@@ -47,4 +50,6 @@ fn main() -> Result<()> {
     } else {
         Ok(())
     }
+
+    Ok(())
 }
