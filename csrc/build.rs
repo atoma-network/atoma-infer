@@ -66,9 +66,8 @@ fn read_lines(filename: &str) -> Vec<String> {
 }
 fn main() -> Result<()> {
     println!("cargo:rerun-if-changed=build.rs");
-    println!("cargo:rerun-if-changed=src/pagedattention.cu");
-    println!("cargo:rerun-if-changed=src/copy_blocks_kernel.cu");
-    println!("cargo:rerun-if-changed=src/reshape_and_cache_kernel.cu");
+    println!("cargo:rerun-if-changed=kernels/attention/attention_kernels.cu");
+    println!("cargo:rerun-if-changed=kernels/cache_kernels.cu");
 
     let cuda_files = vec![
         "./kernels/attention/attention_kernels.cu",
@@ -81,7 +80,6 @@ fn main() -> Result<()> {
     let builder = bindgen_cuda::Builder::default()
         .kernel_paths(cuda_files)
         .out_dir(out_dir.clone())
-        .arg("-gencode=arch=compute_89,code=sm_89")
         .arg("-I./kernels");
 
     println!("cargo:info={builder:?}");
