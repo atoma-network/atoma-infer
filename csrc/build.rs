@@ -88,6 +88,8 @@ fn main() -> Result<()> {
     let lib_name = "libpagedattention.a";
     builder.build_lib(out_dir.join(lib_name));
 
+    println!("FLAG");
+
     let bindings = builder.build_ptx().unwrap();
     bindings.write("src/lib.rs").unwrap();
 
