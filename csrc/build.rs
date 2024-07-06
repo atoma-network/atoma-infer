@@ -71,8 +71,8 @@ fn main() -> Result<()> {
     println!("cargo:rerun-if-changed=src/reshape_and_cache_kernel.cu");
 
     let cuda_files = vec![
-        "kernels/attention/attention_kernels.cu",
-        "kernels/cache_kernels.cu",
+        "./kernels/attention/attention_kernels.cu",
+        "./kernels/cache_kernels.cu",
     ];
 
     let out_dir = PathBuf::from(std::env::var("OUT_DIR")?);
