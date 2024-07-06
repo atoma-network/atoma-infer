@@ -64,45 +64,45 @@ fn read_lines(filename: &str) -> Vec<String> {
 
     result
 }
-
 fn main() -> Result<()> {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=src/pagedattention.cu");
     println!("cargo:rerun-if-changed=src/copy_blocks_kernel.cu");
     println!("cargo:rerun-if-changed=src/reshape_and_cache_kernel.cu");
-    let builder = bindgen_cuda::Builder::default();
+
+    let cuda_files = vec![
+        "kernels/attention/attention_kernels.cu",
+        "kernels/cache_kernels.cu",
+    ];
+
+    let out_dir = PathBuf::from(std::env::var("OUT_DIR")?);
+    std::fs::create_dir_all(&out_dir)?;
+
+    let builder = bindgen_cuda::Builder::default()
+        .kernel_paths(cuda_files)
+        .out_dir(out_dir.clone())
+        .arg("-gencode=arch=compute_89,code=sm_89");
+
     println!("cargo:info={builder:?}");
-    builder.build_lib("libpagedattention.a");
+
+    let lib_name = "libpagedattention.a";
+    builder.build_lib(out_dir.join(lib_name));
 
     let bindings = builder.build_ptx().unwrap();
     bindings.write("src/lib.rs").unwrap();
 
-    let kernel_dir = PathBuf::from("./kernels/");
-    let absolute_kernel_dir = std::fs::canonicalize(&kernel_dir).unwrap();
-
-    println!(
-        "cargo:rustc-link-search=native={}",
-        absolute_kernel_dir.display()
-    );
-    println!("cargo:rustc-link-lib=pagedattention");
+    println!("cargo:rustc-link-search=native={}", out_dir.display());
+    println!("cargo:rustc-link-lib=static=pagedattention");
     println!("cargo:rustc-link-lib=dylib=cudart");
 
     let contents = read_lines("src/lib.rs");
-    for line in contents {
-        if line == "pub mod ffi;" {
-            return Ok(());
-        }
+    if !contents.contains(&"pub mod ffi;".to_string()) {
+        let mut file = OpenOptions::new()
+            .write(true)
+            .append(true)
+            .open("src/lib.rs")?;
+        writeln!(file, "pub mod ffi;")?;
     }
-    let mut file = OpenOptions::new()
-        .write(true)
-        .append(true)
-        .open("src/lib.rs")
-        .unwrap();
-    //Expose paged attention interface to Rust
-    if let Err(e) = writeln!(file, "pub mod ffi;") {
-        anyhow::bail!("error while building dependencies: {:?}\n", e,)
-    } else {
-        Ok(())
-    }
-}
 
+    Ok(())
+}
