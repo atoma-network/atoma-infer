@@ -81,14 +81,13 @@ fn main() -> Result<()> {
     let builder = bindgen_cuda::Builder::default()
         .kernel_paths(cuda_files)
         .out_dir(out_dir.clone())
-        .arg("-gencode=arch=compute_89,code=sm_89");
+        .arg("-gencode=arch=compute_89,code=sm_89")
+        .arg("-I./kernels");
 
     println!("cargo:info={builder:?}");
 
     let lib_name = "libpagedattention.a";
     builder.build_lib(out_dir.join(lib_name));
-
-    println!("FLAG");
 
     let bindings = builder.build_ptx().unwrap();
     bindings.write("src/lib.rs").unwrap();
