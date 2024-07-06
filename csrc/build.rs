@@ -35,6 +35,7 @@ fn main() -> Result<()> {
     let builder = bindgen_cuda::Builder::default()
         .kernel_paths(kernels)
         .out_dir(build_dir.clone())
+        .arg("-gencode=arch=compute_89,code=sm_89")
         .arg("--verbose");
 
     let out_file = build_dir.join("libpagedattention.a");
