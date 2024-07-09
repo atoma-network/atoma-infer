@@ -1,4 +1,4 @@
-//To DO import :use crate::pagedattention::{PagedAttention, PagedAttentionMetadata}; 
+use crate::pagedattention::{PagedAttention, PagedAttentionMetadata};
 use candle_core::{DType, Device, IndexOp, Module, Result, Tensor};
 use candle_nn::{embedding, Embedding, VarBuilder};
 use candle_transformers::models::with_tracing::{linear_no_bias as linear, Linear, RmsNorm};
@@ -23,19 +23,17 @@ pub struct LlamaConfig {
 }
 
 impl LlamaConfig {
-    /// Returns the number of key-value heads, defaults to the number of attention heads if not specified.
+    /// This will return the number of key-value heads
     pub fn num_key_value_heads(&self) -> usize {
         self.num_key_value_heads.unwrap_or(self.num_attention_heads)
     }
 }
 
-/// Default rope theta value
 fn default_rope() -> f32 {
     10_000.0
 }
 
 impl LlamaConfig {
-    /// Converts LlamaConfig to a more general Config with an additional flash attention flag.
     pub fn into_config(self, use_flash_attn: bool) -> Config {
         Config {
             hidden_size: self.hidden_size,
