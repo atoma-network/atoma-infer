@@ -3,6 +3,11 @@ use candle_core::{
     cuda_backend::{cudarc::driver::DeviceRepr, CudaDType},
     DType, Device, Error as CandleError, IndexOp, Storage, Tensor, WithDType, D,
 };
+
+use crate::{
+    backend::{paged_attention, reshape_and_cache},
+    kernels::ffi::{copy_blocks, swap_blocks},
+};
 use half::{bf16, f16};
 
 //structure of the metadata
