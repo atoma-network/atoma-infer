@@ -1,6 +1,6 @@
 use std::ffi::{c_int, CString};
 
-use crate::kernels::ffi::{paged_attention_v1, paged_attention_v2};
+use csrc::ffi::{paged_attention_v1, paged_attention_v2};
 use candle_core::{
     backend::BackendStorage,
     cuda_backend::{
@@ -458,7 +458,7 @@ fn reshape_and_cache_t<T: CudaDType + DeviceRepr>(
     let kv_cache_dtype = kv_cache_dtype.as_ptr();
 
     unsafe {
-        crate::kernels::ffi::reshape_and_cache(
+        csrc::ffi::reshape_and_cache(
             k_ptr,
             v_ptr,
             kc_ptr,
