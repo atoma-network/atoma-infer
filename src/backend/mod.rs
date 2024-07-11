@@ -1,6 +1,5 @@
 use std::ffi::{c_int, CString};
 
-use csrc::ffi::{paged_attention_v1, paged_attention_v2};
 use candle_core::{
     backend::BackendStorage,
     cuda_backend::{
@@ -9,6 +8,7 @@ use candle_core::{
     },
     CpuStorage, CudaStorage, CustomOp1, DType, Layout, Result, Shape, Storage, Tensor,
 };
+use csrc::ffi::{paged_attention_v1, paged_attention_v2};
 use half::{bf16, f16};
 
 const PARTITION_SIZE: usize = 512;
