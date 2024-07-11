@@ -8,7 +8,7 @@ const KERNEL_FILES: [&str; 64] = [
     "kernels/flash_fwd_hdim32_bf16_causal_sm80.cu",
     "kernels/flash_fwd_hdim32_bf16_sm80.cu",
     "kernels/flash_fwd_hdim32_fp16_causal_sm80.cu",
-    "kernels/flash_fwd_hdims32_fp16_sm80.cu",
+    "kernels/flash_fwd_hdim32_fp16_sm80.cu",
     "kernels/flash_fwd_hdim64_bf16_causal_sm80.cu", 
     "kernels/flash_fwd_hdim64_bf16_sm80.cu", 
     "kernels/flash_fwd_hdim64_fp16_causal_sm80.cu", 
