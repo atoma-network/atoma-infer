@@ -1557,15 +1557,15 @@ extern "C" void mha_fwd(
 )
 
 extern "C" void mha_varlen_fwd(
-    const void *q,  // total_q x num_heads x head_size, total_q := \sum_{i=0}^{b} s_i
-    const void *k,  // total_k x num_heads_k x head_size, total_k := \sum_{i=0}^{b} s_i or num_blocks x page_block_size x num_heads_k x head_size if there's a block_table.
-    const void *v,  // total_k x num_heads_k x head_size, total_k := \sum_{i=0}^{b} s_i or num_blocks x page_block_size x num_heads_k x head_size if there's a block_table.
-    void *out_,      // total_q x num_heads x head_size, total_k := \sum_{i=0}^{b} s_i
+    const void *q,             // total_q x num_heads x head_size, total_q := \sum_{i=0}^{b} s_i
+    const void *k,             // total_k x num_heads_k x head_size, total_k := \sum_{i=0}^{b} s_i or num_blocks x page_block_size x num_heads_k x head_size if there's a block_table.
+    const void *v,             // total_k x num_heads_k x head_size, total_k := \sum_{i=0}^{b} s_i or num_blocks x page_block_size x num_heads_k x head_size if there's a block_table.
+    void *out_,                // total_q x num_heads x head_size, total_k := \sum_{i=0}^{b} s_i   
     const void *cu_seqlens_q,  // b+1
     const void *cu_seqlens_k,  // b+1
-    void *seqused_k,  // b. If given, only this many elements of each batch element's keys are used.
-    void *block_table_,  // batch_size x max_num_blocks_per_seq
-    void *alibi_slopes_,  // num_heads or b x num_heads
+    void *seqused_k,           // b. If given, only this many elements of each batch element's keys are used.
+    void *block_table_,        // batch_size x max_num_blocks_per_seq
+    void *alibi_slopes_,       // num_heads or b x num_heads
     int max_seqlen_q,
     int max_seqlen_k,
     float p_dropout,
@@ -1583,20 +1583,20 @@ extern "C" mha_fwd_kvcache(
     const void *q,                 // batch_size x seqlen_q x num_heads x head_size
     const void *kcache,            // batch_size_c x seqlen_k x num_heads_k x head_size or num_blocks x page_block_size x num_heads_k x head_size if there's a block_table.
     const void *vcache,            // batch_size_c x seqlen_k x num_heads_k x head_size or num_blocks x page_block_size x num_heads_k x head_size if there's a block_table.
-    void *k_, // batch_size x seqlen_knew x num_heads_k x head_size
-    void *v_, // batch_size x seqlen_knew x num_heads_k x head_size
-    void *seqlens_k_, // batch_size
-    void *rotary_cos_, // seqlen_ro x (rotary_dim / 2)
-    void *rotary_sin_, // seqlen_ro x (rotary_dim / 2)
-    void *cache_batch_idx_, // indices to index into the KV cache
-    void *block_table_, // batch_size x max_num_blocks_per_seq
-    void *alibi_slopes_, // num_heads or batch_size x num_heads
-    void *out_,             // batch_size x seqlen_q x num_heads x head_size
+    void *k_,                      // batch_size x seqlen_knew x num_heads_k x head_size
+    void *v_,                      // batch_size x seqlen_knew x num_heads_k x head_size
+    void *seqlens_k_,              // batch_size
+    void *rotary_cos_,             // seqlen_ro x (rotary_dim / 2)
+    void *rotary_sin_,             // seqlen_ro x (rotary_dim / 2)
+    void *cache_batch_idx_,        // indices to index into the KV cache
+    void *block_table_,            // batch_size x max_num_blocks_per_seq
+    void *alibi_slopes_,           // num_heads or batch_size x num_heads
+    void *out_,                    // batch_size x seqlen_q x num_heads x head_size
     float softmax_scale,
     bool is_causal,
     int window_size_left,
     int window_size_right,
     float softcap,
-    bool is_rotary_interleaved,   // if true, rotary combines indices 0 & 1, else indices 0 & rotary_dim / 2
+    bool is_rotary_interleaved,    // if true, rotary combines indices 0 & 1, else indices 0 & rotary_dim / 2
     int num_splits
 )
