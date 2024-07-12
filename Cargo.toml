@@ -8,3 +8,4 @@ edition = "2021"
 
 [dependencies]
 candle-transformers = { git = "https://github.com/huggingface/candle", package = "candle-transformers", branch = "main" }
+csrc = { path = "csrc" }
