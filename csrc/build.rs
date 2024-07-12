@@ -110,6 +110,8 @@ fn main() -> Result<()> {
 
     let num_files = 64 / NUM_RUNS;
     for i in 0..NUM_RUNS {
+        println!("cargo:warning={i}");
+
         let kernels = KERNEL_FILES[i * num_files..(i + 1) * num_files].iter().collect();
         let builder = bindgen_cuda::Builder::default()
             .kernel_paths(kernels)
@@ -126,7 +128,6 @@ fn main() -> Result<()> {
             .arg("--use_fast_math");
 
         println!("cargo:info={builder:?}");
-        println!("cargo:warning={i}");
 
         let out_file = build_dir.join(format!("libflashattention_{i}.a")); 
         builder.build_lib(out_file);
