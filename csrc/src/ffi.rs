@@ -1,4 +1,4 @@
-use core::ffi::{c_void, c_int};
+use core::ffi::{c_int, c_void};
 
 extern "C" {
     pub fn mha_fwd(
@@ -14,7 +14,7 @@ extern "C" {
         window_size_right: i32,
         softcap: f32,
         return_softmax: bool,
-        gen: *mut c_void
+        gen: *mut c_void,
     );
 
     pub fn mha_varlen_fwd(
@@ -37,7 +37,7 @@ extern "C" {
         window_size_right: i32,
         softcap: f32,
         return_softmax: bool,
-        gen: *mut c_void
+        gen: *mut c_void,
     );
 
     pub fn mha_fwd_kvcache(
@@ -59,6 +59,6 @@ extern "C" {
         window_size_right: i32,
         softcap: f32,
         is_rotary_interleaved: bool,
-        num_splits: i32
+        num_splits: i32,
     );
 }
