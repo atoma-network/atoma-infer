@@ -108,7 +108,7 @@ fn main() -> Result<()> {
     println!("cargo:warning={:?}", build_dir.display());
 
     let current_dir = std::env::current_dir()?;
-    let cutlass_include_dir = current_dir.join("/cutlass/include");
+    let cutlass_include_dir = current_dir.join("cutlass/include");
     let cutlass_include_arg = format!("-I{}", cutlass_include_dir.display());
     let cutlass_include_arg = Box::leak(cutlass_include_arg.into_boxed_str());
 
