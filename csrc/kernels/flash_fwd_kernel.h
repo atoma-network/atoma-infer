@@ -71,16 +71,16 @@ inline __device__ void compute_attn_1rowblock(const Params &params, const int bi
     constexpr int kHeadDim = Kernel_traits::kHeadDim;
     constexpr int kNWarps = Kernel_traits::kNWarps;
 
-    auto seed_offset = at::cuda::philox::unpack(params.philox_args);
-    flash::Dropout dropout(std::get<0>(seed_offset), std::get<1>(seed_offset), params.p_dropout_in_uint8_t,
-                           bidb, bidh, tidx, params.h);
+    // auto seed_offset = at::cuda::philox::unpack(params.philox_args);
+    // flash::Dropout dropout(std::get<0>(seed_offset), std::get<1>(seed_offset), params.p_dropout_in_uint8_t,
+    //                        bidb, bidh, tidx, params.h);
 
     // Save seed and offset for backward, before any early exiting. Otherwise the 0-th thread block might
     // exit early and no one saves the rng states.
-    if (Is_dropout && blockIdx.x == 0 && blockIdx.y == 0 && blockIdx.z == 0 && tidx == 0) {
-        params.rng_state[0] = std::get<0>(seed_offset);
-        params.rng_state[1] = std::get<1>(seed_offset);
-    }
+    // if (Is_dropout && blockIdx.x == 0 && blockIdx.y == 0 && blockIdx.z == 0 && tidx == 0) {
+    //     params.rng_state[0] = std::get<0>(seed_offset);
+    //     params.rng_state[1] = std::get<1>(seed_offset);
+    // }
 
     const BlockInfo</*Varlen=*/!Is_even_MN> binfo(params, bidb);
     if (m_block * kBlockM >= binfo.actual_seqlen_q) return;

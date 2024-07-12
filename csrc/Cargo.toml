@@ -7,7 +7,9 @@ categories = ["science"]
 license = "MIT OR Apache-2.0"
 
 [dependencies]
+candle-core = { version = "0.6.0", features = ["cuda"] }
+half = { version = "2.4.1", features = ["num-traits"] }
 
 [build-dependencies]
 anyhow = { version = "1", features = ["backtrace"] }
-bindgen_cuda = {git = "https://github.com/guoqingbao/bindgen_cuda.git", version= "0.1.6"}
+bindgen_cuda = "0.1.5"
