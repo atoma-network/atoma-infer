@@ -123,10 +123,10 @@ fn main() -> Result<()> {
             .arg("-Icsrc/cutlass/include")
             .arg("--expt-relaxed-constexpr")
             .arg("--expt-extended-lambda")
-            .arg("--use_fast_math")
-            .arg("--verbose");
+            .arg("--use_fast_math");
 
         println!("cargo:info={builder:?}");
+        println!("cargo:warning={i}");
 
         let out_file = build_dir.join(format!("libflashattention_{i}.a")); 
         builder.build_lib(out_file);
