@@ -115,7 +115,7 @@ fn main() -> Result<()> {
         .arg("-U__CUDA_NO_HALF_CONVERSIONS__")
         .arg("-U__CUDA_NO_HALF2_OPERATORS__")
         .arg("-U__CUDA_NO_BFLOAT16_CONVERSIONS__")
-        .arg("-Icutlass/include")
+        .arg("-Icsrc/cutlass/include")
         .arg("--expt-relaxed-constexpr")
         .arg("--expt-extended-lambda")
         .arg("--use_fast_math")
