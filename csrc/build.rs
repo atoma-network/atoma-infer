@@ -106,7 +106,7 @@ fn main() -> Result<()> {
         }
     };
     println!("cargo:warning={:?}", build_dir.display());
-    panic!(""):
+    panic!("");
 
     let kernels = KERNEL_FILES.iter().collect();
     let builder = bindgen_cuda::Builder::default()
