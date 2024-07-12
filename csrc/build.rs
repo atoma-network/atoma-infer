@@ -97,6 +97,7 @@ fn main() -> Result<()> {
         }
         Ok(build_dir) => {
             let path = PathBuf::from(build_dir);
+            println!("cargo:warning={:?}", std::env::current_dir()?.display());
             path.canonicalize().expect(&format!(
                 "Directory doesn't exists: {} (the current directory is {})",
                 &path.display(),
@@ -104,6 +105,7 @@ fn main() -> Result<()> {
             ))
         }
     };
+    println!("cargo:warning={:?}", build_dir.display());
 
     let kernels = KERNEL_FILES.iter().collect();
     let builder = bindgen_cuda::Builder::default()
