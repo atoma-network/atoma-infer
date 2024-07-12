@@ -106,6 +106,8 @@ fn main() -> Result<()> {
         }
     };
     println!("cargo:warning={:?}", build_dir.display());
+    println!("cargo:warning={:?}", std::env::current_dir()?.display());
+
     panic!("");
 
     let kernels = KERNEL_FILES.iter().collect();
