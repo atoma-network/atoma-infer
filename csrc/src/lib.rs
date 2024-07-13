@@ -284,11 +284,11 @@ fn round_multiple(x: usize, m: usize) -> usize {
 /// So we find the best efficiency, then find the smallest number of splits that gets 85%
 /// of the best efficiency.
 fn num_splits_heuristic(
-    batch_nheads_mblocks: i32,
-    num_sms: i32,
-    num_n_blocks: i32,
-    max_splits: i32,
-) -> i32 {
+    batch_nheads_mblocks: usize,
+    num_sms: usize,
+    num_n_blocks: usize,
+    max_splits: usize,
+) -> usize {
     // If we have enough to almost fill the SMs, then just use 1 split
     if (batch_nheads_mblocks as f32) >= 0.8 * (num_sms as f32) {
         return 1;
