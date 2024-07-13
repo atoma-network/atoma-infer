@@ -352,6 +352,18 @@ inline __device__ void compute_attn_1rowblock(const Params &params, const int bi
         Tensor rP = flash::convert_type<Element>(acc_s);
         int block_row_idx = m_block * (kBlockM / 16) + tidx / 32;
         int block_col_idx = n_block * (kBlockN / 32);
+        // if (Return_softmax) {
+        //     Tensor rP_drop = make_fragment_like(rP);
+        //     cute::copy(rP, rP_drop);
+        //     dropout.template apply_dropout</*encode_dropout_in_sign_bit=*/true>(
+        //         rP_drop, block_row_idx, block_col_idx, kNWarps
+        //     );
+        //     cute::copy(rP_drop, tSgS);
+        //     tSgS.data() = tSgS.data() + (-kBlockN);
+        // }
+        // if (Is_dropout) {
+        //     dropout.apply_dropout(rP, block_row_idx, block_col_idx, kNWarps);
+        // }
 
         // Reshape rP from (MMA=4, MMA_M, MMA_N) to ((4, 2), MMA_M, MMA_N / 2)
         // if using m16n8k16 or (4, MMA_M, MMA_N) if using m16n8k8.
