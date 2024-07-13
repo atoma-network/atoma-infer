@@ -65,7 +65,7 @@ impl FlashAttention {
             let new_shape = Shape::from((b_sz, ngroups, num_heads_k, head_size_og)); 
 
             // Create new layout for q, maintaining the original start_offset
-            let new_q_l = Layout::contiguous_with_offset(&new_shape, q_l.start_offset())?.transpose(1, 2)?;
+            let new_q_l = Layout::contiguous_with_offset(&new_shape, q_l.start_offset()).transpose(1, 2)?;
 
             (new_q_l.clone(), Layout::contiguous(&new_shape), new_shape, ngroups, num_heads_k)
         } else {
