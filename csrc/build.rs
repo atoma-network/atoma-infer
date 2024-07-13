@@ -122,6 +122,7 @@ fn main() -> Result<()> {
         .arg("-U__CUDA_NO_HALF_CONVERSIONS__")
         .arg("-U__CUDA_NO_HALF2_OPERATORS__")
         .arg("-U__CUDA_NO_BFLOAT16_CONVERSIONS__")
+        .arg("-I/usr/local/lib/python3.10/dist-packages/torch/include/")
         .arg(cutlass_include_arg)
         .arg("--expt-relaxed-constexpr")
         .arg("--expt-extended-lambda")
@@ -134,7 +135,8 @@ fn main() -> Result<()> {
     builder.build_lib(&out_file);
 
     println!("cargo:rustc-link-search={}", build_dir.display());
-    println!("cargo:rustc-link-lib=static=flashattention");
+    println!("cargo:rustc-link-lib=flashattention");
+    println!("cargo:rustc-link-lib=torch");
     println!("cargo:rustc-link-lib=dylib=cudart");
     println!("cargo:rustc-link-lib=dylib=stdc++");
 
