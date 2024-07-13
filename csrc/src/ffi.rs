@@ -28,7 +28,7 @@ extern "C" {
         v_head_stride: u32,
         o_head_stride: u32,
 
-        num_splits: c_int,
+        num_splits: u32,
 
         b: u32,
         h: u32,
