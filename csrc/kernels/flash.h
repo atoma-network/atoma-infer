@@ -120,11 +120,11 @@ struct Flash_fwd_params : public Qkv_params {
     int window_size_left, window_size_right;
     float softcap;
 
-    // // Random state.
-    // at::PhiloxCudaState philox_args;
+    // Random state.
+    at::PhiloxCudaState philox_args;
 
-    // // Pointer to the RNG seed (idx 0) and offset (idx 1).
-    // uint64_t * rng_state;
+    // Pointer to the RNG seed (idx 0) and offset (idx 1).
+    uint64_t * rng_state;
 
     bool is_bf16;
     bool is_causal;
@@ -141,8 +141,7 @@ struct Flash_fwd_params : public Qkv_params {
     index_t alibi_slopes_batch_stride;
 
     bool unpadded_lse;  // For varlen paths: LSE is in [nheads, total_seqlen_q] format instead of [b, nheads, seqlen_q].
-    // TODO: add this optimization
-    // bool seqlenq_ngroups_swapped;  // q has been transposed from (b, 1, (nheads_kv ngroups), d) to (b, ngroups, nheads_kv, d).
+    bool seqlenq_ngroups_swapped;  // q has been transposed from (b, 1, (nheads_kv ngroups), d) to (b, ngroups, nheads_kv, d).
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////

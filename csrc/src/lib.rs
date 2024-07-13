@@ -79,7 +79,7 @@ impl FlashAttention {
     >(
         &self,
         q: &candle_core::CudaStorage,
-        q_l: &Layout,
+        q_l: &mut Layout,
         k: &candle_core::CudaStorage,
         k_l: &Layout,
         v: &candle_core::CudaStorage,
@@ -207,22 +207,22 @@ impl FlashAttention {
             is_causal = false;
         }
 
-        // TODO: Can this case be safely removed?
-        // let seqlenq_ngroups_swapped = seqlen_q == 1
-        //     && num_heads > num_heads_k
-        //     && window_size_left < 0
-        //     && window_size_right < 0
-        //     && head_size_og % 8 == 0
-        //     && self.alibi_slopes.is_none();
-        // // Faster to transpose q from (b, 1, (nheads_kv ngroups), d) to (b, ngroups, nheads_kv, d) in this case
-        // if seqlenq_ngroups_swapped {
-        //     let ngroups = num_heads / num_heads_k;
-        //     let new_shape = Shape::from((batch_size, num_heads_k, ngroups, head_size_og));
-        //     let mut new_layout = Layout::contiguous(&new_shape);
-        //     new_layout.transpose(1, 2);
-        //     *q_l = new_layout;
-        //     *out_l = new_layout;
-        // }
+        let seqlenq_ngroups_swapped = seqlen_q == 1
+            && num_heads > num_heads_k
+            && window_size_left < 0
+            && window_size_right < 0
+            && head_size_og % 8 == 0
+            && self.alibi_slopes.is_none();
+        // Faster to transpose q from (b, 1, (nheads_kv ngroups), d) to (b, ngroups, nheads_kv, d) in this case
+        if seqlenq_ngroups_swapped {
+            let ngroups = num_heads / num_heads_k;
+            let new_shape = Shape::from((batch_size, num_heads_k, ngroups, head_size_og));
+            let mut new_layout = Layout::contiguous(&new_shape);
+            new_layout.transpose(1, 2);
+            *q_l = new_layout;
+            out_l = new_layout;
+            out_shape = new_shape;
+        }
 
         let head_size = round_multiple(head_size_og, 8);
         let head_size_rounded = round_multiple(head_size, 32);
