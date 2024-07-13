@@ -125,6 +125,7 @@ fn main() -> Result<()> {
         .arg("-I/usr/local/lib/python3.10/dist-packages/torch/include/")
         .arg("-I/usr/local/lib/python3.10/dist-packages/torch/include/")
         .arg("-I/usr/local/lib/python3.10/dist-packages/torch/include/torch/csrc/api/include")
+        .arg("-DTORCH_CUDA_CU")
         .arg(cutlass_include_arg)
         .arg("--expt-relaxed-constexpr")
         .arg("--expt-extended-lambda")
