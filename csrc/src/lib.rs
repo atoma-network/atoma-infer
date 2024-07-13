@@ -51,6 +51,36 @@ impl FlashAttention {
         let k = k.slice(k_l.start_offset()..);
         let v = v.slice(v_l.start_offset()..);
 
+        let (b_sz, seqlen_q, num_heads, head_size_og) = q_l.shape().dims4()?;
+    let (_b_sz, seqlen_k, num_heads_k, _head_size_og) = k_l.shape().dims4()?;
+
+    let seqlenq_ngroups_swapped = seqlen_q == 1
+        && num_heads > num_heads_k
+        && self.window_size_left.unwrap_or(-1) < 0
+        && self.window_size_right.unwrap_or(-1) < 0
+        && self.p_dropout == 0.0
+        && head_size_og % 8 == 0
+        && self.alibi_slopes.is_none();
+
+    let mut new_seqlen_q = seqlen_q;
+    let mut new_num_heads = num_heads;
+
+    if seqlenq_ngroups_swapped {
+        let ngroups = num_heads / num_heads_k;
+        let new_shape = Shape::from([b_sz, num_heads_k, ngroups, head_size_og]);
+        
+        // Reshape q_l
+        *q_l = Layout::contiguous(&new_shape).transpose(1, 2)?;
+        
+        // Update out_shape and out_l
+        out_shape = new_shape;
+        out_l = Layout::contiguous(&out_shape).transpose(1, 2)?;
+
+        // Update seqlen_q and num_heads
+        new_seqlen_q = ngroups;
+        new_num_heads = num_heads_k;
+    }
+
         let q_stride = q_l.stride();
         let k_stride = k_l.stride();
         let v_stride = v_l.stride();
@@ -76,9 +106,7 @@ impl FlashAttention {
         if v_stride[v_rank - 1] != 1 {
             candle_core::bail!("the last dim of v must be contiguous {v_stride:?}")
         }
-
-        let (b_sz, seqlen_q, num_heads, head_size_og) = q_l.shape().dims4()?;
-        let (_b_sz, seqlen_k, num_heads_k, _head_size_og) = k_l.shape().dims4()?;
+        
         let expected_kv = (b_sz, seqlen_k, num_heads_k, head_size_og);
 
         if expected_kv != k_l.shape().dims4()? {
@@ -152,23 +180,6 @@ impl FlashAttention {
         };
         if seqlen_q == 1 && !self.alibi_slopes.is_some() {
             is_causal = 0;
-        }
-
-        let seqlenq_ngroups_swapped = seqlen_q == 1
-            && num_heads > num_heads_k
-            && window_size_left < 0
-            && window_size_right < 0
-            && head_size_og % 8 == 0
-            && self.alibi_slopes.is_none();
-        // Faster to transpose q from (b, 1, (nheads_kv ngroups), d) to (b, ngroups, nheads_kv, d) in this case
-        if seqlenq_ngroups_swapped {
-            let ngroups = num_heads / num_heads_k;
-            let new_shape = Shape::from((b_sz, num_heads_k, ngroups, head_size_og));
-            let mut new_layout = Layout::contiguous(&new_shape);
-            new_layout.transpose(1, 2);
-            *q_l = new_layout;
-            out_l = new_layout;
-            out_shape = new_shape;
         }
 
         let head_size = utils::round_multiple(head_size_og, 8);
@@ -281,6 +292,41 @@ impl FlashAttention {
     }
 }
 
+
+impl candle_core::CustomOp3 for FlashAttention {
+    fn name(&self) -> &'static str {
+        "flash-attn"
+    }
+
+    fn cpu_fwd(
+        &self,
+        _: &CpuStorage,
+        _: &Layout,
+        _: &CpuStorage,
+        _: &Layout,
+        _: &CpuStorage,
+        _: &Layout,
+    ) -> Result<(CpuStorage, Shape)> {
+        candle::bail!("no cpu support for flash-attn")
+    }
+
+    fn cuda_fwd(
+        &self,
+        q: &candle_core::CudaStorage,
+        q_l: &mut Layout,
+        k: &candle_core::CudaStorage,
+        k_l: &Layout,
+        v: &candle_core::CudaStorage,
+        v_l: &Layout,
+    ) -> Result<(candle_core::CudaStorage, Shape)> {
+        match q.dtype() {
+            candle_core::DType::F16 => self.cuda_fwd_t::<f16>(q, q_l, k, k_l, v, v_l, false),
+            candle_core::DType::BF16 => self.cuda_fwd_t::<bf16>(q, q_l, k, k_l, v, v_l, true),
+            dt => candle_core::bail!("flash-attn is only supported for f16/bf16 ({dt:?})"),
+        }
+    }
+}
+
 pub(crate) mod utils {
 
     use super::*;
@@ -363,8 +409,8 @@ pub(crate) mod utils {
         // Technically kBlockM = 64 only for the splitKV kernels, not the standard kernel.
         // In any case we don't expect seqlen_q to be larger than 64 for inference.
         let num_m_blocks = (max_seqlen_q + 64 - 1) / 64;
-        let cuda_multiprocessor_count = utils::get_multiprocessor_count(device_ordinal)?;
-        let num_splits = utils::num_splits_heuristic(
+        let cuda_multiprocessor_count = get_multiprocessor_count(device_ordinal)?;
+        let num_splits = num_splits_heuristic(
             batch_size * num_heads * num_m_blocks,
             cuda_multiprocessor_count,
             num_n_blocks,
@@ -384,12 +430,12 @@ pub(crate) mod utils {
             let error = cudaDeviceGetAttribute(
                 count.as_mut_ptr(),
                 cudaDeviceAttr::cudaDevAttrMultiProcessorCount,
-                device_index,
+                device_index as i32,
             );
             if error != cudaError::cudaSuccess {
                 return candle_core::bail!("CUDA error: {:?}", error);
             }
-            Ok(count.assume_init())
+            Ok(count.assume_init() as usize)
         }
     }
 }
