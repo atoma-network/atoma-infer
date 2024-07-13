@@ -139,9 +139,19 @@ fn main() -> Result<()> {
 
     println!("cargo:rustc-link-search={}", build_dir.display());
     println!("cargo:rustc-link-lib=flashattention");
-    println!("cargo:rustc-link-lib=torch");
     println!("cargo:rustc-link-lib=dylib=cudart");
     println!("cargo:rustc-link-lib=dylib=stdc++");
+
+    println!("cargo:rustc-link-search=native=/usr/local/lib/python3.10/dist-packages/torch/lib");
+    println!("cargo:rustc-link-search=native=/usr/local/lib");
+    
+    println!("cargo:rustc-link-lib=dylib=torch");
+    println!("cargo:rustc-link-lib=dylib=c10");
+    println!("cargo:rustc-link-lib=dylib=torch_cuda");
+    println!("cargo:rustc-link-lib=dylib=c10_cuda");
+    
+    println!("cargo:rustc-link-lib=dylib=cudart");
+    println!("cargo:rustc-link-lib=dylib=cuda");
 
     Ok(())
 }
