@@ -60,7 +60,7 @@ impl FlashAttention {
             && head_size_og % 8 == 0
             && self.alibi_slopes.is_none();
         // Faster to transpose q from (b, 1, (nheads_kv ngroups), d) to (b, ngroups, nheads_kv, d) in this case
-        let (q_l, out_shape, out_l, seqlen_q, num_heads) = if seqlenq_ngroups_swapped {
+        let (q_l, out_l, out_shape, seqlen_q, num_heads) = if seqlenq_ngroups_swapped {
             let ngroups = num_heads / num_heads_k;
             let new_shape = Shape::from((b_sz, ngroups, num_heads_k, head_size_og));
 
@@ -213,7 +213,6 @@ impl FlashAttention {
             head_size,
             seqlen_k,
             seqlen_q,
-            head_size_rounded,
             device.ordinal(),
         )?;
 
@@ -282,12 +281,8 @@ impl FlashAttention {
             )
         }
 
-        out_shape = if seqlenq_ngroups_swapped {
-            let out_shape = Shape::from((b_sz, 1, num_heads_k * seqlen_q, head_size_og));
-            let out_layout = Layout::contiguous(&out_shape);
-            *q_l = out_layout;
-            out_l = out_layout;
-            out_shape
+        let out_shape = if seqlenq_ngroups_swapped {
+            Shape::from((b_sz, 1, num_heads_k * seqlen_q, head_size_og))
         } else {
             out_shape
         };
