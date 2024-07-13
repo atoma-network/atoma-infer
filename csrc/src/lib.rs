@@ -52,34 +52,34 @@ impl FlashAttention {
         let v = v.slice(v_l.start_offset()..);
 
         let (b_sz, seqlen_q, num_heads, head_size_og) = q_l.shape().dims4()?;
-    let (_b_sz, seqlen_k, num_heads_k, _head_size_og) = k_l.shape().dims4()?;
+        let (_b_sz, seqlen_k, num_heads_k, _head_size_og) = k_l.shape().dims4()?;
 
-    let seqlenq_ngroups_swapped = seqlen_q == 1
-        && num_heads > num_heads_k
-        && self.window_size_left.unwrap_or(-1) < 0
-        && self.window_size_right.unwrap_or(-1) < 0
-        && self.p_dropout == 0.0
-        && head_size_og % 8 == 0
-        && self.alibi_slopes.is_none();
+        let seqlenq_ngroups_swapped = seqlen_q == 1
+            && num_heads > num_heads_k
+            && self.window_size_left.unwrap_or(-1) < 0
+            && self.window_size_right.unwrap_or(-1) < 0
+            && self.p_dropout == 0.0
+            && head_size_og % 8 == 0
+            && self.alibi_slopes.is_none();
 
-    let mut new_seqlen_q = seqlen_q;
-    let mut new_num_heads = num_heads;
+        let mut new_seqlen_q = seqlen_q;
+        let mut new_num_heads = num_heads;
 
-    if seqlenq_ngroups_swapped {
-        let ngroups = num_heads / num_heads_k;
-        let new_shape = Shape::from([b_sz, num_heads_k, ngroups, head_size_og]);
-        
-        // Reshape q_l
-        *q_l = Layout::contiguous(&new_shape).transpose(1, 2)?;
-        
-        // Update out_shape and out_l
-        out_shape = new_shape;
-        out_l = Layout::contiguous(&out_shape).transpose(1, 2)?;
+        if seqlenq_ngroups_swapped {
+            let ngroups = num_heads / num_heads_k;
+            let new_shape = Shape::from([b_sz, num_heads_k, ngroups, head_size_og]);
 
-        // Update seqlen_q and num_heads
-        new_seqlen_q = ngroups;
-        new_num_heads = num_heads_k;
-    }
+            // Reshape q_l
+            *q_l = Layout::contiguous(&new_shape).transpose(1, 2)?;
+
+            // Update out_shape and out_l
+            out_shape = new_shape;
+            out_l = Layout::contiguous(&out_shape).transpose(1, 2)?;
+
+            // Update seqlen_q and num_heads
+            new_seqlen_q = ngroups;
+            new_num_heads = num_heads_k;
+        }
 
         let q_stride = q_l.stride();
         let k_stride = k_l.stride();
@@ -106,7 +106,7 @@ impl FlashAttention {
         if v_stride[v_rank - 1] != 1 {
             candle_core::bail!("the last dim of v must be contiguous {v_stride:?}")
         }
-        
+
         let expected_kv = (b_sz, seqlen_k, num_heads_k, head_size_og);
 
         if expected_kv != k_l.shape().dims4()? {
@@ -291,7 +291,6 @@ impl FlashAttention {
         Ok((dst, out_shape))
     }
 }
-
 
 impl candle_core::CustomOp3 for FlashAttention {
     fn name(&self) -> &'static str {
