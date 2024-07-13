@@ -13,3 +13,7 @@ half = { version = "2.4.1", features = ["num-traits"] }
 [build-dependencies]
 anyhow = { version = "1", features = ["backtrace"] }
 bindgen_cuda = "0.1.5"
+
+[dev-dependencies]
+anyhow = { version = "1", features = ["backtrace"] }
+candle-nn = { version = "2.4.1", features = ["cuda"] }
