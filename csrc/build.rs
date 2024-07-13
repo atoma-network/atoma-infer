@@ -130,11 +130,11 @@ fn main() -> Result<()> {
 
     println!("cargo:info={builder:?}");
 
-    let out_file = build_dir.join(format!("libflashattention.a"));
+    let out_file = build_dir.join("libflashattention.a");
     builder.build_lib(&out_file);
 
     println!("cargo:rustc-link-search={}", build_dir.display());
-    println!("cargo:rustc-link-lib=csrc");
+    println!("cargo:rustc-link-lib=libflashattention");
     println!("cargo:rustc-link-lib=dylib=cudart");
     println!("cargo:rustc-link-lib=dylib=stdc++");
 
