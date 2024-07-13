@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include <cuda_runtime.h>
+#include <stdio.h>
 #include "static_switch.h"
 #include "flash.h"
 #include "flash_fwd_kernel.h"
@@ -18,6 +20,15 @@
 
 // Define a macro for unsupported architecture handling to centralize the error message
 #define FLASH_UNSUPPORTED_ARCH printf("FATAL: FlashAttention requires building with sm version sm80-sm90, but was built for < 8.0!");
+
+// Custom CUDA error checking function
+inline void checkCudaErrors(cudaError_t code, const char *file, int line) {
+    if (code != cudaSuccess) {
+        fprintf(stderr, "CUDA Error: %s %s %d\n", cudaGetErrorString(code), file, line);
+        exit(code);
+    }
+}
+#define CUDA_CHECK(ans) { checkCudaErrors((ans), __FILE__, __LINE__); }
 
 // Use a macro to clean up kernel definitions
 #define DEFINE_FLASH_FORWARD_KERNEL(kernelName, ...) \
@@ -63,17 +74,11 @@ void run_flash_fwd(Flash_fwd_params &params, cudaStream_t stream) {
                         SOFTCAP_SWITCH(params.softcap > 0.0, Is_softcap, [&] {
                             auto kernel = &flash_fwd_kernel<Kernel_traits, Is_dropout && !Is_softcap, Is_causal, Is_local && !Is_causal, Has_alibi, IsEvenMNConst && IsEvenKConst && !Is_local && !ReturnSoftmaxConst && Kernel_traits::kHeadDim <= 128, IsEvenKConst, Is_softcap, ReturnSoftmaxConst && Is_dropout && !Is_softcap>;
                             if (smem_size >= 48 * 1024) {
-                                cudaError_t status = cudaFuncSetAttribute(
-                                    kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, smem_size);
-                                if (status != cudaSuccess) {
-                                    // Handle error
-                                }
+                                CUDA_CHECK(cudaFuncSetAttribute(
+                                    kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, smem_size));
                             }
                             kernel<<<grid, Kernel_traits::kNThreads, smem_size, stream>>>(params);
-                            cudaError_t status = cudaGetLastError();
-                            if (status != cudaSuccess) {
-                                // Handle error
-                            }
+                            CUDA_CHECK(cudaGetLastError());
                         });
                     });
                 });
@@ -105,11 +110,11 @@ void run_flash_splitkv_fwd(Flash_fwd_params &params, cudaStream_t stream) {
                                 // auto kernel = &flash_fwd_splitkv_kernel<Kernel_traits, Is_causal, false, true, Split, Append_KV>;
                                 // auto kernel = &flash_fwd_splitkv_kernel<Kernel_traits, Is_causal, false, IsEvenKConst>;
                                 if (smem_size >= 48 * 1024) {
-                                    C10_CUDA_CHECK(cudaFuncSetAttribute(
+                                    CUDA_CHECK(cudaFuncSetAttribute(
                                         kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, smem_size));
                                 }
                                 kernel<<<grid, Kernel_traits::kNThreads, smem_size, stream>>>(params);
-                                C10_CUDA_KERNEL_LAUNCH_CHECK();
+                                CUDA_CHECK(cudaGetLastError());
                             });
                         });
                     });
@@ -139,7 +144,7 @@ void run_flash_splitkv_fwd(Flash_fwd_params &params, cudaStream_t stream) {
             } else if (params.num_splits <= 128) {
                 flash_fwd_splitkv_combine_kernel<Kernel_traits, kBlockM, 7, IsEvenKConst><<<grid_combine, Kernel_traits::kNThreads, 0, stream>>>(params);
             }
-            C10_CUDA_KERNEL_LAUNCH_CHECK();
+            CUDA_CHECK(cudaGetLastError());
         });
     }
 }
@@ -296,7 +301,7 @@ void run_mha_fwd_hdim224(Flash_fwd_params &params, cudaStream_t stream) {
     cudaError status_ = cudaDeviceGetAttribute(
         &max_smem_per_block, cudaDevAttrMaxSharedMemoryPerBlockOptin, device);
     if (status_ != cudaSuccess) {
-      C10_CUDA_CHECK(status_);
+      CUDA_CHECK(status_);
     }
     // printf("max_smem_per_block = %d\n", max_smem_per_block);
     DROPOUT_SWITCH(params.p_dropout < 1.f, Is_dropout, [&] {
@@ -325,7 +330,7 @@ void run_mha_fwd_hdim256(Flash_fwd_params &params, cudaStream_t stream) {
     status_ = cudaDeviceGetAttribute(
         &max_smem_per_block, cudaDevAttrMaxSharedMemoryPerBlockOptin, device);
     if (status_ != cudaSuccess) {
-      C10_CUDA_CHECK(status_);
+      CUDA_CHECK(status_);
     }
     // printf("max_smem_per_sm = %d, max_smem_per_block = %d\n", max_smem_per_sm, max_smem_per_block);
     DROPOUT_SWITCH(params.p_dropout < 1.f, Is_dropout, [&] {
