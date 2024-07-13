@@ -7,6 +7,7 @@ use candle_core::cuda::cudarc::driver::result::device;
 use candle_core::cuda_backend::cudarc::driver::DevicePtr;
 use candle_core::cuda_backend::WrapErr;
 use candle_core::{CpuStorage, DType, Device, Layout, Result, Shape, Tensor};
+use half::{bf16, f16};
 
 pub struct FlashAttention {
     pub softmax_scale: f32,
@@ -23,7 +24,7 @@ impl FlashAttention {
     >(
         &self,
         q: &candle_core::CudaStorage,
-        q_l: &mut Layout,
+        q_l: &Layout,
         k: &candle_core::CudaStorage,
         k_l: &Layout,
         v: &candle_core::CudaStorage,
@@ -56,9 +57,8 @@ impl FlashAttention {
 
         let seqlenq_ngroups_swapped = seqlen_q == 1
             && num_heads > num_heads_k
-            && self.window_size_left.unwrap_or(-1) < 0
-            && self.window_size_right.unwrap_or(-1) < 0
-            && self.p_dropout == 0.0
+            && self.window_size_left.is_none()
+            && self.window_size_right.is_none()
             && head_size_og % 8 == 0
             && self.alibi_slopes.is_none();
 
@@ -67,7 +67,7 @@ impl FlashAttention {
 
         if seqlenq_ngroups_swapped {
             let ngroups = num_heads / num_heads_k;
-            let new_shape = Shape::from([b_sz, num_heads_k, ngroups, head_size_og]);
+            let new_shape = Shape::from((b_sz, num_heads_k, ngroups, head_size_og));
 
             // Reshape q_l
             *q_l = Layout::contiguous(&new_shape).transpose(1, 2)?;
@@ -306,13 +306,13 @@ impl candle_core::CustomOp3 for FlashAttention {
         _: &CpuStorage,
         _: &Layout,
     ) -> Result<(CpuStorage, Shape)> {
-        candle::bail!("no cpu support for flash-attn")
+        candle_core::bail!("no cpu support for flash-attn")
     }
 
     fn cuda_fwd(
         &self,
         q: &candle_core::CudaStorage,
-        q_l: &mut Layout,
+        q_l: &Layout,
         k: &candle_core::CudaStorage,
         k_l: &Layout,
         v: &candle_core::CudaStorage,
