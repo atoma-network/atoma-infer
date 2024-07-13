@@ -192,7 +192,7 @@ impl FlashAttention {
             seqlen_k,
             seqlen_q,
             head_size_rounded,
-        );
+        )?;
 
         let mut softcap = self.softcap.unwrap_or(0.0);
         let (softmax_scale, scale_softmatx_log2) = if softcap > 0.0 {
@@ -340,7 +340,7 @@ fn compute_num_splits(
     max_seqlen_k: usize,
     max_seqlen_q: usize,
     head_size_rounded: usize,
-) -> i32 {
+) -> Result<i32> {
     let block_n = if head_size <= 64 {
         256
     } else if head_size <= 128 {
@@ -361,5 +361,5 @@ fn compute_num_splits(
     if num_splits > 128 {
         candle_core::bail!("num_splits > 128 not supported")
     }
-    num_splits
+    Ok(num_splits)
 }
