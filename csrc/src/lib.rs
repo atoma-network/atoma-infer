@@ -5,7 +5,7 @@ use std::mem::MaybeUninit;
 use candle_core::backend::BackendStorage;
 use candle_core::cuda_backend::cudarc::driver::DevicePtr;
 use candle_core::cuda_backend::WrapErr;
-use candle_core::{CpuStorage, DType, Device, Layout, Result, Shape, Tensor};
+use candle_core::{CpuStorage, DType, Layout, Result, Shape, Tensor};
 use half::{bf16, f16};
 
 pub struct FlashAttention {
@@ -62,15 +62,28 @@ impl FlashAttention {
         // Faster to transpose q from (b, 1, (nheads_kv ngroups), d) to (b, ngroups, nheads_kv, d) in this case
         let (q_l, out_shape, out_l, seqlen_q, num_heads) = if seqlenq_ngroups_swapped {
             let ngroups = num_heads / num_heads_k;
-            let new_shape = Shape::from((b_sz, ngroups, num_heads_k, head_size_og)); 
+            let new_shape = Shape::from((b_sz, ngroups, num_heads_k, head_size_og));
 
             // Create new layout for q, maintaining the original start_offset
-            let new_q_l = Layout::contiguous_with_offset(&new_shape, q_l.start_offset()).transpose(1, 2)?;
+            let new_q_l =
+                Layout::contiguous_with_offset(&new_shape, q_l.start_offset()).transpose(1, 2)?;
 
-            (new_q_l.clone(), Layout::contiguous(&new_shape), new_shape, ngroups, num_heads_k)
+            (
+                new_q_l,
+                Layout::contiguous(&new_shape),
+                new_shape,
+                ngroups,
+                num_heads_k,
+            )
         } else {
             let out_shape = q_l.shape().clone();
-            (q_l, Layout::contiguous(&out_shape), out_shape, seqlen_q, num_heads)
+            (
+                q_l.clone(),
+                Layout::contiguous(&out_shape),
+                out_shape,
+                seqlen_q,
+                num_heads,
+            )
         };
 
         let q_stride = q_l.stride();
@@ -386,7 +399,6 @@ pub(crate) mod utils {
         head_size: usize,
         max_seqlen_k: usize,
         max_seqlen_q: usize,
-        head_size_rounded: usize,
         device_ordinal: usize,
     ) -> Result<u32> {
         let block_n = if head_size <= 64 {
