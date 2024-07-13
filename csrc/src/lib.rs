@@ -3,7 +3,6 @@ mod ffi;
 use std::mem::MaybeUninit;
 
 use candle_core::backend::BackendStorage;
-use candle_core::cuda::cudarc::driver::result::device;
 use candle_core::cuda_backend::cudarc::driver::DevicePtr;
 use candle_core::cuda_backend::WrapErr;
 use candle_core::{CpuStorage, DType, Device, Layout, Result, Shape, Tensor};
@@ -34,9 +33,6 @@ impl FlashAttention {
         // https://github.com/Dao-AILab/flash-attention/blob/main/csrc/flash_attn/flash_api.cpp#L341
         let device = q.device();
 
-        let mut out_shape = q_l.shape().clone();
-        let mut out_l = Layout::contiguous(&out_shape);
-
         if q.dtype() != k.dtype() {
             candle_core::bail!("query and key must have the same dtype");
         }
@@ -44,6 +40,8 @@ impl FlashAttention {
         if q.dtype() != v.dtype() {
             candle_core::bail!("query and value must have the same dtype");
         }
+
+        // Faster to transpose q from (b, 1, (nheads_kv ngroups), d) to (b, ngroups, nheads_kv, d) in this case
 
         let q = q.as_cuda_slice::<T>()?;
         let k = k.as_cuda_slice::<T>()?;
@@ -61,25 +59,19 @@ impl FlashAttention {
             && self.window_size_right.is_none()
             && head_size_og % 8 == 0
             && self.alibi_slopes.is_none();
-
-        let mut new_seqlen_q = seqlen_q;
-        let mut new_num_heads = num_heads;
-
-        if seqlenq_ngroups_swapped {
+        // Faster to transpose q from (b, 1, (nheads_kv ngroups), d) to (b, ngroups, nheads_kv, d) in this case
+        let (q_l, out_shape, out_l, seqlen_q, num_heads) = if seqlenq_ngroups_swapped {
             let ngroups = num_heads / num_heads_k;
-            let new_shape = Shape::from((b_sz, num_heads_k, ngroups, head_size_og));
+            let new_shape = Shape::from((b_sz, ngroups, num_heads_k, head_size_og)); 
 
-            // Reshape q_l
-            *q_l = Layout::contiguous(&new_shape).transpose(1, 2)?;
+            // Create new layout for q, maintaining the original start_offset
+            let new_q_l = Layout::contiguous_with_offset(&new_shape, q_l.start_offset())?.transpose(1, 2)?;
 
-            // Update out_shape and out_l
-            out_shape = new_shape;
-            out_l = Layout::contiguous(&out_shape).transpose(1, 2)?;
-
-            // Update seqlen_q and num_heads
-            new_seqlen_q = ngroups;
-            new_num_heads = num_heads_k;
-        }
+            (new_q_l.clone(), Layout::contiguous(&new_shape), new_shape, ngroups, num_heads_k)
+        } else {
+            let out_shape = q_l.shape().clone();
+            (q_l, Layout::contiguous(&out_shape), out_shape, seqlen_q, num_heads)
+        };
 
         let q_stride = q_l.stride();
         let k_stride = k_l.stride();
@@ -432,7 +424,7 @@ pub(crate) mod utils {
                 device_index as i32,
             );
             if error != cudaError::cudaSuccess {
-                return candle_core::bail!("CUDA error: {:?}", error);
+                candle_core::bail!("CUDA error: {:?}", error)
             }
             Ok(count.assume_init() as usize)
         }
