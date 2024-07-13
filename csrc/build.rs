@@ -123,6 +123,8 @@ fn main() -> Result<()> {
         .arg("-U__CUDA_NO_HALF2_OPERATORS__")
         .arg("-U__CUDA_NO_BFLOAT16_CONVERSIONS__")
         .arg("-I/usr/local/lib/python3.10/dist-packages/torch/include/")
+        .arg("-I/usr/local/lib/python3.10/dist-packages/torch/include/")
+        .arg("-I/usr/local/lib/python3.10/dist-packages/torch/include/torch/csrc/api/include")
         .arg(cutlass_include_arg)
         .arg("--expt-relaxed-constexpr")
         .arg("--expt-extended-lambda")
