@@ -1,6 +1,9 @@
 mod ffi;
 
+use std::mem::MaybeUninit;
+
 use candle_core::backend::BackendStorage;
+use candle_core::cuda::cudarc::driver::result::device;
 use candle_core::cuda_backend::cudarc::driver::DevicePtr;
 use candle_core::cuda_backend::WrapErr;
 use candle_core::{CpuStorage, DType, Device, Layout, Result, Shape, Tensor};
@@ -29,6 +32,7 @@ impl FlashAttention {
     ) -> Result<(candle_core::CudaStorage, Shape)> {
         // https://github.com/Dao-AILab/flash-attention/blob/main/csrc/flash_attn/flash_api.cpp#L341
         let device = q.device();
+
         let mut out_shape = q_l.shape().clone();
         let mut out_l = Layout::contiguous(&out_shape);
 
@@ -172,7 +176,7 @@ impl FlashAttention {
 
         let elem_count = out_shape.elem_count();
         let dst = unsafe { device.alloc::<T>(elem_count) }.w()?;
-        let softmax_lse = dev
+        let softmax_lse = device
             .alloc_zeros::<f32>(b_sz * 128 * num_heads * seqlen_q)
             .w()?;
 
@@ -192,12 +196,13 @@ impl FlashAttention {
             seqlen_k,
             seqlen_q,
             head_size_rounded,
+            device.ordinal(),
         )?;
 
         let mut softcap = self.softcap.unwrap_or(0.0);
         let (softmax_scale, scale_softmatx_log2) = if softcap > 0.0 {
             softcap = self.softmax_scale / softcap;
-            (softcap, softcap * M_LOG2E)
+            (softcap, softcap * std::f32::consts::LOG2_E)
         } else {
             // Remove potential NaN
             softcap = 0.0;
@@ -235,7 +240,7 @@ impl FlashAttention {
                 /* k_head_stride  */ k_stride[k_rank - 2] as u32,
                 /* v_head_stride  */ v_stride[v_rank - 2] as u32,
                 /* o_head_stride  */ o_stride[o_rank - 2] as u32,
-                /* num_splits */ num_splits as u32,
+                /* num_splits */ num_splits,
                 /* b */ b_sz as u32,
                 /* h */ num_heads as u32,
                 /* h_k */ num_heads_k as u32,
@@ -264,6 +269,8 @@ impl FlashAttention {
             let out_layout = Layout::contiguous(&out_shape);
             *q_l = out_layout;
             out_l = out_layout;
+            out_shape
+        } else { 
             out_shape
         };
 
@@ -298,9 +305,9 @@ fn num_splits_heuristic(
     let mut max_efficiency = 0.0;
     let mut efficiency = Vec::with_capacity(max_splits as usize);
 
-    let ceil_div = |a: i32, b: i32| -> i32 { (a + b - 1) / b };
+    let ceil_div = |a: usize, b: usize| -> usize { (a + b - 1) / b };
 
-    let is_split_eligible = |num_splits: i32| -> bool {
+    let is_split_eligible = |num_splits: usize| -> bool {
         num_splits == 1
             || ceil_div(num_n_blocks, num_splits) != ceil_div(num_n_blocks, num_splits - 1)
     };
@@ -340,7 +347,8 @@ fn compute_num_splits(
     max_seqlen_k: usize,
     max_seqlen_q: usize,
     head_size_rounded: usize,
-) -> Result<i32> {
+    device_ordinal: usize,
+) -> Result<u32> {
     let block_n = if head_size <= 64 {
         256
     } else if head_size <= 128 {
@@ -352,14 +360,32 @@ fn compute_num_splits(
     // Technically kBlockM = 64 only for the splitKV kernels, not the standard kernel.
     // In any case we don't expect seqlen_q to be larger than 64 for inference.
     let num_m_blocks = (max_seqlen_q + 64 - 1) / 64;
+    let num_sms = get_multiprocessor_count(device_ordinal)?;
     let num_splits = num_splits_heuristic(
         batch_size * num_heads * num_m_blocks,
-        dprops.multiProcessorCount * 2,
+        dpro.multiProcessorCount * 2,
         num_n_blocks,
         128,
     );
     if num_splits > 128 {
         candle_core::bail!("num_splits > 128 not supported")
     }
-    Ok(num_splits)
+    Ok(num_splits as u32)
+}
+
+fn get_multiprocessor_count(device_index: usize) -> Result<usize> {
+    use cuda_runtime_sys::*;
+
+    unsafe {
+        let mut count = MaybeUninit::uninit();
+        let error = cudaDeviceGetAttribute(
+            count.as_mut_ptr(),
+            cudaDeviceAttr::cudaDevAttrMultiProcessorCount,
+            device_index
+        );
+        if error != cudaError::cudaSuccess {
+            return candle_core::bail!("CUDA error: {:?}", error);
+        }
+        Ok(count.assume_init())
+    }
 }
