@@ -92,7 +92,9 @@ impl FlashAttention {
         }
         if head_size_og % 8 != 0 {
             // TODO: Handle head sizes that are not a multiple of 8 via some padding.
-            candle_core::bail!("only supports head sizes that are a multiple of 8 (got {head_size_og})")
+            candle_core::bail!(
+                "only supports head sizes that are a multiple of 8 (got {head_size_og})"
+            )
         }
         if num_heads % num_heads_k != 0 {
             candle_core::bail!("number of k/v heads {num_heads_k} must divide number of heads in query {num_heads}")
@@ -169,10 +171,10 @@ impl FlashAttention {
             out_shape = new_shape;
         }
 
-        let head_size = round_multiple(head_size_og, 8);
-        let head_size_rounded = round_multiple(head_size, 32);
-        let seqlen_q_rounded = round_multiple(seqlen_q, 128);
-        let seqlen_k_rounded = round_multiple(seqlen_k, 128);
+        let head_size = utils::round_multiple(head_size_og, 8);
+        let head_size_rounded = utils::round_multiple(head_size, 32);
+        let seqlen_q_rounded = utils::round_multiple(seqlen_q, 128);
+        let seqlen_k_rounded = utils::round_multiple(seqlen_k, 128);
 
         let elem_count = out_shape.elem_count();
         let dst = unsafe { device.alloc::<T>(elem_count) }.w()?;
@@ -189,7 +191,7 @@ impl FlashAttention {
             window_size_right = seqlen_k as i32;
         }
 
-        let num_splits = compute_num_splits(
+        let num_splits = utils::compute_num_splits(
             b_sz,
             num_heads,
             head_size,
@@ -270,7 +272,7 @@ impl FlashAttention {
             *q_l = out_layout;
             out_l = out_layout;
             out_shape
-        } else { 
+        } else {
             out_shape
         };
 
@@ -279,113 +281,115 @@ impl FlashAttention {
     }
 }
 
+pub(crate) mod utils {
 
-fn round_multiple(x: usize, m: usize) -> usize {
-    (x + m - 1) / m * m
-}
-
-/// Find the number of splits that maximizes the occupancy. For example, if we have
-/// batch * n_heads = 48 and we have 108 SMs, having 2 splits (efficiency = 0.89) is
-/// better than having 3 splits (efficiency = 0.67). However, we also don't want too many
-/// splits as that would incur more HBM reads/writes.
-/// So we find the best efficiency, then find the smallest number of splits that gets 85%
-/// of the best efficiency.
-fn num_splits_heuristic(
-    batch_nheads_mblocks: usize,
-    num_sms: usize,
-    num_n_blocks: usize,
-    max_splits: usize,
-) -> usize {
-    // If we have enough to almost fill the SMs, then just use 1 split
-    if (batch_nheads_mblocks as f32) >= 0.8 * (num_sms as f32) {
-        return 1;
+    use super::*;
+    pub(crate) fn round_multiple(x: usize, m: usize) -> usize {
+        (x + m - 1) / m * m
     }
 
-    let max_splits = max_splits.min(num_sms).min(num_n_blocks);
-    let mut max_efficiency = 0.0;
-    let mut efficiency = Vec::with_capacity(max_splits as usize);
+    /// Find the number of splits that maximizes the occupancy. For example, if we have
+    /// batch * n_heads = 48 and we have 108 SMs, having 2 splits (efficiency = 0.89) is
+    /// better than having 3 splits (efficiency = 0.67). However, we also don't want too many
+    /// splits as that would incur more HBM reads/writes.
+    /// So we find the best efficiency, then find the smallest number of splits that gets 85%
+    /// of the best efficiency.
+    pub(crate) fn num_splits_heuristic(
+        batch_nheads_mblocks: usize,
+        num_sms: usize,
+        num_n_blocks: usize,
+        max_splits: usize,
+    ) -> usize {
+        // If we have enough to almost fill the SMs, then just use 1 split
+        if (batch_nheads_mblocks as f32) >= 0.8 * (num_sms as f32) {
+            return 1;
+        }
 
-    let ceil_div = |a: usize, b: usize| -> usize { (a + b - 1) / b };
+        let max_splits = max_splits.min(num_sms).min(num_n_blocks);
+        let mut max_efficiency = 0.0;
+        let mut efficiency = Vec::with_capacity(max_splits as usize);
 
-    let is_split_eligible = |num_splits: usize| -> bool {
-        num_splits == 1
-            || ceil_div(num_n_blocks, num_splits) != ceil_div(num_n_blocks, num_splits - 1)
-    };
+        let ceil_div = |a: usize, b: usize| -> usize { (a + b - 1) / b };
 
-    for num_splits in 1..=max_splits {
-        if !is_split_eligible(num_splits) {
-            efficiency.push(0.0);
-        } else {
-            let n_waves = (batch_nheads_mblocks * num_splits) as f32 / num_sms as f32;
-            let eff = n_waves / n_waves.ceil();
-            // println!("num_splits = {}, eff = {}", num_splits, eff);
-            if eff > max_efficiency {
-                max_efficiency = eff;
+        let is_split_eligible = |num_splits: usize| -> bool {
+            num_splits == 1
+                || ceil_div(num_n_blocks, num_splits) != ceil_div(num_n_blocks, num_splits - 1)
+        };
+
+        for num_splits in 1..=max_splits {
+            if !is_split_eligible(num_splits) {
+                efficiency.push(0.0);
+            } else {
+                let n_waves = (batch_nheads_mblocks * num_splits) as f32 / num_sms as f32;
+                let eff = n_waves / n_waves.ceil();
+                // println!("num_splits = {}, eff = {}", num_splits, eff);
+                if eff > max_efficiency {
+                    max_efficiency = eff;
+                }
+                efficiency.push(eff);
             }
-            efficiency.push(eff);
         }
+
+        for num_splits in 1..=max_splits {
+            if !is_split_eligible(num_splits) {
+                continue;
+            }
+            if efficiency[(num_splits - 1) as usize] >= 0.85 * max_efficiency {
+                // println!("num_splits chosen = {}", num_splits);
+                return num_splits;
+            }
+        }
+
+        1
     }
 
-    for num_splits in 1..=max_splits {
-        if !is_split_eligible(num_splits) {
-            continue;
-        }
-        if efficiency[(num_splits - 1) as usize] >= 0.85 * max_efficiency {
-            // println!("num_splits chosen = {}", num_splits);
-            return num_splits;
-        }
-    }
-
-    1
-}
-
-
-fn compute_num_splits(
-    batch_size: usize,
-    num_heads: usize,
-    head_size: usize,
-    max_seqlen_k: usize,
-    max_seqlen_q: usize,
-    head_size_rounded: usize,
-    device_ordinal: usize,
-) -> Result<u32> {
-    let block_n = if head_size <= 64 {
-        256
-    } else if head_size <= 128 {
-        128
-    } else {
-        64
-    };
-    let num_n_blocks = (max_seqlen_k + block_n - 1) / block_n;
-    // Technically kBlockM = 64 only for the splitKV kernels, not the standard kernel.
-    // In any case we don't expect seqlen_q to be larger than 64 for inference.
-    let num_m_blocks = (max_seqlen_q + 64 - 1) / 64;
-    let num_sms = get_multiprocessor_count(device_ordinal)?;
-    let num_splits = num_splits_heuristic(
-        batch_size * num_heads * num_m_blocks,
-        dpro.multiProcessorCount * 2,
-        num_n_blocks,
-        128,
-    );
-    if num_splits > 128 {
-        candle_core::bail!("num_splits > 128 not supported")
-    }
-    Ok(num_splits as u32)
-}
-
-fn get_multiprocessor_count(device_index: usize) -> Result<usize> {
-    use cuda_runtime_sys::*;
-
-    unsafe {
-        let mut count = MaybeUninit::uninit();
-        let error = cudaDeviceGetAttribute(
-            count.as_mut_ptr(),
-            cudaDeviceAttr::cudaDevAttrMultiProcessorCount,
-            device_index
+    pub(crate) fn compute_num_splits(
+        batch_size: usize,
+        num_heads: usize,
+        head_size: usize,
+        max_seqlen_k: usize,
+        max_seqlen_q: usize,
+        head_size_rounded: usize,
+        device_ordinal: usize,
+    ) -> Result<u32> {
+        let block_n = if head_size <= 64 {
+            256
+        } else if head_size <= 128 {
+            128
+        } else {
+            64
+        };
+        let num_n_blocks = (max_seqlen_k + block_n - 1) / block_n;
+        // Technically kBlockM = 64 only for the splitKV kernels, not the standard kernel.
+        // In any case we don't expect seqlen_q to be larger than 64 for inference.
+        let num_m_blocks = (max_seqlen_q + 64 - 1) / 64;
+        let cuda_multiprocessor_count = utils::get_multiprocessor_count(device_ordinal)?;
+        let num_splits = utils::num_splits_heuristic(
+            batch_size * num_heads * num_m_blocks,
+            cuda_multiprocessor_count,
+            num_n_blocks,
+            128,
         );
-        if error != cudaError::cudaSuccess {
-            return candle_core::bail!("CUDA error: {:?}", error);
+        if num_splits > 128 {
+            candle_core::bail!("num_splits > 128 not supported")
         }
-        Ok(count.assume_init())
+        Ok(num_splits as u32)
+    }
+
+    pub(crate) fn get_multiprocessor_count(device_index: usize) -> Result<usize> {
+        use cuda_runtime_sys::*;
+
+        unsafe {
+            let mut count = MaybeUninit::uninit();
+            let error = cudaDeviceGetAttribute(
+                count.as_mut_ptr(),
+                cudaDeviceAttr::cudaDevAttrMultiProcessorCount,
+                device_index,
+            );
+            if error != cudaError::cudaSuccess {
+                return candle_core::bail!("CUDA error: {:?}", error);
+            }
+            Ok(count.assume_init())
+        }
     }
 }
