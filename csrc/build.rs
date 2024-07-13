@@ -72,7 +72,7 @@ const KERNEL_FILES: [&str; 64] = [
 ];
 
 fn main() -> Result<()> {
-    std::env::set_var("RAYON_NUM_THREADS", "4");
+    std::env::set_var("RAYON_NUM_THREADS", "16");
     println!("cargo:rerun-if-changed=build.rs");
     for kernel_file in KERNEL_FILES.iter() {
         println!("cargo:rerun-if-changed={kernel_file}");
