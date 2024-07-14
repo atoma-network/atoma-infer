@@ -4,8 +4,7 @@
 use anyhow::{Context, Result};
 use std::path::PathBuf;
 
-const KERNEL_FILES: [&str; 65] = [
-    "kernels/flash_api.cu",
+const KERNEL_FILES: [&str; 64] = [
     "kernels/flash_fwd_hdim32_bf16_causal_sm80.cu",
     "kernels/flash_fwd_hdim32_bf16_sm80.cu",
     "kernels/flash_fwd_hdim32_fp16_causal_sm80.cu",
@@ -89,6 +88,7 @@ fn main() -> Result<()> {
     println!("cargo:rerun-if-changed=kernels/static_switch.h");
     println!("cargo:rerun-if-changed=kernels/rotary.h");
     println!("cargo:rerun-if-changed=kernels/alibi.h");
+    println!("cargo:rerun-if-changed=kernels/flash_api.cu");
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").context("OUT_DIR not set")?);
     let build_dir = match std::env::var("ATOMA_FLASH_ATTN_BUILD_DIR") {
         Err(_) =>
@@ -117,7 +117,7 @@ fn main() -> Result<()> {
         .kernel_paths(kernels)
         .out_dir(build_dir.clone())
         .arg("-std=c++17")
-        .arg("-O3")
+        .arg("-O2")
         .arg("-U__CUDA_NO_HALF_OPERATORS__")
         .arg("-U__CUDA_NO_HALF_CONVERSIONS__")
         .arg("-U__CUDA_NO_HALF2_OPERATORS__")
