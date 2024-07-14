@@ -110,10 +110,38 @@ fn main() -> Result<()> {
     let current_dir = std::env::current_dir()?;
     let cutlass_include_dir = current_dir.join("cutlass/include");
     let cutlass_include_arg = format!("-I{}", cutlass_include_dir.display());
+    let cutlass_include_arg = Box::leak(cutlass_include_arg.clone().into_boxed_str());
 
-    build_cuda_kernels(&build_dir, &cutlass_include_arg)?;
-    // Compile flash_api.cu separately
-    build_flash_api(&build_dir, &cutlass_include_arg)?;
+    // Create a single Builder instance
+    let create_builder = || {
+        bindgen_cuda::Builder::default()
+            .arg("-std=c++17")
+            .arg("-O2")
+            .arg("-U__CUDA_NO_HALF_OPERATORS__")
+            .arg("-U__CUDA_NO_HALF_CONVERSIONS__")
+            .arg("-U__CUDA_NO_HALF2_OPERATORS__")
+            .arg("-U__CUDA_NO_BFLOAT16_CONVERSIONS__")
+            .arg(cutlass_include_arg)
+            .arg("--expt-relaxed-constexpr")
+            .arg("--expt-extended-lambda")
+            .arg("--use_fast_math")
+            .arg("--verbose")
+    };
+
+    // Build main CUDA kernels
+    let main_kernels: Vec<_> = KERNEL_FILES.iter().map(|&s| s.to_string()).collect();
+    let main_builder = create_builder()
+        .kernel_paths(main_kernels)
+        .out_dir(build_dir.clone());
+    let main_out_file = build_dir.join("libflashattention_main.a");
+    main_builder.build_lib(&main_out_file);
+
+    // Build flash_api.cu
+    let flash_api_builder = create_builder()
+        .kernel_paths(vec!["kernels/flash_api.cu".to_string()])
+        .out_dir(build_dir.clone());
+    let flash_api_out_file = build_dir.join("libflash_api.a");
+    flash_api_builder.build_lib(&flash_api_out_file);
 
     println!("cargo:rustc-link-search={}", build_dir.display());
     println!("cargo:rustc-link-lib=static=flashattention_main");
@@ -124,7 +152,7 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn build_cuda_kernels(build_dir: &PathBuf, cutlass_include_arg: &String) -> Result<()> { 
+fn build_cuda_kernels(build_dir: &PathBuf, cutlass_include_arg: &String) -> Result<()> {
     let cutlass_include_arg = Box::leak(cutlass_include_arg.clone().into_boxed_str());
 
     let kernels = KERNEL_FILES.iter().collect();
