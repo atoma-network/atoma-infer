@@ -113,7 +113,7 @@ fn main() -> Result<()> {
     let cutlass_include_arg = Box::leak(cutlass_include_arg.into_boxed_str());
 
     let kernels = KERNEL_FILES.iter().collect();
-    let builder = bindgen_cuda::Builder::default()
+    let main_builder = bindgen_cuda::Builder::default()
         .kernel_paths(kernels)
         .out_dir(build_dir.clone())
         .arg("-std=c++17")
@@ -128,13 +128,33 @@ fn main() -> Result<()> {
         .arg("--use_fast_math")
         .arg("--verbose");
 
-    println!("cargo:info={builder:?}");
+    println!("cargo:info={main_builder:?}");
 
-    let out_file = build_dir.join("libflashattention.a");
-    builder.build_lib(&out_file);
+    let main_out_file = build_dir.join("libflashattention_main.a");
+    main_builder.build_lib(&main_out_file);
+
+    // Compile flash_api.cu separately
+    let flash_api_builder = bindgen_cuda::Builder::default()
+        .kernel_paths(vec!["kernels/flash_api.cu"])
+        .out_dir(build_dir.clone())
+        .arg("-std=c++17")
+        .arg("-O2")
+        .arg("-U__CUDA_NO_HALF_OPERATORS__")
+        .arg("-U__CUDA_NO_HALF_CONVERSIONS__")
+        .arg("-U__CUDA_NO_HALF2_OPERATORS__")
+        .arg("-U__CUDA_NO_BFLOAT16_CONVERSIONS__")
+        .arg(cutlass_include_arg)
+        .arg("--expt-relaxed-constexpr")
+        .arg("--expt-extended-lambda")
+        .arg("--use_fast_math")
+        .arg("--verbose");
+
+    let flash_api_out_file = build_dir.join("libflash_api.a");
+    flash_api_builder.build_lib(&flash_api_out_file);
 
     println!("cargo:rustc-link-search={}", build_dir.display());
-    println!("cargo:rustc-link-lib=flashattention");
+    println!("cargo:rustc-link-lib=static=flashattention_main");
+    println!("cargo:rustc-link-lib=static=flash_api");
     println!("cargo:rustc-link-lib=dylib=cudart");
     println!("cargo:rustc-link-lib=dylib=stdc++");
 
