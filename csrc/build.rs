@@ -110,7 +110,22 @@ fn main() -> Result<()> {
     let current_dir = std::env::current_dir()?;
     let cutlass_include_dir = current_dir.join("cutlass/include");
     let cutlass_include_arg = format!("-I{}", cutlass_include_dir.display());
-    let cutlass_include_arg = Box::leak(cutlass_include_arg.into_boxed_str());
+
+    build_cuda_kernels(&build_dir, &cutlass_include_arg)?;
+    // Compile flash_api.cu separately
+    build_flash_api(&build_dir, &cutlass_include_arg)?;
+
+    println!("cargo:rustc-link-search={}", build_dir.display());
+    println!("cargo:rustc-link-lib=static=flashattention_main");
+    println!("cargo:rustc-link-lib=static=flash_api");
+    println!("cargo:rustc-link-lib=dylib=cudart");
+    println!("cargo:rustc-link-lib=dylib=stdc++");
+
+    Ok(())
+}
+
+fn build_cuda_kernels(build_dir: &PathBuf, cutlass_include_arg: &String) -> Result<()> { 
+    let cutlass_include_arg = Box::leak(cutlass_include_arg.clone().into_boxed_str());
 
     let kernels = KERNEL_FILES.iter().collect();
     let main_builder = bindgen_cuda::Builder::default()
@@ -132,8 +147,12 @@ fn main() -> Result<()> {
 
     let main_out_file = build_dir.join("libflashattention_main.a");
     main_builder.build_lib(&main_out_file);
+    Ok(())
+}
 
-    // Compile flash_api.cu separately
+fn build_flash_api(build_dir: &PathBuf, cutlass_include_arg: &String) -> Result<()> {
+    let cutlass_include_arg = Box::leak(cutlass_include_arg.clone().into_boxed_str());
+
     let flash_api_builder = bindgen_cuda::Builder::default()
         .kernel_paths(vec!["kernels/flash_api.cu"])
         .out_dir(build_dir.clone())
@@ -151,12 +170,6 @@ fn main() -> Result<()> {
 
     let flash_api_out_file = build_dir.join("libflash_api.a");
     flash_api_builder.build_lib(&flash_api_out_file);
-
-    println!("cargo:rustc-link-search={}", build_dir.display());
-    println!("cargo:rustc-link-lib=static=flashattention_main");
-    println!("cargo:rustc-link-lib=static=flash_api");
-    println!("cargo:rustc-link-lib=dylib=cudart");
-    println!("cargo:rustc-link-lib=dylib=stdc++");
 
     Ok(())
 }
