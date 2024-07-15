@@ -4,7 +4,8 @@
 use anyhow::{Context, Result};
 use std::path::PathBuf;
 
-const KERNEL_FILES: [&str; 64] = [
+const KERNEL_FILES: [&str; 65] = [
+    "kernels/flash_api.cu",
     "kernels/flash_fwd_hdim32_bf16_causal_sm80.cu",
     "kernels/flash_fwd_hdim32_bf16_sm80.cu",
     "kernels/flash_fwd_hdim32_fp16_causal_sm80.cu",
@@ -116,8 +117,8 @@ fn main() -> Result<()> {
     let builder = bindgen_cuda::Builder::default()
         .kernel_paths(kernels)
         .out_dir(build_dir.clone())
-        .arg("-std=c++17")
-        .arg("-O3")
+        // .arg("-std=c++17")
+        // .arg("-O3")
         .arg("-U__CUDA_NO_HALF_OPERATORS__")
         .arg("-U__CUDA_NO_HALF_CONVERSIONS__")
         .arg("-U__CUDA_NO_HALF2_OPERATORS__")
