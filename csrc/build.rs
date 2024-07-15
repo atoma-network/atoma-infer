@@ -151,9 +151,9 @@ fn compile_flash_api(build_dir: &PathBuf) -> Result<()> {
 
     let status = Command::new("nvcc")
         .args(&[
-            "-c", format!("{current_dir:?}/kernels/flash_api.cu").as_str(),
+            "-c", format!("{}/kernels/flash_api.cu", current_dir.as_os_str().to_str().unwrap()).as_str(),
             "-o", format!("{build_dir:?}/flash_api.o").as_str(), 
-            "--include-path", format!("{current_dir:?}/cutlass/include/").as_str(), 
+            "--include-path", format!("{}/cutlass/include/", current_dir.as_os_str().to_str().unwrap()).as_str(), 
             "--expt-relaxed-constexpr",
             "-U__CUDA_NO_HALF_OPERATORS__",
             "-U__CUDA_NO_HALF_CONVERSIONS__",
