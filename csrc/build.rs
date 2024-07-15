@@ -86,7 +86,7 @@ fn main() -> Result<()> {
 
     println!("cargo:rerun-if-changed=build.rs");
     for kernel_file in KERNEL_FILES.iter() {
-        println!("cargo:rerun-if-changed=kernels/{kernel_file}");
+        println!("cargo:rerun-if-changed={kernel_file}");
     }
     println!("cargo:rerun-if-changed=kernels/flash_fwd_kernel.h");
     println!("cargo:rerun-if-changed=kernels/flash_fwd_launch_template.h");
@@ -98,7 +98,7 @@ fn main() -> Result<()> {
     println!("cargo:rerun-if-changed=kernels/block_info.h");
     println!("cargo:rerun-if-changed=kernels/static_switch.h");
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").context("OUT_DIR not set")?);
-    let build_dir = match std::env::var("CANDLE_FLASH_ATTN_BUILD_DIR") {
+    let build_dir = match std::env::var("ATOMA_FLASH_ATTN_BUILD_DIR") {
         Err(_) =>
         {
             #[allow(clippy::redundant_clone)]
@@ -115,8 +115,8 @@ fn main() -> Result<()> {
     };
     set_cuda_include_dir()?;
 
-    let ccbin_env = std::env::var("CANDLE_NVCC_CCBIN");
-    println!("cargo:rerun-if-env-changed=CANDLE_NVCC_CCBIN");
+    let ccbin_env = std::env::var("ATOMA_NVCC_CCBIN");
+    println!("cargo:rerun-if-env-changed=ATOMA_NVCC_CCBIN");
 
     let compute_cap = compute_cap()?;
 
