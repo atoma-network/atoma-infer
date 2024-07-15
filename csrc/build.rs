@@ -1,11 +1,10 @@
 // Build script to run nvcc and generate the C glue code for launching the flash-attention kernel.
 // The cuda build time is very long so one can set the ATOMA_FLASH_ATTN_BUILD_DIR environment
 // variable in order to cache the compiled artifacts and avoid recompiling too often.
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use std::path::PathBuf;
 
-const KERNEL_FILES: [&str; 65] = [
-    "kernels/flash_api.cu",
+const KERNEL_FILES: [&str; 64] = [
     "kernels/flash_fwd_hdim32_bf16_causal_sm80.cu",
     "kernels/flash_fwd_hdim32_bf16_sm80.cu",
     "kernels/flash_fwd_hdim32_fp16_causal_sm80.cu",
@@ -131,6 +130,8 @@ fn main() -> Result<()> {
 
     println!("cargo:info={builder:?}");
 
+    compile_flash_api(&build_dir)?;
+
     let out_file = build_dir.join(format!("libflashattention.a"));
     builder.build_lib(&out_file);
 
@@ -138,6 +139,35 @@ fn main() -> Result<()> {
     println!("cargo:rustc-link-lib=flashattention");
     println!("cargo:rustc-link-lib=dylib=cudart");
     println!("cargo:rustc-link-lib=dylib=stdc++");
+
+    Ok(())
+}
+
+
+fn compile_flash_api(build_dir: &PathBuf) -> Result<()> {
+    use std::process::Command;
+
+    let current_dir = std::env::current_dir()?;
+
+    let status = Command::new("nvcc")
+        .args(&[
+            "-c", format!("{current_dir:?}/csrc/kernels/flash_api.cu").as_str(),
+            "-o", format!("{build_dir:?}/flash_api.o").as_str(), 
+            "--include-path", format!("{current_dir:?}/cutlass/include/").as_str(), 
+            "--expt-relaxed-constexpr",
+            "-U__CUDA_NO_HALF_OPERATORS__",
+            "-U__CUDA_NO_HALF_CONVERSIONS__",
+            "-U__CUDA_NO_HALF2_OPERATORS__",
+            "-U__CUDA_NO_BFLOAT16_CONVERSIONS__",
+            "--expt-extended-lambda",
+            "--use_fast_math",
+            "--verbose"
+        ])
+        .status()?;
+
+    if !status.success() {
+        return Err(anyhow!("nvcc command failed"));
+    }
 
     Ok(())
 }
