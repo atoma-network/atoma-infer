@@ -144,57 +144,28 @@ fn compile_flash_api(build_dir: &PathBuf, cutlass_include_arg: &str) -> Result<(
     Ok(())
 }
 
-fn compile_cuda_files(build_dir: &PathBuf, cutlass_include_arg: &str) -> Result<()> {
-    let mut object_files = Vec::new();
+fn compile_cuda_files(build_dir: &PathBuf, cutlass_include_arg: &String) -> Result<()> {
+    let cutlass_include_arg = Box::leak(cutlass_include_arg.clone().into_boxed_str());
+    let kernels: Vec<_> = KERNEL_FILES.iter().map(|&s| s.to_string()).collect();
+    let builder = bindgen_cuda::Builder::default()
+        .kernel_paths(kernels)
+        .out_dir(build_dir.clone())
+        .arg("--gpu-architecture=sm_80") // Adjust as needed
+        .arg("-O2")
+        .arg(cutlass_include_arg)
+        .arg("-U__CUDA_NO_HALF_OPERATORS__")
+        .arg("-U__CUDA_NO_HALF_CONVERSIONS__")
+        .arg("-U__CUDA_NO_HALF2_OPERATORS__")
+        .arg("-U__CUDA_NO_BFLOAT16_CONVERSIONS__")
+        .arg("--expt-relaxed-constexpr")
+        .arg("--expt-extended-lambda")
+        .arg("--use_fast_math")
+        .arg("--verbose");
 
-    for kernel_file in &KERNEL_FILES {
-        let file_stem = std::path::Path::new(kernel_file)
-            .file_stem()
-            .and_then(std::ffi::OsStr::to_str)
-            .context("Failed to get file stem")?;
-        let output_file = build_dir.join(format!("{}.o", file_stem));
+    println!("cargo:info={builder:?}");
 
-        let status = Command::new("nvcc")
-            .args(&[
-                "-c",
-                kernel_file,
-                "-o", output_file.to_str().unwrap(),
-                "--gpu-architecture=sm_80", // Adjust as needed
-                "-O2",
-                cutlass_include_arg,
-                "-U__CUDA_NO_HALF_OPERATORS__",
-                "-U__CUDA_NO_HALF_CONVERSIONS__",
-                "-U__CUDA_NO_HALF2_OPERATORS__",
-                "-U__CUDA_NO_BFLOAT16_CONVERSIONS__",
-                "--expt-relaxed-constexpr",
-                "--expt-extended-lambda",
-                "--use_fast_math",
-                "--verbose"
-            ])
-            .status()
-            .with_context(|| format!("Failed to compile {}", kernel_file))?;
-
-        if !status.success() {
-            return Err(anyhow::anyhow!("nvcc command failed for {}", kernel_file));
-        }
-
-        object_files.push(output_file);
-    }
-
-    // Create libflashattention.a
-    let mut ar_command = Command::new("ar");
-    ar_command.arg("rcs").arg("libflashattention.a");
-    for obj_file in &object_files {
-        ar_command.arg(obj_file);
-    }
-    let status = ar_command
-        .current_dir(build_dir)
-        .status()
-        .context("Failed to create libflashattention.a")?;
-
-    if !status.success() {
-        return Err(anyhow::anyhow!("ar command for libflashattention.a failed"));
-    }
+    let out_file = build_dir.join("libflashattention.a");
+    builder.build_lib(&out_file);
 
     Ok(())
 }
