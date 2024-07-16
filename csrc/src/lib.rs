@@ -30,8 +30,11 @@ impl FlashAttention {
         v_l: &Layout,
         is_bf16: bool,
     ) -> Result<(candle_core::CudaStorage, Shape)> {
-        // https://github.com/Dao-AILab/flash-attention/blob/main/csrc/flash_attn/flash_api.cpp#L341
+        // https://github.com/Dao-AILab/flash-attention/blob/7551202cb2dd245432bc878447e19015c0af3c22/csrc/flash_attn/flash_api.cpp#L341
         let device = q.device();
+
+        // Check GPU device compatibility
+        utils::check_gpu_compatibility(device.ordinal())?;
 
         if q.dtype() != k.dtype() {
             candle_core::bail!("query and key must have the same dtype");
@@ -358,6 +361,463 @@ pub fn flash_attn(
         softcap,
     };
     q.apply_op3(k, v, op)
+}
+
+/// Flash-attention v2 layer.
+///
+/// This implements scaled dot-product attention, `softmax(Q @ K^T . softmax_scale) @ V`.
+/// Multi-query and grouped-query attention are supported by using tensors k and v with fewer heads
+/// than q, the number of heads in k and v has to be divisible by the number of heads in q.
+///
+/// # Arguments
+///
+/// * `q` - Query tensor with shape `(batch, seq_len_q, num_heads_q, head_size)`.
+/// * `k` - Key tensor with shape `(batch, seq_len_kv, num_heads_kv, head_size)`.
+/// * `v` - Value tensor with shape `(batch, seq_len_kv, num_heads_kv, head_size)`.
+/// * `window_size_left` - Limit left attention to value tokens.
+/// * `window_size_right` - Limit right attention to value tokens.
+///
+/// # Causal mask
+///
+/// `window_size_left=None` with `window_size_right=Some(0)` applies a causal mask to the result
+/// of  `Q @ K^T`
+///
+/// The resulting tensor has dimensions `(batch, seq_len_q, num_heads_q, head_size)`.
+pub fn flash_attn_windowed(
+    q: &Tensor,
+    k: &Tensor,
+    v: &Tensor,
+    softmax_scale: f32,
+    window_size_left: Option<usize>,
+    window_size_right: Option<usize>,
+) -> Result<Tensor> {
+    let op = FlashAttn {
+        softmax_scale,
+        alibi_slopes: None,
+        window_size_left,
+        window_size_right,
+    };
+    q.apply_op3(k, v, op)
+}
+
+/// Flash-attention v2 layer.
+///
+/// This implements scaled dot-product attention, `softmax(Q @ K^T . softmax_scale) @ V`.
+/// Multi-query and grouped-query attention are supported by using tensors k and v with fewer heads
+/// than q, the number of heads in k and v has to be divisible by the number of heads in q.
+///
+/// # Arguments
+///
+/// * `q` - Query tensor with shape `(batch, seq_len_q, num_heads_q, head_size)`.
+/// * `k` - Key tensor with shape `(batch, seq_len_kv, num_heads_kv, head_size)`.
+/// * `v` - Value tensor with shape `(batch, seq_len_kv, num_heads_kv, head_size)`.
+/// * `alibi_slopes` - Alibi slopes tensor with shape `(num_heads_q)`.
+///
+/// The resulting tensor has dimensions `(batch, seq_len_q, num_heads_q, head_size)`.
+pub fn flash_attn_alibi(
+    q: &Tensor,
+    k: &Tensor,
+    v: &Tensor,
+    alibi_slopes: &Tensor,
+    softmax_scale: f32,
+    causal: bool,
+) -> Result<Tensor> {
+    let window_size_left = None;
+    let window_size_right = if causal { Some(0) } else { None };
+
+    let op = FlashAttn {
+        softmax_scale,
+        alibi_slopes: Some(alibi_slopes.clone()),
+        window_size_left,
+        window_size_right,
+    };
+    q.apply_op3(k, v, op)
+}
+
+/// Flash-attention v2 layer.
+///
+/// This implements scaled dot-product attention, `softmax(Q @ K^T . softmax_scale) @ V`.
+/// Multi-query and grouped-query attention are supported by using tensors k and v with fewer heads
+/// than q, the number of heads in k and v has to be divisible by the number of heads in q.
+///
+/// # Arguments
+///
+/// * `q` - Query tensor with shape `(batch, seq_len_q, num_heads_q, head_size)`.
+/// * `k` - Key tensor with shape `(batch, seq_len_kv, num_heads_kv, head_size)`.
+/// * `v` - Value tensor with shape `(batch, seq_len_kv, num_heads_kv, head_size)`.
+/// * `alibi_slopes` - Alibi slopes tensor with shape `(num_heads_q)`.
+/// * `window_size_left` - Limit left attention to value tokens.
+/// * `window_size_right` - Limit right attention to value tokens.
+///
+/// # Causal mask
+///
+/// `window_size_left=None` with `window_size_right=Some(0)` applies a causal mask to the result
+/// of  `Q @ K^T`
+///
+/// The resulting tensor has dimensions `(batch, seq_len_q, num_heads_q, head_size)`.
+pub fn flash_attn_alibi_windowed(
+    q: &Tensor,
+    k: &Tensor,
+    v: &Tensor,
+    alibi_slopes: &Tensor,
+    softmax_scale: f32,
+    window_size_left: Option<usize>,
+    window_size_right: Option<usize>,
+) -> Result<Tensor> {
+    let op = FlashAttn {
+        softmax_scale,
+        alibi_slopes: Some(alibi_slopes.clone()),
+        window_size_left,
+        window_size_right,
+    };
+    q.apply_op3(k, v, op)
+}
+
+/// Flash-attention v2 layer, with variable sequence lengths.
+struct FlashAttnVarLen {
+    /// Softmax scale
+    pub softmax_scale: f32,
+    /// Maximum sequence length of Query tensor
+    pub max_seqlen_q: usize,
+    /// Maximum sequence length of Key tensor
+    pub max_seqlen_k: usize,
+    /// Cumulative sequence lengths for the query tensor,
+    /// of shape `[batch_size + 1, ]`
+    pub seqlens_q: Tensor,
+    /// Cumulative sequence lengths for the key tensor,
+    /// of shape `[batch_size + 1, ]`
+    pub seqlens_k: Tensor,
+    /// The sequence used for keys tensor. If given,
+    /// only this many elements of each batch element's keys are used,
+    /// of shape `[batch_size, ]`
+    pub seqused_k: Option<Tensor>,
+    /// Block table, used for paged attention algorithm
+    /// of shape [batch_size, max_num_block_per_sequence]
+    pub block_table: Option<Tensor>,
+    /// Alibi slopes, see https://nn.labml.ai/transformers/alibi/index.html,
+    /// of shape `[num_heads, ]` or `[batch_size, num_heads]`
+    pub alibi_slopes: Option<Tensor>,
+    /// Flags if attention is causal or not. If true, this means
+    /// that each token can only attend to itself and
+    /// the previous tokens within the attention algorithm
+    pub is_causal: bool,
+    /// Window size for left sided slicing attention
+    pub window_size_left: Option<usize>,
+    /// Window size for right sided slicing attention
+    pub window_size_right: Option<usize>,
+}
+
+impl FlashAttnVarLen {
+    fn cuda_fwd_t<
+        T: candle_core::cuda_backend::CudaDType
+            + candle_core::cuda_backend::cudarc::driver::DeviceRepr,
+    >(
+        &self,
+        q: &candle_core::CudaStorage,
+        q_l: &Layout, // shape: `[total_q,  num_heads, head_size]`, total_q := \sum_{i=0}^{b} s_i
+        k: &candle_core::CudaStorage,
+        k_l: &Layout, // shape: `[total_k, num_heads_k, head_size]`, total_k := \sum_{i=0}^{b} s_i or `[num_blocks, page_block_size, num_heads_k, head_size]` if `self.block_table.is_some()`.
+        v: &candle_core::CudaStorage,
+        v_l: &Layout, // shape: `[total_k, num_heads_k, head_size]`, total_k := \sum_{i=0}^{b} s_i or `[num_blocks, page_block_size, num_heads_k, head_size]` if `self.block_table.is_some()`.
+        is_bf16: bool,
+    ) -> Result<(candle_core::CudaStorage, Shape)> {
+        // https://github.com/Dao-AILab/flash-attention/blob/7551202cb2dd245432bc878447e19015c0af3c22/csrc/flash_attn/flash_api.cpp#L528
+        let dev = q.device();
+
+        // Check GPU device compatibility
+        utils::check_gpu_compatibility(dev.ordinal())?;
+
+        let out_shape = q_l.shape().clone();
+        let out_l = Layout::contiguous(&out_shape);
+
+        let (seqlens_q, seqlens_q_layout) = self.seqlens_q.storage_and_layout();
+        let seqlens_q = match &*seqlens_q {
+            candle_core::Storage::Cuda(c) => c.as_cuda_slice::<u32>()?, // Should be i32!
+            _ => candle_core::bail!("seqlens_q must be a cuda tensor"),
+        };
+        let seqlens_q = match seqlens_q_layout.contiguous_offsets() {
+            Some((o1, o2)) => seqlens_q.slice(o1..o2),
+            None => candle_core::bail!("seqlens_q has to be contiguous"),
+        };
+
+        let (seqlens_k, seqlens_k_layout) = self.seqlens_k.storage_and_layout();
+        let seqlens_k = match &*seqlens_k {
+            candle_core::Storage::Cuda(c) => c.as_cuda_slice::<u32>()?, // Should be i32!
+            _ => candle_core::bail!("seqlens_k must be a cuda tensor"),
+        };
+        let seqlens_k = match seqlens_k_layout.contiguous_offsets() {
+            Some((o1, o2)) => seqlens_k.slice(o1..o2),
+            None => candle_core::bail!("seqlens_k has to be contiguous"),
+        };
+
+        let q = q.as_cuda_slice::<f16>()?;
+        let k = k.as_cuda_slice::<f16>()?;
+        let v = v.as_cuda_slice::<f16>()?;
+        let q = q.slice(q_l.start_offset()..);
+        let k = k.slice(k_l.start_offset()..);
+        let v = v.slice(v_l.start_offset()..);
+
+        let q_stride = q_l.stride();
+        let k_stride = k_l.stride();
+        let v_stride = v_l.stride();
+        let o_stride = out_l.stride();
+
+        let q_rank = q_stride.len();
+        let k_rank = k_stride.len();
+        let v_rank = v_stride.len();
+        let o_rank = o_stride.len();
+
+        if q_rank != 3 || k_rank != 3 || v_rank != 3 {
+            candle_core::bail!(
+                "flash-attn-varlen expects input tensors of rank 3 (q: {q_rank}, k: {k_rank}, v: {v_rank}"
+            )
+        }
+        if q_stride[q_rank - 1] != 1 {
+            candle_core::bail!("the last dim of q must be contiguous {q_stride:?}")
+        }
+        if k_stride[k_rank - 1] != 1 {
+            candle_core::bail!("the last dim of k must be contiguous {k_stride:?}")
+        }
+        if v_stride[v_rank - 1] != 1 {
+            candle_core::bail!("the last dim of v must be contiguous {v_stride:?}")
+        }
+
+        let (block_table, block_table_layout) = if let Some(block_table) = &self.block_table {
+            let (block_table_storage, block_table_layout) = block_table.storage_and_layout();
+            let block_table = match &*block_table_storage {
+                candle_core::Storage::Cuda(c) => c.as_cuda_slice::<i32>()?,
+                _ => candle_core::bail!("block_table must be a cuda tensor"),
+            };
+            let block_table = block_table.slice(block_table_layout.start_offset()..);
+            let block_table_stride = block_table_layout.stride();
+            let block_table_rank = block_table_stride.len();
+            if block_table_stride[block_table_rank - 1] != 1 {
+                candle_core::bail!("block_table must be contiguous")
+            }
+            (Some(block_table), Some(block_table_layout))
+        } else {
+            (None, None)
+        };
+
+        let nseqlens_q = seqlens_q_layout.shape().dims1()?;
+        let batch_size = nseqlens_q - 1;
+        let (_total_q, num_heads, head_size_og) = q_l.shape().dims3()?;
+
+        let (num_blocks, total_k, num_heads_k, head_size_og) = if block_table.is_some() {
+            k_l.shape().dims4()?
+        } else {
+            let (total_k, num_heads_k, _head_size_og) = k_l.shape().dims3()?;
+            (0, total_k, num_heads_k, head_size_og)
+        };
+
+        let max_num_blocks_per_sequence = if let Some(layout) = block_table_layout {
+            let (_b_sz, max_num_blocks_per_sequence) = layout.shape().dims2()?;
+            max_num_blocks_per_sequence
+        } else {
+            0
+        };
+
+        let page_block_size = if block_table.is_some() { total_k } else { 1 };
+
+        if block_table.is_some() && page_block_size % 256 == 0 {
+            candle_core::bail!("page_block_size must be a multiple of 256")
+        }
+
+        if batch_size <= 0 {
+            candle_core::bail!("batch_size must be > 0")
+        }
+        if head_size_og > 256 {
+            candle_core::bail!("only supports head dimension at most 256 (got {head_size_og})")
+        }
+        if num_heads % num_heads_k != 0 {
+            candle_core::bail!("number of k/v heads {num_heads_k} must divide number of heads in query {num_heads}")
+        }
+
+        if let Some(layout) = block_table_layout {
+            if k_l.shape().dims4()? != (num_blocks, page_block_size, num_heads_k, head_size_og) {
+                candle_core::bail!(
+                    "shape mismatch of k (got {:?}) expected {:?}",
+                    k_l.shape(),
+                    (num_blocks, page_block_size, num_heads_k, head_size_og)
+                )
+            }
+            if v_l.shape().dims4()? != (num_blocks, page_block_size, num_heads_k, head_size_og) {
+                candle_core::bail!(
+                    "shape mismatch of v (got {:?}) expected {:?}",
+                    v_l.shape(),
+                    (num_blocks, page_block_size, num_heads_k, head_size_og)
+                )
+            }
+            if layout.shape().dims2()? != (batch_size, max_num_blocks_per_sequence) {
+                candle_core::bail!(
+                    "shape mismatch of block_table (got {:?}) expected {:?}",
+                    layout.shape(),
+                    (batch_size, max_num_blocks_per_sequence)
+                )
+            }
+        } else {
+            if k_l.shape().dims3()? != (total_k, num_heads_k, head_size_og) {
+                candle_core::bail!(
+                    "shape mismatch of k (got {:?}) expected {:?}",
+                    k_l.shape(),
+                    (total_k, num_heads_k, head_size_og)
+                )
+            }
+            if v_l.shape().dims3()? != (total_k, num_heads_k, head_size_og) {
+                candle_core::bail!(
+                    "shape mismatch of v (got {:?}) expected {:?}",
+                    v_l.shape(),
+                    (total_k, num_heads_k, head_size_og)
+                )
+            }
+        }
+
+        if seqlens_k_layout.shape().dims1()? != batch_size + 1 {
+            candle_core::bail!(
+                "shape mismatch of seqlens_k (got {:?}) expected {:?}",
+                seqlens_k_layout.shape(),
+                (batch_size + 1)
+            )
+        }
+        if seqlens_q_layout.shape().dims1()? != batch_size + 1 {
+            candle_core::bail!(
+                "shape mismatch of seqlens_q (got {:?}) expected {:?}",
+                seqlens_q_layout.shape(),
+                (batch_size + 1)
+            )
+        }
+
+        let nseqlens_q = seqlens_q_layout.shape().dims1()?;
+        if nseqlens_q < 2 {
+            candle_core::bail!("seqlens_q should have a len >= 2 {nseqlens_q}")
+        }
+        let nseqlens_k = seqlens_k_layout.shape().dims1()?;
+        if nseqlens_k != nseqlens_q {
+            candle_core::bail!("seqlens_q and seqlens_k should have the same number of elements {nseqlens_q} <> {nseqlens_k}")
+        }
+
+        let alibi_slopes_ptr = if let Some(alibi_slopes) = &self.alibi_slopes {
+            if alibi_slopes.dtype() != DType::F32 {
+                candle_core::bail!(
+                    "DType mismatch alibi_slopes {:?}, expected {:?}",
+                    alibi_slopes.dtype(),
+                    DType::F32
+                );
+            }
+
+            let (alibi_slopes, alibi_slopes_layout) = alibi_slopes.storage_and_layout();
+
+            if num_heads != alibi_slopes_layout.shape().dims1()? {
+                candle_core::bail!(
+                    "shape mismatch alibi_slopes {:?}, expected {:?}",
+                    alibi_slopes_layout.shape(),
+                    (num_heads)
+                );
+            }
+
+            let alibi_slopes = match &*alibi_slopes {
+                candle_core::Storage::Cuda(c) => c.as_cuda_slice::<f32>()?,
+                _ => candle_core::bail!("alibi_slopes must be a cuda tensor"),
+            };
+
+            let alibi_slopes = alibi_slopes.slice(alibi_slopes_layout.start_offset()..);
+
+            *alibi_slopes.device_ptr() as *const core::ffi::c_void
+        } else {
+            std::ptr::null()
+        };
+
+        // if window_size_left > self.max_seqlen_k or None => -1
+        let mut window_size_left = self
+            .window_size_left
+            .filter(|v| v <= &self.max_seqlen_k)
+            .map(|v| v as i32)
+            .unwrap_or(-1);
+
+        // if window_size_right > self.max_seqlen_k or None => -1
+        let mut window_size_right = self
+            .window_size_right
+            .filter(|v| v <= &self.max_seqlen_k)
+            .map(|v| v as i32)
+            .unwrap_or(-1);
+
+        let head_size = utils::round_multiple(head_size_og, 8);
+        let head_size_rounded = utils::round_multiple(head_size, 32);
+        let seqlen_q_rounded = utils::round_multiple(self.max_seqlen_q, 128);
+        let seqlen_k_rounded = utils::round_multiple(self.max_seqlen_k, 128);
+
+        let elem_count = out_shape.elem_count();
+        let dst = unsafe { dev.alloc::<f16>(elem_count) }.w()?;
+        let softmax_lse = dev
+            .alloc_zeros::<f32>(batch_size * num_heads * self.max_seqlen_q)
+            .w()?;
+
+        let is_bf16 = if is_bf16 { 1 } else { 0 };
+
+        // Causal is the special case where window_size_right == 0 and window_size_left < 0.
+        // Local is the more general case where window_size_right >= 0 or window_size_left >= 0.
+        let is_causal = if window_size_left < 0 && window_size_right == 0 {
+            1
+        } else {
+            0
+        };
+        if window_size_left < 0 && window_size_right >= 0 {
+            window_size_left = self.max_seqlen_k as i32;
+        }
+        if window_size_left >= 0 && window_size_right < 0 {
+            window_size_right = self.max_seqlen_k as i32;
+        }
+
+        unsafe {
+            let q_ptr = *q.device_ptr() as *const core::ffi::c_void;
+            let k_ptr = *k.device_ptr() as *const core::ffi::c_void;
+            let v_ptr = *v.device_ptr() as *const core::ffi::c_void;
+            let dst_ptr = *dst.device_ptr() as *const core::ffi::c_void;
+            let softmax_lse_ptr = *softmax_lse.device_ptr() as *const core::ffi::c_void;
+            let seqlens_q_ptr = *seqlens_q.device_ptr() as *const core::ffi::c_int;
+            let seqlens_k_ptr = *seqlens_k.device_ptr() as *const core::ffi::c_int;
+            ffi::run_mha(
+                q_ptr,
+                k_ptr,
+                v_ptr,
+                dst_ptr,
+                softmax_lse_ptr,
+                /* alibi_slopes_ptr */ alibi_slopes_ptr,
+                /* cu_seqlens_q_ptr */ seqlens_q_ptr,
+                /* cu_seqlens_k_ptr */ seqlens_k_ptr,
+                /* q_batch_stride */ 0,
+                /* k_batch_stride */ 0,
+                /* v_batch_stride */ 0,
+                /* o_batch_stride */ 0,
+                /* alibi_slopes_batch_stride */ 0,
+                /* q_row_stride   */ q_stride[q_rank - 3] as u32,
+                /* k_row_stride   */ k_stride[k_rank - 3] as u32,
+                /* v_row_stride   */ v_stride[v_rank - 3] as u32,
+                /* o_row_stride   */ o_stride[o_rank - 3] as u32,
+                /* q_head_stride  */ q_stride[q_rank - 2] as u32,
+                /* k_head_stride  */ k_stride[k_rank - 2] as u32,
+                /* v_head_stride  */ v_stride[v_rank - 2] as u32,
+                /* o_head_stride  */ o_stride[o_rank - 2] as u32,
+                /* b */ batch_size as u32,
+                /* h */ num_heads as u32,
+                /* h_k */ num_heads_k as u32,
+                /* d */ head_size as u32,
+                /* d_rounded */ head_size_rounded as u32,
+                /* softmax_scale*/ self.softmax_scale,
+                /* seqlen_q */ self.max_seqlen_q as u32,
+                /* seqlen_k */ self.max_seqlen_k as u32,
+                /* seqlen_q_rounded */ seqlen_q_rounded as u32,
+                /* seqlen_k_rounded */ seqlen_k_rounded as u32,
+                /* is_bf16 */ is_bf16,
+                /* is_causal */ is_causal,
+                /* window_size_left */ window_size_left,
+                /* window_size_right */ window_size_right,
+            )
+        }
+
+        let dst = candle_core::CudaStorage::wrap_cuda_slice(dst, dev.clone());
+        Ok((dst, out_shape))
+    }
 }
 
 pub(crate) mod utils {

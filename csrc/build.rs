@@ -75,7 +75,10 @@ const KERNEL_FILES: [&str; 64] = [
 
 fn main() -> Result<()> {
     println!("cargo:rerun-if-changed=build.rs");
-    for kernel_file in KERNEL_FILES.iter().chain(std::iter::once(&"kernels/flash_api.cu")) {
+    for kernel_file in KERNEL_FILES
+        .iter()
+        .chain(std::iter::once(&"kernels/flash_api.cu"))
+    {
         println!("cargo:rerun-if-changed={kernel_file}");
     }
     // Your existing rerun-if-changed statements for header files
@@ -83,7 +86,9 @@ fn main() -> Result<()> {
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").context("OUT_DIR not set")?);
     let build_dir = match std::env::var("ATOMA_FLASH_ATTN_BUILD_DIR") {
         Err(_) => out_dir.clone(),
-        Ok(build_dir) => PathBuf::from(build_dir).canonicalize().context("Failed to canonicalize build directory")?
+        Ok(build_dir) => PathBuf::from(build_dir)
+            .canonicalize()
+            .context("Failed to canonicalize build directory")?,
     };
     println!("cargo:warning=Build directory: {:?}", build_dir.display());
 
@@ -92,7 +97,7 @@ fn main() -> Result<()> {
     let cutlass_include_arg = format!("-I{}", cutlass_include_dir.display());
 
     compile_cuda_files(&build_dir, &cutlass_include_arg)?;
-    compile_flash_api(&build_dir, &cutlass_include_arg)?;
+    // compile_flash_api(&build_dir, &cutlass_include_arg)?;
 
     // Step 3: Link libraries
     println!("cargo:rustc-link-search={}", build_dir.display());
@@ -110,7 +115,8 @@ fn compile_flash_api(build_dir: &PathBuf, cutlass_include_arg: &str) -> Result<(
         .args(&[
             "-c",
             "kernels/flash_api.cu",
-            "-o", flash_api_o.to_str().unwrap(),
+            "-o",
+            flash_api_o.to_str().unwrap(),
             "--gpu-architecture=sm_80", // Adjust as needed
             "-O2",
             cutlass_include_arg,
@@ -121,7 +127,7 @@ fn compile_flash_api(build_dir: &PathBuf, cutlass_include_arg: &str) -> Result<(
             "--expt-relaxed-constexpr",
             "--expt-extended-lambda",
             "--use_fast_math",
-            "--verbose"
+            "--verbose",
         ])
         .status()
         .context("Failed to compile flash_api.cu")?;
