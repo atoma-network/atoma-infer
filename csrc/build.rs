@@ -91,11 +91,8 @@ fn main() -> Result<()> {
     let cutlass_include_dir = current_dir.join("cutlass/include");
     let cutlass_include_arg = format!("-I{}", cutlass_include_dir.display());
 
-    // Step 1: Compile flash_api.cu first
-    compile_flash_api(&build_dir, &cutlass_include_arg)?;
-
-    // Step 2: Compile all other CUDA files
     compile_cuda_files(&build_dir, &cutlass_include_arg)?;
+    compile_flash_api(&build_dir, &cutlass_include_arg)?;
 
     // Step 3: Link libraries
     println!("cargo:rustc-link-search={}", build_dir.display());
