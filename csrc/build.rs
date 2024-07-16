@@ -4,8 +4,8 @@
 use anyhow::{Context, Result};
 use std::path::PathBuf;
 
-const KERNEL_FILES: [&str; 65] = [
-    "kernels/flash_api.cu",
+const KERNEL_FILES: [&str; 64] = [
+    // "kernels/flash_api.cu",
     "kernels/flash_fwd_hdim32_bf16_causal_sm80.cu",
     "kernels/flash_fwd_hdim32_bf16_sm80.cu",
     "kernels/flash_fwd_hdim32_fp16_causal_sm80.cu",
@@ -136,6 +136,7 @@ fn main() -> Result<()> {
 
     println!("cargo:rustc-link-search={}", build_dir.display());
     println!("cargo:rustc-link-lib=flashattention");
+    println!("cargo:rustc-link-lib=flashapi");
     println!("cargo:rustc-link-lib=dylib=cudart");
     println!("cargo:rustc-link-lib=dylib=stdc++");
 
