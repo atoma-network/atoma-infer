@@ -111,7 +111,6 @@ fn compile_flash_api(build_dir: &PathBuf, cutlass_include_arg: &str) -> Result<(
             "-c",
             "kernels/flash_api.cu",
             "-o", flash_api_o.to_str().unwrap(),
-            "--gpu-architecture=sm_80", // Adjust as needed
             "-O2",
             cutlass_include_arg,
             "-U__CUDA_NO_HALF_OPERATORS__",
@@ -150,7 +149,6 @@ fn compile_cuda_files(build_dir: &PathBuf, cutlass_include_arg: &String) -> Resu
     let builder = bindgen_cuda::Builder::default()
         .kernel_paths(kernels)
         .out_dir(build_dir.clone())
-        .arg("--gpu-architecture=sm_80") // Adjust as needed
         .arg("-O2")
         .arg(cutlass_include_arg)
         .arg("-U__CUDA_NO_HALF_OPERATORS__")
