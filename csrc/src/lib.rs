@@ -712,6 +712,7 @@ impl FlashAttentionVarLen {
         };
 
         let page_block_size = if block_table_layout.is_some() { total_k } else { 1 };
+        panic!("page_block_size = {}", page_block_size);
 
         if !block_table_ptr.is_null() && page_block_size % 16 == 0 {
             // NOTE: We are following the vLLM flash attention fork, where the paged 
