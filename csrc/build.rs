@@ -5,71 +5,71 @@ use anyhow::{Context, Result};
 use std::path::PathBuf;
 use std::process::Command;
 
-const KERNEL_FILES: [&str; 64] = [
-    // "kernels/flash_api.cu",
-    "kernels/flash_fwd_hdim32_bf16_causal_sm80.cu",
+const KERNEL_FILES: [&str; 33] = [
+    "kernels/flash_api.cu",
+    // "kernels/flash_fwd_hdim32_bf16_causal_sm80.cu",
     "kernels/flash_fwd_hdim32_bf16_sm80.cu",
-    "kernels/flash_fwd_hdim32_fp16_causal_sm80.cu",
+    // "kernels/flash_fwd_hdim32_fp16_causal_sm80.cu",
     "kernels/flash_fwd_hdim32_fp16_sm80.cu",
-    "kernels/flash_fwd_hdim64_bf16_causal_sm80.cu",
+    // "kernels/flash_fwd_hdim64_bf16_causal_sm80.cu",
     "kernels/flash_fwd_hdim64_bf16_sm80.cu",
-    "kernels/flash_fwd_hdim64_fp16_causal_sm80.cu",
+    // "kernels/flash_fwd_hdim64_fp16_causal_sm80.cu",
     "kernels/flash_fwd_hdim64_fp16_sm80.cu",
-    "kernels/flash_fwd_hdim96_bf16_causal_sm80.cu",
+    // "kernels/flash_fwd_hdim96_bf16_causal_sm80.cu",
     "kernels/flash_fwd_hdim96_bf16_sm80.cu",
-    "kernels/flash_fwd_hdim96_fp16_causal_sm80.cu",
+    // "kernels/flash_fwd_hdim96_fp16_causal_sm80.cu",
     "kernels/flash_fwd_hdim96_fp16_sm80.cu",
-    "kernels/flash_fwd_hdim128_bf16_causal_sm80.cu",
+    // "kernels/flash_fwd_hdim128_bf16_causal_sm80.cu",
     "kernels/flash_fwd_hdim128_bf16_sm80.cu",
-    "kernels/flash_fwd_hdim128_fp16_causal_sm80.cu",
+    // "kernels/flash_fwd_hdim128_fp16_causal_sm80.cu",
     "kernels/flash_fwd_hdim128_fp16_sm80.cu",
-    "kernels/flash_fwd_hdim160_bf16_causal_sm80.cu",
+    // "kernels/flash_fwd_hdim160_bf16_causal_sm80.cu",
     "kernels/flash_fwd_hdim160_bf16_sm80.cu",
-    "kernels/flash_fwd_hdim160_fp16_causal_sm80.cu",
+    // "kernels/flash_fwd_hdim160_fp16_causal_sm80.cu",
     "kernels/flash_fwd_hdim160_fp16_sm80.cu",
-    "kernels/flash_fwd_hdim192_bf16_causal_sm80.cu",
+    // "kernels/flash_fwd_hdim192_bf16_causal_sm80.cu",
     "kernels/flash_fwd_hdim192_bf16_sm80.cu",
-    "kernels/flash_fwd_hdim192_fp16_causal_sm80.cu",
+    // "kernels/flash_fwd_hdim192_fp16_causal_sm80.cu",
     "kernels/flash_fwd_hdim192_fp16_sm80.cu",
-    "kernels/flash_fwd_hdim224_bf16_causal_sm80.cu",
+    // "kernels/flash_fwd_hdim224_bf16_causal_sm80.cu",
     "kernels/flash_fwd_hdim224_bf16_sm80.cu",
-    "kernels/flash_fwd_hdim224_fp16_causal_sm80.cu",
+    // "kernels/flash_fwd_hdim224_fp16_causal_sm80.cu",
     "kernels/flash_fwd_hdim224_fp16_sm80.cu",
-    "kernels/flash_fwd_hdim256_bf16_causal_sm80.cu",
+    // "kernels/flash_fwd_hdim256_bf16_causal_sm80.cu",
     "kernels/flash_fwd_hdim256_bf16_sm80.cu",
-    "kernels/flash_fwd_hdim256_fp16_causal_sm80.cu",
+    // "kernels/flash_fwd_hdim256_fp16_causal_sm80.cu",
     "kernels/flash_fwd_hdim256_fp16_sm80.cu",
-    "kernels/flash_fwd_split_hdim32_bf16_causal_sm80.cu",
+    // "kernels/flash_fwd_split_hdim32_bf16_causal_sm80.cu",
     "kernels/flash_fwd_split_hdim32_bf16_sm80.cu",
-    "kernels/flash_fwd_split_hdim32_fp16_causal_sm80.cu",
+    // "kernels/flash_fwd_split_hdim32_fp16_causal_sm80.cu",
     "kernels/flash_fwd_split_hdim32_fp16_sm80.cu",
-    "kernels/flash_fwd_split_hdim64_bf16_causal_sm80.cu",
+    // "kernels/flash_fwd_split_hdim64_bf16_causal_sm80.cu",
     "kernels/flash_fwd_split_hdim64_bf16_sm80.cu",
-    "kernels/flash_fwd_split_hdim64_fp16_causal_sm80.cu",
+    // "kernels/flash_fwd_split_hdim64_fp16_causal_sm80.cu",
     "kernels/flash_fwd_split_hdim64_fp16_sm80.cu",
-    "kernels/flash_fwd_split_hdim96_bf16_causal_sm80.cu",
+    // "kernels/flash_fwd_split_hdim96_bf16_causal_sm80.cu",
     "kernels/flash_fwd_split_hdim96_bf16_sm80.cu",
-    "kernels/flash_fwd_split_hdim96_fp16_causal_sm80.cu",
+    // "kernels/flash_fwd_split_hdim96_fp16_causal_sm80.cu",
     "kernels/flash_fwd_split_hdim96_fp16_sm80.cu",
-    "kernels/flash_fwd_split_hdim128_bf16_causal_sm80.cu",
+    // "kernels/flash_fwd_split_hdim128_bf16_causal_sm80.cu",
     "kernels/flash_fwd_split_hdim128_bf16_sm80.cu",
-    "kernels/flash_fwd_split_hdim128_fp16_causal_sm80.cu",
+    // "kernels/flash_fwd_split_hdim128_fp16_causal_sm80.cu",
     "kernels/flash_fwd_split_hdim128_fp16_sm80.cu",
-    "kernels/flash_fwd_split_hdim160_bf16_causal_sm80.cu",
+    // "kernels/flash_fwd_split_hdim160_bf16_causal_sm80.cu",
     "kernels/flash_fwd_split_hdim160_bf16_sm80.cu",
-    "kernels/flash_fwd_split_hdim160_fp16_causal_sm80.cu",
+    // "kernels/flash_fwd_split_hdim160_fp16_causal_sm80.cu",
     "kernels/flash_fwd_split_hdim160_fp16_sm80.cu",
-    "kernels/flash_fwd_split_hdim192_bf16_causal_sm80.cu",
+    // "kernels/flash_fwd_split_hdim192_bf16_causal_sm80.cu",
     "kernels/flash_fwd_split_hdim192_bf16_sm80.cu",
-    "kernels/flash_fwd_split_hdim192_fp16_causal_sm80.cu",
+    // "kernels/flash_fwd_split_hdim192_fp16_causal_sm80.cu",
     "kernels/flash_fwd_split_hdim192_fp16_sm80.cu",
-    "kernels/flash_fwd_split_hdim224_bf16_causal_sm80.cu",
+    // "kernels/flash_fwd_split_hdim224_bf16_causal_sm80.cu",
     "kernels/flash_fwd_split_hdim224_bf16_sm80.cu",
-    "kernels/flash_fwd_split_hdim224_fp16_causal_sm80.cu",
+    // "kernels/flash_fwd_split_hdim224_fp16_causal_sm80.cu",
     "kernels/flash_fwd_split_hdim224_fp16_sm80.cu",
-    "kernels/flash_fwd_split_hdim256_bf16_causal_sm80.cu",
+    // "kernels/flash_fwd_split_hdim256_bf16_causal_sm80.cu",
     "kernels/flash_fwd_split_hdim256_bf16_sm80.cu",
-    "kernels/flash_fwd_split_hdim256_fp16_causal_sm80.cu",
+    // "kernels/flash_fwd_split_hdim256_fp16_causal_sm80.cu",
     "kernels/flash_fwd_split_hdim256_fp16_sm80.cu",
 ];
 
@@ -92,7 +92,7 @@ fn main() -> Result<()> {
     let cutlass_include_arg = format!("-I{}", cutlass_include_dir.display());
 
     compile_cuda_files(&build_dir, &cutlass_include_arg)?;
-    compile_flash_api(&build_dir, &cutlass_include_arg)?;
+    // compile_flash_api(&build_dir, &cutlass_include_arg)?;
 
     // Step 3: Link libraries
     println!("cargo:rustc-link-search={}", build_dir.display());
@@ -149,12 +149,13 @@ fn compile_cuda_files(build_dir: &PathBuf, cutlass_include_arg: &String) -> Resu
     let builder = bindgen_cuda::Builder::default()
         .kernel_paths(kernels)
         .out_dir(build_dir.clone())
-        .arg("-O2")
-        .arg(cutlass_include_arg)
+        .arg("-std=c++17")
+        .arg("-O3")
         .arg("-U__CUDA_NO_HALF_OPERATORS__")
         .arg("-U__CUDA_NO_HALF_CONVERSIONS__")
         .arg("-U__CUDA_NO_HALF2_OPERATORS__")
         .arg("-U__CUDA_NO_BFLOAT16_CONVERSIONS__")
+        .arg("-Icutlass/include")
         .arg("--expt-relaxed-constexpr")
         .arg("--expt-extended-lambda")
         .arg("--use_fast_math")
