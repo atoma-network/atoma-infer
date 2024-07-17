@@ -118,7 +118,7 @@ fn compile_flash_api(build_dir: &PathBuf, cutlass_include_arg: &str) -> Result<(
             "-o",
             flash_api_o.to_str().unwrap(),
             "-O2",
-            "--gpu-architecture=sm_89",
+            // "--gpu-architecture=sm_89",
             cutlass_include_arg,
             "-U__CUDA_NO_HALF_OPERATORS__",
             "-U__CUDA_NO_HALF_CONVERSIONS__",

@@ -587,9 +587,6 @@ impl FlashAttentionVarLen {
         // Check GPU device compatibility
         utils::check_gpu_compatibility(dev.ordinal())?;
 
-        let out_shape = q_l.shape().clone();
-        let out_l = Layout::contiguous(&out_shape);
-
         let (seqlens_q, seqlens_q_layout) = self.seqlens_q.storage_and_layout();
         let seqlens_q = match &*seqlens_q {
             candle_core::Storage::Cuda(c) => c.as_cuda_slice::<u32>()?, // Should be i32!
@@ -976,7 +973,7 @@ impl FlashAttentionVarLen {
                 /* h_k */ num_heads_k as u32,
                 /* d */ head_size as u32,
                 /* d_rounded */ head_size_rounded as u32,
-                /* softmax_scale*/ self.softmax_scale,
+                /* softmax_scale*/ softmax_scale,
                 /* scale_softmatx_log2 */ scale_softmatx_log2,
                 /* block_table */ block_table_ptr,
                 /* block_table_batch_stride */ block_table_batch_stride,
