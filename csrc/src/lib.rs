@@ -620,8 +620,7 @@ impl FlashAttentionVarLen {
         let batch_size = nseqlens_q - 1;
         let (_total_q, num_heads, head_size_og) = q_l.shape().dims3()?;
 
-        let block_table = self.block_table.clone();
-        let block_table_data = block_table.as_ref().map(|block_table| -> Result<_> {
+        let (block_table, block_table_layout) = if let Some(block_table) = &self.block_table {
             let (block_table_storage, block_table_layout) = block_table.storage_and_layout();
             let block_table = match &*block_table_storage {
                 candle_core::Storage::Cuda(c) => {
@@ -633,14 +632,14 @@ impl FlashAttentionVarLen {
                         candle_core::bail!("block_table must be contiguous")
                     }
                     block_table
-                }
+                },
                 _ => candle_core::bail!("block_table must be a cuda tensor"),
             };
-            Ok((block_table, block_table_layout))
-        }).transpose()?;
-        let (block_table, block_table_layout) = match block_table_data {
-            Some(data) => (Some(data.0), Some(data.1)),
-            _ => (None, None),
+            // Clone block_table_storage to extend its lifetime
+            let block_table_storage = block_table_storage.clone();
+            (Some((block_table, block_table_storage)), Some(block_table_layout))
+        } else {
+            (None, None)
         };
 
         let (num_blocks, total_k, num_heads_k, head_size_og) = if block_table.is_some() {
