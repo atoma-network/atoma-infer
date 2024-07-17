@@ -719,7 +719,7 @@ impl FlashAttentionVarLen {
             // repository, the paged block size must be divisible by 256, instead.
             // TODO: benchmark the performance of block sizes such as
             // [16, 32, 64, 128, 256]
-            candle_core::bail!("page_block_size must be a multiple of 16")
+            candle_core::bail!("page_block_size must be a multiple of 16, got {page_block_size}")
         }
 
         if batch_size <= 0 {
@@ -741,21 +741,21 @@ impl FlashAttentionVarLen {
         if let Some(layout) = block_table_layout {
             if k_l.shape().dims4()? != (num_blocks, page_block_size, num_heads_k, head_size_og) {
                 candle_core::bail!(
-                    "shape mismatch of k (got {:?}) expected {:?}",
+                    "shape mismatch of k (got {:?}) expected {:?})",
                     k_l.shape(),
                     (num_blocks, page_block_size, num_heads_k, head_size_og)
                 )
             }
             if v_l.shape().dims4()? != (num_blocks, page_block_size, num_heads_k, head_size_og) {
                 candle_core::bail!(
-                    "shape mismatch of v (got {:?}) expected {:?}",
+                    "shape mismatch of v (got {:?}) expected {:?})",
                     v_l.shape(),
                     (num_blocks, page_block_size, num_heads_k, head_size_og)
                 )
             }
             if layout.shape().dims2()? != (batch_size, max_num_blocks_per_sequence) {
                 candle_core::bail!(
-                    "shape mismatch of block_table (got {:?}) expected {:?}",
+                    "shape mismatch of block_table (got {:?}) expected {:?})",
                     layout.shape(),
                     (batch_size, max_num_blocks_per_sequence)
                 )
@@ -763,14 +763,14 @@ impl FlashAttentionVarLen {
         } else {
             if k_l.shape().dims3()? != (total_k, num_heads_k, head_size_og) {
                 candle_core::bail!(
-                    "shape mismatch of k (got {:?}) expected {:?}",
+                    "shape mismatch of k (got {:?}) expected {:?})",
                     k_l.shape(),
                     (total_k, num_heads_k, head_size_og)
                 )
             }
             if v_l.shape().dims3()? != (total_k, num_heads_k, head_size_og) {
                 candle_core::bail!(
-                    "shape mismatch of v (got {:?}) expected {:?}",
+                    "shape mismatch of v (got {:?}) expected {:?})",
                     v_l.shape(),
                     (total_k, num_heads_k, head_size_og)
                 )
@@ -779,14 +779,14 @@ impl FlashAttentionVarLen {
 
         if seqlens_k_layout.shape().dims1()? != batch_size + 1 {
             candle_core::bail!(
-                "shape mismatch of seqlens_k (got {:?}) expected {:?}",
+                "shape mismatch of seqlens_k (got {:?}) expected {:?})",
                 seqlens_k_layout.shape(),
                 (batch_size + 1)
             )
         }
         if seqlens_q_layout.shape().dims1()? != batch_size + 1 {
             candle_core::bail!(
-                "shape mismatch of seqlens_q (got {:?}) expected {:?}",
+                "shape mismatch of seqlens_q (got {:?}) expected {:?})",
                 seqlens_q_layout.shape(),
                 (batch_size + 1)
             )

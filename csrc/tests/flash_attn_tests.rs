@@ -146,8 +146,8 @@ fn flash_attn_varlen_with_block_table() -> Result<()> {
     let v = (&q / 50.)?.reshape((num_blocks, block_size, 2, 8))?;
     let q = (&q / 30.)?;
 
-    let seqlens_q = Tensor::new(&[0u32, 16u32], &device)?;
-    let seqlens_k = Tensor::new(&[0u32, 16u32], &device)?;
+    let seqlens_q = Tensor::new(&[0u32, 16u32, 32u32], &device)?;
+    let seqlens_k = Tensor::new(&[0u32, 16u32, 32u32], &device)?;
 
     let ys = {
         // let q = q.transpose(0, 1)?;
