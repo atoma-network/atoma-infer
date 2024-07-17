@@ -356,7 +356,6 @@ pub fn flash_attn(
     k: &Tensor,
     v: &Tensor,
     softmax_scale: f32,
-    softcap: Option<f32>,
     causal: bool,
 ) -> Result<Tensor> {
     let window_size_left = None;
@@ -367,7 +366,7 @@ pub fn flash_attn(
         alibi_slopes: None,
         window_size_left,
         window_size_right,
-        softcap,
+        softcap: None,
     };
     q.apply_op3(k, v, op)
 }
@@ -400,11 +399,12 @@ pub fn flash_attn_windowed(
     window_size_left: Option<usize>,
     window_size_right: Option<usize>,
 ) -> Result<Tensor> {
-    let op = FlashAttn {
+    let op = FlashAttention {
         softmax_scale,
         alibi_slopes: None,
         window_size_left,
         window_size_right,
+        softcap: None,
     };
     q.apply_op3(k, v, op)
 }
@@ -434,11 +434,12 @@ pub fn flash_attn_alibi(
     let window_size_left = None;
     let window_size_right = if causal { Some(0) } else { None };
 
-    let op = FlashAttn {
+    let op = FlashAttention {
         softmax_scale,
         alibi_slopes: Some(alibi_slopes.clone()),
         window_size_left,
         window_size_right,
+        softcap: None,
     };
     q.apply_op3(k, v, op)
 }
@@ -473,17 +474,64 @@ pub fn flash_attn_alibi_windowed(
     window_size_left: Option<usize>,
     window_size_right: Option<usize>,
 ) -> Result<Tensor> {
-    let op = FlashAttn {
+    let op = FlashAttention {
         softmax_scale,
         alibi_slopes: Some(alibi_slopes.clone()),
         window_size_left,
         window_size_right,
+        softcap: None,
+    };
+    q.apply_op3(k, v, op)
+}
+
+/// Flash-attention v2 layer.
+///
+/// This implements scaled dot-product attention, `softmax(Q @ K^T . softmax_scale) @ V`.
+/// Multi-query and grouped-query attention are supported by using tensors k and v with fewer heads
+/// than q, the number of heads in k and v has to be divisible by the number of heads in q.
+///
+/// # Arguments
+///
+/// * `q` - Query tensor with shape `(batch, seq_len_q, num_heads_q, head_size)`.
+/// * `k` - Key tensor with shape `(batch, seq_len_kv, num_heads_kv, head_size)`.
+/// * `v` - Value tensor with shape `(batch, seq_len_kv, num_heads_kv, head_size)`.
+/// * `alibi_slopes` - Alibi slopes tensor with shape `(num_heads_q)`.
+/// * `window_size_left` - Limit left attention to value tokens.
+/// * `window_size_right` - Limit right attention to value tokens.
+///
+/// # Causal mask
+///
+/// `window_size_left=None` with `window_size_right=Some(0)` applies a causal mask to the result
+/// of  `Q @ K^T`
+/// 
+/// # Softcap
+/// 
+/// `softcap` is applied to the softmax output. Softcap is a multiplicative factor that is applied to the
+/// softmax output before the softmax is applied. Softcap is used in Grok and Gemma2 models.
+///
+/// The resulting tensor has dimensions `(batch, seq_len_q, num_heads_q, head_size)`.
+pub fn flash_attn_alibi_windowed_with_softcap(
+    q: &Tensor,
+    k: &Tensor,
+    v: &Tensor,
+    alibi_slopes: &Tensor,
+    softmax_scale: f32,
+    window_size_left: Option<usize>,
+    window_size_right: Option<usize>,
+    softcap: Option<f32>,
+) -> Result<Tensor> {
+    let op = FlashAttention {
+        softmax_scale,
+        alibi_slopes: Some(alibi_slopes.clone()),
+        window_size_left,
+        window_size_right,
+        softcap,
     };
     q.apply_op3(k, v, op)
 }
 
 /// Flash-attention v2 layer, with variable sequence lengths.
-struct FlashAttnVarLen {
+struct FlashAttentionVarLen {
     /// Softmax scale
     pub softmax_scale: f32,
     /// Maximum sequence length of Query tensor
@@ -518,7 +566,7 @@ struct FlashAttnVarLen {
     pub softcap: Option<f32>,
 }
 
-impl FlashAttnVarLen {
+impl FlashAttentionVarLen {
     fn cuda_fwd_t<
         T: candle_core::cuda_backend::CudaDType
             + candle_core::cuda_backend::cudarc::driver::DeviceRepr,
@@ -849,7 +897,7 @@ impl FlashAttnVarLen {
             let k_ptr = *k.device_ptr() as *const core::ffi::c_void;
             let v_ptr = *v.device_ptr() as *const core::ffi::c_void;
             let block_table_ptr = if let Some(block_table) = block_table {
-                *block_table.device_ptr() as *const core::ffi::c_void
+                *block_table.device_ptr() as *const i32
             } else {
                 std::ptr::null()
             };

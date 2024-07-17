@@ -43,7 +43,7 @@ fn flash_attn_acausal() -> Result<()> {
         let q = q.transpose(1, 2)?;
         let k = k.transpose(1, 2)?;
         let v = v.transpose(1, 2)?;
-        csrc::flash_attn(&q, &k, &v, 0.5, None, false)?.transpose(1, 2)?
+        csrc::flash_attn(&q, &k, &v, 0.5, false)?.transpose(1, 2)?
     };
     let ys2 = ys2.i(0)?.to_dtype(DType::F32)?;
     let diff = ys1.sub(&ys2)?.abs()?.flatten_all()?.max(0)?;
