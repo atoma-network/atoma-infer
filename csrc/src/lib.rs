@@ -623,7 +623,7 @@ impl FlashAttentionVarLen {
         let block_table = self.block_table.clone();
         let (block_table_ptr, block_table_layout) = if let Some(block_table) = &block_table {
             let (block_table_storage, block_table_layout) = block_table.storage_and_layout();
-            let block_table = match &*block_table_storage {
+            let block_table_ptr = match &*block_table_storage {
                 candle_core::Storage::Cuda(c) => {
                     let cuda_slice = c.as_cuda_slice::<u32>()?;
                     let block_table = cuda_slice.slice(block_table_layout.start_offset()..);
