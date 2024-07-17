@@ -6,7 +6,6 @@ use candle_core::backend::BackendStorage;
 use candle_core::cuda_backend::cudarc::driver::DevicePtr;
 use candle_core::cuda_backend::WrapErr;
 use candle_core::{CpuStorage, DType, Layout, Result, Shape, Tensor};
-use candle_nn::seq;
 use half::{bf16, f16};
 
 pub struct FlashAttention {
@@ -573,6 +572,13 @@ impl FlashAttnVarLen {
         let batch_size = nseqlens_q - 1;
         let (_total_q, num_heads, head_size_og) = q_l.shape().dims3()?;
 
+        let (num_blocks, total_k, num_heads_k, head_size_og) = if block_table.is_some() {
+            k_l.shape().dims4()?
+        } else {
+            let (total_k, num_heads_k, _head_size_og) = k_l.shape().dims3()?;
+            (0, total_k, num_heads_k, head_size_og)
+        };
+
         let seqlenq_ngroups_swapped = self.max_seqlen_q == 1
             && num_heads > num_heads_k
             && self.window_size_left.is_none()
@@ -601,7 +607,7 @@ impl FlashAttnVarLen {
                 q_l.clone(),
                 Layout::contiguous(&out_shape),
                 out_shape,
-                seqlen_q,
+                self.max_seqlen_q,
                 num_heads,
             )
         };
@@ -646,13 +652,6 @@ impl FlashAttnVarLen {
             (Some(block_table), Some(block_table_layout))
         } else {
             (None, None)
-        };
-
-        let (num_blocks, total_k, num_heads_k, head_size_og) = if block_table.is_some() {
-            k_l.shape().dims4()?
-        } else {
-            let (total_k, num_heads_k, _head_size_og) = k_l.shape().dims3()?;
-            (0, total_k, num_heads_k, head_size_og)
         };
 
         let max_num_blocks_per_sequence = if let Some(layout) = block_table_layout {
@@ -824,9 +823,9 @@ impl FlashAttnVarLen {
                 batch_size,
                 num_heads,
                 head_size,
-                max_seqlen_k,
+                self.max_seqlen_k,
                 max_seqlen_q,
-                device.ordinal(),
+                dev.ordinal(),
             )?
         } else {
             1
@@ -911,11 +910,11 @@ impl FlashAttnVarLen {
                 /* d_rounded */ head_size_rounded as u32,
                 /* softmax_scale*/ self.softmax_scale,
                 /* scale_softmatx_log2 */ scale_softmatx_log2,
-                /* seqlen_q */ self.max_seqlen_q as u32,
-                /* seqlen_k */ self.max_seqlen_k as u32,
                 /* block_table */ block_table_ptr,
                 /* block_table_batch_stride */ block_table_batch_stride,
-                /* page_block_size */ page_block_size,
+                /* page_block_size */ page_block_size as u32,
+                /* seqlen_q */ self.max_seqlen_q as u32,
+                /* seqlen_k */ self.max_seqlen_k as u32,
                 /* seqlen_q_rounded */ seqlen_q_rounded as u32,
                 /* seqlen_k_rounded */ seqlen_k_rounded as u32,
                 /* is_bf16 */ is_bf16,
