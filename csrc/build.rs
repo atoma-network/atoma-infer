@@ -3,7 +3,6 @@
 // variable in order to cache the compiled artifacts and avoid recompiling too often.
 use anyhow::{Context, Result};
 use std::path::PathBuf;
-use std::process::Command;
 
 const KERNEL_FILES: [&str; 33] = [
     "kernels/flash_api.cu",
