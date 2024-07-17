@@ -1021,7 +1021,7 @@ impl candle_core::CustomOp3 for FlashAttentionVarLen {
         _: &CpuStorage,
         _: &Layout,
     ) -> Result<(CpuStorage, Shape)> {
-        candle::bail!("no cpu support for flash-attn")
+        candle_core::bail!("no cpu support for flash-attn")
     }
 
     fn cuda_fwd(
