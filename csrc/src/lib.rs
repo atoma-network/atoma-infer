@@ -503,9 +503,9 @@ pub fn flash_attn_alibi_windowed(
 ///
 /// `window_size_left=None` with `window_size_right=Some(0)` applies a causal mask to the result
 /// of  `Q @ K^T`
-/// 
+///
 /// # Softcap
-/// 
+///
 /// `softcap` is applied to the softmax output. Softcap is a multiplicative factor that is applied to the
 /// softmax output before the softmax is applied. Softcap is used in Grok and Gemma2 models.
 ///
@@ -623,15 +623,18 @@ impl FlashAttentionVarLen {
         let (block_table, block_table_layout) = if let Some(block_table) = &self.block_table {
             let (block_table_storage, block_table_layout) = block_table.storage_and_layout();
             let block_table = match &*block_table_storage {
-                candle_core::Storage::Cuda(c) => c.as_cuda_slice::<u32>()?,
+                candle_core::Storage::Cuda(c) => {
+                    let cuda_slice = c.as_cuda_slice::<u32>()?;
+                    let block_table = cuda_slice.slice(block_table_layout.start_offset()..);
+                    let block_table_stride = block_table_layout.stride();
+                    let block_table_rank = block_table_stride.len();
+                    if block_table_stride[block_table_rank - 1] != 1 {
+                        candle_core::bail!("block_table must be contiguous")
+                    }
+                    block_table
+                }
                 _ => candle_core::bail!("block_table must be a cuda tensor"),
             };
-            let block_table = block_table.slice(block_table_layout.start_offset()..);
-            let block_table_stride = block_table_layout.stride();
-            let block_table_rank = block_table_stride.len();
-            if block_table_stride[block_table_rank - 1] != 1 {
-                candle_core::bail!("block_table must be contiguous")
-            }
             (Some(block_table), Some(block_table_layout))
         } else {
             (None, None)
