@@ -620,7 +620,8 @@ impl FlashAttentionVarLen {
         let batch_size = nseqlens_q - 1;
         let (_total_q, num_heads, head_size_og) = q_l.shape().dims3()?;
 
-        let (block_table, block_table_layout) = if let Some(block_table) = &self.block_table {
+        let block_table = self.block_table.clone();
+        let (block_table, block_table_layout) = if let Some(block_table) = &block_table {
             let (block_table_storage, block_table_layout) = block_table.storage_and_layout();
             let block_table = match &*block_table_storage {
                 candle_core::Storage::Cuda(c) => {
