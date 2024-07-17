@@ -626,7 +626,7 @@ impl FlashAttentionVarLen {
             .map(|block_table| -> Result<_> {
                 let (storage, layout) = block_table.storage_and_layout();
                 let cuda_slice = match &*storage {
-                    Storage::Cuda(c) => c.as_cuda_slice::<u32>()?,
+                    candle_core::Storage::Cuda(c) => c.as_cuda_slice::<u32>()?,
                     _ => candle_core::bail!("block_table must be a cuda tensor"),
                 };
 
