@@ -1178,6 +1178,7 @@ pub fn flash_attn_varlen_alibi(
     max_seqlen_q: usize,
     max_seqlen_k: usize,
     softmax_scale: f32,
+    causal: bool,
 ) -> Result<Tensor> {
     let window_size_left = None;
     let window_size_right = if causal { Some(0) } else { None };
@@ -1241,7 +1242,7 @@ pub fn flash_attn_varlen_alibi_windowed(
     window_size_left: Option<usize>,
     window_size_right: Option<usize>,
 ) -> Result<Tensor> {
-    let op = FlashAttnVarLen {
+    let op = FlashAttentionVarLen {
         softmax_scale,
         max_seqlen_q,
         max_seqlen_k,
@@ -1250,6 +1251,9 @@ pub fn flash_attn_varlen_alibi_windowed(
         alibi_slopes: Some(alibi_slopes.clone()),
         window_size_left,
         window_size_right,
+        block_table: None,
+        seqused_k: None,
+        softcap: None,
     };
     q.apply_op3(k, v, op)
 }
