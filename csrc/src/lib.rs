@@ -623,7 +623,7 @@ impl FlashAttentionVarLen {
         let (block_table, block_table_layout) = if let Some(block_table) = &self.block_table {
             let (block_table_storage, block_table_layout) = block_table.storage_and_layout();
             let block_table = match &*block_table_storage {
-                candle_core::Storage::Cuda(c) => c.as_cuda_slice::<i32>()?,
+                candle_core::Storage::Cuda(c) => c.as_cuda_slice::<u32>()?,
                 _ => candle_core::bail!("block_table must be a cuda tensor"),
             };
             let block_table = block_table.slice(block_table_layout.start_offset()..);
