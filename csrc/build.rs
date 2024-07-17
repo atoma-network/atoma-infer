@@ -97,7 +97,7 @@ fn main() -> Result<()> {
     let cutlass_include_arg = format!("-I{}", cutlass_include_dir.display());
 
     compile_cuda_files(&build_dir, &cutlass_include_arg)?;
-    // compile_flash_api(&build_dir, &cutlass_include_arg)?;
+    compile_flash_api(&build_dir, &cutlass_include_arg)?;
 
     // Step 3: Link libraries
     println!("cargo:rustc-link-search={}", build_dir.display());
@@ -117,7 +117,6 @@ fn compile_flash_api(build_dir: &PathBuf, cutlass_include_arg: &str) -> Result<(
             "kernels/flash_api.cu",
             "-o",
             flash_api_o.to_str().unwrap(),
-            "--gpu-architecture=sm_80", // Adjust as needed
             "-O2",
             cutlass_include_arg,
             "-U__CUDA_NO_HALF_OPERATORS__",

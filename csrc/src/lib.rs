@@ -503,9 +503,9 @@ pub fn flash_attn_alibi_windowed(
 ///
 /// `window_size_left=None` with `window_size_right=Some(0)` applies a causal mask to the result
 /// of  `Q @ K^T`
-/// 
+///
 /// # Softcap
-/// 
+///
 /// `softcap` is applied to the softmax output. Softcap is a multiplicative factor that is applied to the
 /// softmax output before the softmax is applied. Softcap is used in Grok and Gemma2 models.
 ///
@@ -620,22 +620,27 @@ impl FlashAttentionVarLen {
         let batch_size = nseqlens_q - 1;
         let (_total_q, num_heads, head_size_og) = q_l.shape().dims3()?;
 
-        let (block_table, block_table_layout) = if let Some(block_table) = &self.block_table {
-            let (block_table_storage, block_table_layout) = block_table.storage_and_layout();
-            let block_table = match &*block_table_storage {
-                candle_core::Storage::Cuda(c) => c.as_cuda_slice::<u32>()?,
-                _ => candle_core::bail!("block_table must be a cuda tensor"),
-            };
-            let block_table = block_table.slice(block_table_layout.start_offset()..);
-            let block_table_stride = block_table_layout.stride();
-            let block_table_rank = block_table_stride.len();
-            if block_table_stride[block_table_rank - 1] != 1 {
-                candle_core::bail!("block_table must be contiguous")
-            }
-            (Some(block_table), Some(block_table_layout))
-        } else {
-            (None, None)
-        };
+        let (block_table, block_table_layout) = self
+            .block_table
+            .as_ref()
+            .map(|block_table| -> Result<_> {
+                let (storage, layout) = block_table.storage_and_layout();
+                let cuda_slice = match &*storage {
+                    Storage::Cuda(c) => c.as_cuda_slice::<u32>()?,
+                    _ => candle_core::bail!("block_table must be a cuda tensor"),
+                };
+
+                let slice = cuda_slice.slice(layout.start_offset()..);
+                let stride = layout.stride();
+
+                if stride.last() != Some(&1) {
+                    candle_core::bail!("block_table must be contiguous");
+                }
+
+                Ok((slice, layout))
+            })
+            .transpose()?
+            .unzip();
 
         let (num_blocks, total_k, num_heads_k, head_size_og) = if block_table.is_some() {
             k_l.shape().dims4()?
@@ -896,7 +901,7 @@ impl FlashAttentionVarLen {
             let q_ptr = *q.device_ptr() as *const core::ffi::c_void;
             let k_ptr = *k.device_ptr() as *const core::ffi::c_void;
             let v_ptr = *v.device_ptr() as *const core::ffi::c_void;
-            let block_table_ptr = if let Some(block_table) = block_table {
+            let block_table_ptr = if let Some(block_table) = &block_table {
                 *block_table.device_ptr() as *const i32
             } else {
                 std::ptr::null()
