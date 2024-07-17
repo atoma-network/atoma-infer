@@ -1,3 +1,9 @@
+#define FLASHATTENTION_DISABLE_SOFTCAP
+#define FLASHATTENTION_DISABLE_ALIBI
+#define FLASHATTENTION_DISABLE_DROPOUT
+#define FLASHATTENTION_DISABLE_UNEVEN_K
+#define FLASHATTENTION_DISABLE_LOCAL
+
 #include "flash_fwd_launch_template.h"
 
 void run_mha_fwd(Flash_fwd_params &params, cudaStream_t stream, bool force_split_kernel=false) {
