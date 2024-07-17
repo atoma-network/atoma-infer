@@ -572,6 +572,23 @@ impl FlashAttnVarLen {
         let batch_size = nseqlens_q - 1;
         let (_total_q, num_heads, head_size_og) = q_l.shape().dims3()?;
 
+        let (block_table, block_table_layout) = if let Some(block_table) = &self.block_table {
+            let (block_table_storage, block_table_layout) = block_table.storage_and_layout();
+            let block_table = match &*block_table_storage {
+                candle_core::Storage::Cuda(c) => c.as_cuda_slice::<i32>()?,
+                _ => candle_core::bail!("block_table must be a cuda tensor"),
+            };
+            let block_table = block_table.slice(block_table_layout.start_offset()..);
+            let block_table_stride = block_table_layout.stride();
+            let block_table_rank = block_table_stride.len();
+            if block_table_stride[block_table_rank - 1] != 1 {
+                candle_core::bail!("block_table must be contiguous")
+            }
+            (Some(block_table), Some(block_table_layout))
+        } else {
+            (None, None)
+        };
+
         let (num_blocks, total_k, num_heads_k, head_size_og) = if block_table.is_some() {
             k_l.shape().dims4()?
         } else {
@@ -636,23 +653,6 @@ impl FlashAttnVarLen {
         if v_stride[v_rank - 1] != 1 {
             candle_core::bail!("the last dim of v must be contiguous {v_stride:?}")
         }
-
-        let (block_table, block_table_layout) = if let Some(block_table) = &self.block_table {
-            let (block_table_storage, block_table_layout) = block_table.storage_and_layout();
-            let block_table = match &*block_table_storage {
-                candle_core::Storage::Cuda(c) => c.as_cuda_slice::<i32>()?,
-                _ => candle_core::bail!("block_table must be a cuda tensor"),
-            };
-            let block_table = block_table.slice(block_table_layout.start_offset()..);
-            let block_table_stride = block_table_layout.stride();
-            let block_table_rank = block_table_stride.len();
-            if block_table_stride[block_table_rank - 1] != 1 {
-                candle_core::bail!("block_table must be contiguous")
-            }
-            (Some(block_table), Some(block_table_layout))
-        } else {
-            (None, None)
-        };
 
         let max_num_blocks_per_sequence = if let Some(layout) = block_table_layout {
             let (_b_sz, max_num_blocks_per_sequence) = layout.shape().dims2()?;
@@ -848,7 +848,7 @@ impl FlashAttnVarLen {
             let q_ptr = *q.device_ptr() as *const core::ffi::c_void;
             let k_ptr = *k.device_ptr() as *const core::ffi::c_void;
             let v_ptr = *v.device_ptr() as *const core::ffi::c_void;
-            let block_table_ptr = if let Some(block_table) = &self.block_table {
+            let block_table_ptr = if let Some(block_table) = block_table {
                 *block_table.device_ptr() as *const core::ffi::c_void
             } else {
                 std::ptr::null()
@@ -870,8 +870,8 @@ impl FlashAttnVarLen {
                 match (seqlens_q_ptr.is_null(), seqlenq_ngroups_swapped) {
                     (false, _) => (0, 0),
                     (true, true) => (
-                        (q_stride[0] * seqlen_q) as u32,
-                        (o_stride[0] * seqlen_q) as u32,
+                        (q_stride[0] * max_seqlen_q) as u32,
+                        (o_stride[0] * max_seqlen_q) as u32,
                     ),
                     (true, false) => (q_stride[0] as u32, o_stride[0] as u32),
                 };
@@ -912,7 +912,7 @@ impl FlashAttnVarLen {
                 /* scale_softmatx_log2 */ scale_softmatx_log2,
                 /* block_table */ block_table_ptr,
                 /* block_table_batch_stride */ block_table_batch_stride,
-                /* page_block_size */ page_block_size as u32,
+                /* page_block_size */ page_block_size as i32,
                 /* seqlen_q */ self.max_seqlen_q as u32,
                 /* seqlen_k */ self.max_seqlen_k as u32,
                 /* seqlen_q_rounded */ seqlen_q_rounded as u32,
@@ -922,7 +922,7 @@ impl FlashAttnVarLen {
                 /* window_size_left */ window_size_left,
                 /* window_size_right */ window_size_right,
                 /* softcap */ softcap,
-                /* unpadded_lse */ unpadded_lse,
+                /* unpadded_lse */ true,
                 block_table.is_some(),
             )
         }
