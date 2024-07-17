@@ -555,10 +555,6 @@ struct FlashAttentionVarLen {
     /// Alibi slopes, see https://nn.labml.ai/transformers/alibi/index.html,
     /// of shape `[num_heads, ]` or `[batch_size, num_heads]`
     pub alibi_slopes: Option<Tensor>,
-    /// Flags if attention is causal or not. If true, this means
-    /// that each token can only attend to itself and
-    /// the previous tokens within the attention algorithm
-    pub is_causal: bool,
     /// Window size for left sided slicing attention
     pub window_size_left: Option<usize>,
     /// Window size for right sided slicing attention
@@ -713,8 +709,13 @@ impl FlashAttentionVarLen {
 
         let page_block_size = if block_table_layout.is_some() { total_k } else { 1 };
 
-        if !block_table_ptr.is_null() && page_block_size % 256 == 0 {
-            candle_core::bail!("page_block_size must be a multiple of 256")
+        if !block_table_ptr.is_null() && page_block_size % 16 == 0 {
+            // NOTE: We are following the vLLM flash attention fork, where the paged 
+            // block size must be divisible by 16. In the actual flash attention
+            // repository, the paged block size must be divisible by 256, instead.
+            // TODO: benchmark the performance of block sizes such as
+            // [16, 32, 64, 128, 256]
+            candle_core::bail!("page_block_size must be a multiple of 16")
         }
 
         if batch_size <= 0 {
@@ -1084,8 +1085,311 @@ pub fn flash_attn_varlen(
         window_size_right,
         softcap: None,
         block_table: None,
-        is_causal: causal,
         seqused_k: None,
+    };
+    q.apply_op3(k, v, op)
+}
+
+#[allow(clippy::too_many_arguments)]
+/// Flash-attention v2 layer with variable-length batching.
+///
+/// This implements scaled dot-product attention, `softmax(Q @ K^T . softmax_scale) @ V`.
+/// Multi-query and grouped-query attention are supported by using tensors k and v with fewer heads
+/// than q, the number of heads in k and v has to be divisible by the number of heads in q.
+///
+/// # Arguments
+///
+/// * `q` - Query tensor with shape `(total_q, num_heads_q, head_size)`.
+/// * `k` - Key tensor with shape `(total_kv, num_heads_kv, head_size)`.
+/// * `v` - Value tensor with shape `(total_kv, num_heads_kv, head_size)`.
+/// * `seqlens_q` - The cumulative lengths of the sequences in the batch, used to index in q.
+/// * `seqlens_k` - The cumulative lengths of the sequences in the batch, used to index in k and v.
+/// * `max_seqlen_q` - The maximum query sequence length for q in the batch.
+/// * `max_seqlen_k` - The maximum query sequence length for k and v in the batch.
+/// * `window_size_left` - Limit left attention to value tokens.
+/// * `window_size_right` - Limit right attention to value tokens.
+///
+/// `seqlens_q` and `seqlens_k` contain `batch_size + 1` elements, typically `0`, `seqlen_1`,
+/// `seqlen_1 + seqlen_2`, etc.
+///
+/// The resulting tensor has dimensions `(total_q, num_heads_q, head_size)`.
+///
+/// # Causal mask
+///
+/// `window_size_left=None` with `window_size_right=Some(0)` applies a causal mask to the result
+/// of  `Q @ K^T`
+pub fn flash_attn_varlen_windowed(
+    q: &Tensor,
+    k: &Tensor,
+    v: &Tensor,
+    seqlens_q: &Tensor,
+    seqlens_k: &Tensor,
+    max_seqlen_q: usize,
+    max_seqlen_k: usize,
+    softmax_scale: f32,
+    window_size_left: Option<usize>,
+    window_size_right: Option<usize>,
+) -> Result<Tensor> {
+    let op = FlashAttentionVarLen {
+        softmax_scale,
+        max_seqlen_q,
+        max_seqlen_k,
+        seqlens_q: seqlens_q.clone(),
+        seqlens_k: seqlens_k.clone(),
+        alibi_slopes: None,
+        window_size_left,
+        window_size_right,
+        softcap: None,
+        block_table: None,
+        seqused_k: None,
+    };
+    q.apply_op3(k, v, op)
+}
+
+#[allow(clippy::too_many_arguments)]
+/// Flash-attention v2 layer with variable-length batching.
+///
+/// This implements scaled dot-product attention, `softmax(Q @ K^T . softmax_scale) @ V`.
+/// Multi-query and grouped-query attention are supported by using tensors k and v with fewer heads
+/// than q, the number of heads in k and v has to be divisible by the number of heads in q.
+///
+/// # Arguments
+///
+/// * `q` - Query tensor with shape `(total_q, num_heads_q, head_size)`.
+/// * `k` - Key tensor with shape `(total_kv, num_heads_kv, head_size)`.
+/// * `v` - Value tensor with shape `(total_kv, num_heads_kv, head_size)`.
+/// * `alibi_slopes` - Alibi slopes tensor with shape `(num_heads_q)`.
+/// * `seqlens_q` - The cumulative lengths of the sequences in the batch, used to index in q.
+/// * `seqlens_k` - The cumulative lengths of the sequences in the batch, used to index in k and v.
+/// * `max_seqlen_q` - The maximum query sequence length for q in the batch.
+/// * `max_seqlen_k` - The maximum query sequence length for k and v in the batch.
+///
+/// `seqlens_q` and `seqlens_k` contain `batch_size + 1` elements, typically `0`, `seqlen_1`,
+/// `seqlen_1 + seqlen_2`, etc.
+///
+/// The resulting tensor has dimensions `(total_q, num_heads_q, head_size)`.
+pub fn flash_attn_varlen_alibi(
+    q: &Tensor,
+    k: &Tensor,
+    v: &Tensor,
+    alibi_slopes: &Tensor,
+    seqlens_q: &Tensor,
+    seqlens_k: &Tensor,
+    max_seqlen_q: usize,
+    max_seqlen_k: usize,
+    softmax_scale: f32,
+) -> Result<Tensor> {
+    let window_size_left = None;
+    let window_size_right = if causal { Some(0) } else { None };
+
+    let op = FlashAttentionVarLen {
+        softmax_scale,
+        max_seqlen_q,
+        max_seqlen_k,
+        seqlens_q: seqlens_q.clone(),
+        seqlens_k: seqlens_k.clone(),
+        alibi_slopes: Some(alibi_slopes.clone()),
+        window_size_left,
+        window_size_right,
+        softcap: None,
+        block_table: None,
+        seqused_k: None,
+    };
+    q.apply_op3(k, v, op)
+}
+
+
+#[allow(clippy::too_many_arguments)]
+/// Flash-attention v2 layer with variable-length batching.
+///
+/// This implements scaled dot-product attention, `softmax(Q @ K^T . softmax_scale) @ V`.
+/// Multi-query and grouped-query attention are supported by using tensors k and v with fewer heads
+/// than q, the number of heads in k and v has to be divisible by the number of heads in q.
+///
+/// # Arguments
+///
+/// * `q` - Query tensor with shape `(total_q, num_heads_q, head_size)`.
+/// * `k` - Key tensor with shape `(total_kv, num_heads_kv, head_size)`.
+/// * `v` - Value tensor with shape `(total_kv, num_heads_kv, head_size)`.
+/// * `alibi_slopes` - Alibi slopes tensor with shape `(num_heads_q)`.
+/// * `seqlens_q` - The cumulative lengths of the sequences in the batch, used to index in q.
+/// * `seqlens_k` - The cumulative lengths of the sequences in the batch, used to index in k and v.
+/// * `max_seqlen_q` - The maximum query sequence length for q in the batch.
+/// * `max_seqlen_k` - The maximum query sequence length for k and v in the batch.
+/// * `window_size_left` - Limit left attention to value tokens.
+/// * `window_size_right` - Limit right attention to value tokens.
+///
+/// `seqlens_q` and `seqlens_k` contain `batch_size + 1` elements, typically `0`, `seqlen_1`,
+/// `seqlen_1 + seqlen_2`, etc.
+///
+/// The resulting tensor has dimensions `(total_q, num_heads_q, head_size)`.
+///
+/// # Causal mask
+///
+/// `window_size_left=None` with `window_size_right=Some(0)` applies a causal mask to the result
+/// of  `Q @ K^T`
+pub fn flash_attn_varlen_alibi_windowed(
+    q: &Tensor,
+    k: &Tensor,
+    v: &Tensor,
+    alibi_slopes: &Tensor,
+    seqlens_q: &Tensor,
+    seqlens_k: &Tensor,
+    max_seqlen_q: usize,
+    max_seqlen_k: usize,
+    softmax_scale: f32,
+    window_size_left: Option<usize>,
+    window_size_right: Option<usize>,
+) -> Result<Tensor> {
+    let op = FlashAttnVarLen {
+        softmax_scale,
+        max_seqlen_q,
+        max_seqlen_k,
+        seqlens_q: seqlens_q.clone(),
+        seqlens_k: seqlens_k.clone(),
+        alibi_slopes: Some(alibi_slopes.clone()),
+        window_size_left,
+        window_size_right,
+    };
+    q.apply_op3(k, v, op)
+}
+
+
+#[allow(clippy::too_many_arguments)]
+/// Flash-attention v2 layer with variable-length batching.
+///
+/// This implements scaled dot-product attention, `softmax(Q @ K^T . softmax_scale) @ V`.
+/// Multi-query and grouped-query attention are supported by using tensors k and v with fewer heads
+/// than q, the number of heads in k and v has to be divisible by the number of heads in q.
+///
+/// # Arguments
+///
+/// * `q` - Query tensor with shape `(total_q, num_heads_q, head_size)`.
+/// * `k` - Key tensor with shape `(total_kv, num_heads_kv, head_size)`.
+/// * `v` - Value tensor with shape `(total_kv, num_heads_kv, head_size)`.
+/// * `alibi_slopes` - Alibi slopes tensor with shape `(num_heads_q)`.
+/// * `seqlens_q` - The cumulative lengths of the sequences in the batch, used to index in q.
+/// * `seqlens_k` - The cumulative lengths of the sequences in the batch, used to index in k and v.
+/// * `max_seqlen_q` - The maximum query sequence length for q in the batch.
+/// * `max_seqlen_k` - The maximum query sequence length for k and v in the batch.
+/// * `window_size_left` - Limit left attention to value tokens.
+/// * `window_size_right` - Limit right attention to value tokens.
+///
+/// `seqlens_q` and `seqlens_k` contain `batch_size + 1` elements, typically `0`, `seqlen_1`,
+/// `seqlen_1 + seqlen_2`, etc.
+///
+/// The resulting tensor has dimensions `(total_q, num_heads_q, head_size)`.
+///
+/// # Causal mask
+///
+/// `window_size_left=None` with `window_size_right=Some(0)` applies a causal mask to the result
+/// of  `Q @ K^T`
+/// 
+/// # Block table 
+/// 
+/// Enables the paged attention algorithm. The block table is a tensor of shape `[batch_size, max_num_block_per_sequence]`
+/// that contains the block table for each sequence in the batch. The block table is used to determine the
+/// the number of blocks per sequence. 
+pub fn flash_attn_varlen_with_block_table(
+    q: &Tensor,
+    k: &Tensor,
+    v: &Tensor,
+    alibi_slopes: &Tensor,
+    seqlens_q: &Tensor,
+    seqlens_k: &Tensor,
+    max_seqlen_q: usize,
+    max_seqlen_k: usize,
+    softmax_scale: f32,
+    window_size_left: Option<usize>,
+    window_size_right: Option<usize>,
+    block_table: Option<Tensor>,
+) -> Result<Tensor> {
+    let op = FlashAttentionVarLen {
+        softmax_scale,
+        max_seqlen_q,
+        max_seqlen_k,
+        seqlens_q: seqlens_q.clone(),
+        seqlens_k: seqlens_k.clone(),
+        alibi_slopes: Some(alibi_slopes.clone()),
+        window_size_left,
+        window_size_right,
+        block_table,
+        seqused_k: None,
+        softcap: None,
+    };
+    q.apply_op3(k, v, op)
+}
+
+#[allow(clippy::too_many_arguments)]
+/// Flash-attention v2 layer with variable-length batching.
+///
+/// This implements scaled dot-product attention, `softmax(Q @ K^T . softmax_scale) @ V`.
+/// Multi-query and grouped-query attention are supported by using tensors k and v with fewer heads
+/// than q, the number of heads in k and v has to be divisible by the number of heads in q.
+///
+/// # Arguments
+///
+/// * `q` - Query tensor with shape `(total_q, num_heads_q, head_size)`.
+/// * `k` - Key tensor with shape `(total_kv, num_heads_kv, head_size)`.
+/// * `v` - Value tensor with shape `(total_kv, num_heads_kv, head_size)`.
+/// * `alibi_slopes` - Alibi slopes tensor with shape `(num_heads_q)`.
+/// * `seqlens_q` - The cumulative lengths of the sequences in the batch, used to index in q.
+/// * `seqlens_k` - The cumulative lengths of the sequences in the batch, used to index in k and v.
+/// * `max_seqlen_q` - The maximum query sequence length for q in the batch.
+/// * `max_seqlen_k` - The maximum query sequence length for k and v in the batch.
+/// * `window_size_left` - Limit left attention to value tokens.
+/// * `window_size_right` - Limit right attention to value tokens.
+///
+/// `seqlens_q` and `seqlens_k` contain `batch_size + 1` elements, typically `0`, `seqlen_1`,
+/// `seqlen_1 + seqlen_2`, etc.
+///
+/// The resulting tensor has dimensions `(total_q, num_heads_q, head_size)`.
+///
+/// # Causal mask
+///
+/// `window_size_left=None` with `window_size_right=Some(0)` applies a causal mask to the result
+/// of  `Q @ K^T`
+/// 
+/// # Block table 
+/// 
+/// Enables the paged attention algorithm. The block table is a tensor of shape `[batch_size, max_num_block_per_sequence]`
+/// that contains the block table for each sequence in the batch. The block table is used to determine the
+/// the number of blocks per sequence. 
+/// 
+/// # Softcap
+///
+/// `softcap` is applied to the softmax output. Softcap is a multiplicative factor that is applied to the
+/// softmax output before the softmax is applied. Softcap is used in Grok and Gemma2 models.
+///
+/// The resulting tensor has dimensions `(batch, seq_len_q, num_heads_q, head_size)`.
+pub fn flash_attn_varlen_full(
+    q: &Tensor,
+    k: &Tensor,
+    v: &Tensor,
+    alibi_slopes: &Tensor,
+    seqlens_q: &Tensor,
+    seqlens_k: &Tensor,
+    max_seqlen_q: usize,
+    max_seqlen_k: usize,
+    softmax_scale: f32,
+    window_size_left: Option<usize>,
+    window_size_right: Option<usize>,
+    block_table: Option<Tensor>,
+    seqused_k: Option<Tensor>,
+    softcap: Option<f32>,
+) -> Result<Tensor> {
+    let op = FlashAttentionVarLen {
+        softmax_scale,
+        max_seqlen_q,
+        max_seqlen_k,
+        seqlens_q: seqlens_q.clone(),
+        seqlens_k: seqlens_k.clone(),
+        alibi_slopes: Some(alibi_slopes.clone()),
+        window_size_left,
+        window_size_right,
+        block_table,
+        seqused_k,
+        softcap,
     };
     q.apply_op3(k, v, op)
 }
