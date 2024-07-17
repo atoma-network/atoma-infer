@@ -621,7 +621,7 @@ impl FlashAttentionVarLen {
         let (_total_q, num_heads, head_size_og) = q_l.shape().dims3()?;
 
         let block_table = self.block_table.clone();
-        let (block_table, block_table_layout) = if let Some(block_table) = &block_table {
+        let (block_table_ptr, block_table_layout) = if let Some(block_table) = &block_table {
             let (block_table_storage, block_table_layout) = block_table.storage_and_layout();
             let block_table = match &*block_table_storage {
                 candle_core::Storage::Cuda(c) => {
@@ -632,14 +632,14 @@ impl FlashAttentionVarLen {
                     if block_table_stride[block_table_rank - 1] != 1 {
                         candle_core::bail!("block_table must be contiguous")
                     }
-                    block_table
-                },
+                    unsafe { *block_table.device_ptr() as *const i32 }
+                }
                 _ => candle_core::bail!("block_table must be a cuda tensor"),
             };
             // Clone block_table_storage to extend its lifetime
-            (Some(block_table), Some(block_table_layout))
+            (block_table_ptr, Some(block_table_layout))
         } else {
-            (None, None)
+            (std::ptr::null(), None)
         };
 
         let (num_blocks, total_k, num_heads_k, head_size_og) = if block_table.is_some() {
@@ -714,9 +714,9 @@ impl FlashAttentionVarLen {
             0
         };
 
-        let page_block_size = if block_table.is_some() { total_k } else { 1 };
+        let page_block_size = if block_table_layout.is_some() { total_k } else { 1 };
 
-        if block_table.is_some() && page_block_size % 256 == 0 {
+        if !block_table_ptr.is_null() && page_block_size % 256 == 0 {
             candle_core::bail!("page_block_size must be a multiple of 256")
         }
 
@@ -901,11 +901,6 @@ impl FlashAttentionVarLen {
             let q_ptr = *q.device_ptr() as *const core::ffi::c_void;
             let k_ptr = *k.device_ptr() as *const core::ffi::c_void;
             let v_ptr = *v.device_ptr() as *const core::ffi::c_void;
-            let block_table_ptr = if let Some(block_table) = &block_table {
-                *block_table.device_ptr() as *const i32
-            } else {
-                std::ptr::null()
-            };
             let block_table_batch_stride = if let Some(layout) = block_table_layout {
                 layout.stride()[0] as u32
             } else {
@@ -928,7 +923,7 @@ impl FlashAttentionVarLen {
                     ),
                     (true, false) => (q_stride[0] as u32, o_stride[0] as u32),
                 };
-            let (k_batch_stride, v_batch_stride) = block_table
+            let (k_batch_stride, v_batch_stride) = block_table_layout
                 .as_ref()
                 .map(|_| (k_stride[0] as u32, v_stride[0] as u32))
                 .unwrap_or((0, 0));
@@ -976,7 +971,7 @@ impl FlashAttentionVarLen {
                 /* window_size_right */ window_size_right,
                 /* softcap */ softcap,
                 /* unpadded_lse */ true,
-                block_table.is_some(),
+                !block_table_ptr.is_null(),
             )
         }
 
