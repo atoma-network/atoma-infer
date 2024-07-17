@@ -635,7 +635,7 @@ impl FlashAttentionVarLen {
                 }
                 _ => candle_core::bail!("block_table must be a cuda tensor"),
             };
-            (Some(block_table), Some(block_table_layout))
+            (Some(block_table.clone()), Some(block_table_layout))
         } else {
             (None, None)
         };
