@@ -155,7 +155,7 @@ fn compile_cuda_files(build_dir: &PathBuf, cutlass_include_arg: &String) -> Resu
     let builder = bindgen_cuda::Builder::default()
         .kernel_paths(kernels)
         .out_dir(build_dir.clone())
-        .arg("--gpu-architecture=sm_80") // Adjust as needed
+        .arg("--gpu-architecture=sm_89")
         .arg("-O2")
         .arg(cutlass_include_arg)
         .arg("-U__CUDA_NO_HALF_OPERATORS__")
