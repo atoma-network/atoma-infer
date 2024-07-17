@@ -620,7 +620,7 @@ impl FlashAttentionVarLen {
         let batch_size = nseqlens_q - 1;
         let (_total_q, num_heads, head_size_og) = q_l.shape().dims3()?;
 
-        let (block_table, block_table_layout) = if let Some(block_table) = &self.block_table {
+        let (block_table, block_table_layout, _block_storage) = if let Some(block_table) = &self.block_table {
             let (block_table_storage, block_table_layout) = block_table.storage_and_layout();
             let block_table = match &*block_table_storage {
                 candle_core::Storage::Cuda(c) => {
@@ -635,9 +635,9 @@ impl FlashAttentionVarLen {
                 }
                 _ => candle_core::bail!("block_table must be a cuda tensor"),
             };
-            (Some(block_table), Some(block_table_layout))
+            (Some(block_table), Some(block_table_layout), Some(block_table_storage))
         } else {
-            (None, None)
+            (None, None, None)
         };
 
         let (num_blocks, total_k, num_heads_k, head_size_og) = if block_table.is_some() {
