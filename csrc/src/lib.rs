@@ -101,7 +101,7 @@ impl FlashAttention {
 
         if q_rank != 4 || k_rank != 4 || v_rank != 4 {
             candle_core::bail!(
-                "flash-attn expects input tensors of rank 4 (q: {q_rank}, k: {k_rank}, v: {v_rank}"
+                "flash-attn expects input tensors of rank 4 (q: {q_rank}, k: {k_rank}, v: {v_rank})"
             )
         }
 
@@ -685,9 +685,13 @@ impl FlashAttentionVarLen {
         let v_rank = v_stride.len();
         let o_rank = o_stride.len();
 
-        if q_rank != 3 || k_rank != 3 || v_rank != 3 {
+        if block_table_ptr.is_null() && q_rank != 3 || k_rank != 3 || v_rank != 3 {
             candle_core::bail!(
                 "flash-attn-varlen expects input tensors of rank 3 (q: {q_rank}, k: {k_rank}, v: {v_rank}"
+            )
+        } else if !block_table_ptr.is_null() && q_rank != 3 || k_rank != 4 || v_rank != 4 {
+            candle_core::bail!(
+                "flash-attn-varlen expects input tensors of rank 4 (q: {q_rank}, k: {k_rank}, v: {v_rank}"
             )
         }
         if q_stride[q_rank - 1] != 1 {
