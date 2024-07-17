@@ -637,8 +637,7 @@ impl FlashAttentionVarLen {
                 _ => candle_core::bail!("block_table must be a cuda tensor"),
             };
             // Clone block_table_storage to extend its lifetime
-            let block_table_storage = block_table_storage.clone();
-            (Some((block_table, block_table_storage)), Some(block_table_layout))
+            (Some(block_table), Some(block_table_layout))
         } else {
             (None, None)
         };
