@@ -642,7 +642,7 @@ impl FlashAttentionVarLen {
             (std::ptr::null(), None)
         };
 
-        let (num_blocks, total_k, num_heads_k, head_size_og) = if block_table.is_some() {
+        let (num_blocks, total_k, num_heads_k, head_size_og) = if !block_table_ptr.is_null() {
             k_l.shape().dims4()?
         } else {
             let (total_k, num_heads_k, _head_size_og) = k_l.shape().dims3()?;
@@ -1007,6 +1007,39 @@ impl FlashAttentionVarLen {
     }
 }
 
+impl candle_core::CustomOp3 for FlashAttentionVarLen {
+    fn name(&self) -> &'static str {
+        "flash-attn-varlen"
+    }
+
+    fn cpu_fwd(
+        &self,
+        _: &CpuStorage,
+        _: &Layout,
+        _: &CpuStorage,
+        _: &Layout,
+        _: &CpuStorage,
+        _: &Layout,
+    ) -> Result<(CpuStorage, Shape)> {
+        candle::bail!("no cpu support for flash-attn")
+    }
+
+    fn cuda_fwd(
+        &self,
+        q: &candle_core::CudaStorage,
+        q_l: &Layout,
+        k: &candle_core::CudaStorage,
+        k_l: &Layout,
+        v: &candle_core::CudaStorage,
+        v_l: &Layout,
+    ) -> Result<(candle_core::CudaStorage, Shape)> {
+        match q.dtype() {
+            candle_core::DType::F16 => self.cuda_fwd_t::<f16>(q, q_l, k, k_l, v, v_l, false),
+            candle_core::DType::BF16 => self.cuda_fwd_t::<bf16>(q, q_l, k, k_l, v, v_l, true),
+            dt => candle_core::bail!("flash-attn is only supported for f16/bf16 ({dt:?})"),
+        }
+    }
+}
 
 #[allow(clippy::too_many_arguments)]
 /// Flash-attention v2 layer with variable-length batching.
