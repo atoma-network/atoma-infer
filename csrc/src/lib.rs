@@ -279,6 +279,7 @@ impl FlashAttention {
                 /* block_table */ std::ptr::null(),
                 /* block_table_batch_stride */ 0,
                 /* page_block_size */ 0,
+                /* seqused_k */ std::ptr::null(),
                 /* seqlen_q */ seqlen_q as u32,
                 /* seqlen_k */ seqlen_k as u32,
                 /* seqlen_q_rounded */ seqlen_q_rounded as u32,
@@ -620,8 +621,7 @@ impl FlashAttentionVarLen {
         let batch_size = nseqlens_q - 1;
         let (_total_q, num_heads, head_size_og) = q_l.shape().dims3()?;
 
-        let block_table = self.block_table.clone();
-        let (block_table_ptr, block_table_layout) = if let Some(block_table) = &block_table {
+        let (block_table_ptr, block_table_layout) = if let Some(block_table) = &self.block_table {
             let (block_table_storage, block_table_layout) = block_table.storage_and_layout();
             let block_table_ptr = match &*block_table_storage {
                 candle_core::Storage::Cuda(c) => {
@@ -632,7 +632,7 @@ impl FlashAttentionVarLen {
                     if block_table_stride[block_table_rank - 1] != 1 {
                         candle_core::bail!("block_table must be contiguous")
                     }
-                    unsafe { *block_table.device_ptr() as *const i32 }
+                    *block_table.device_ptr() as *const i32
                 }
                 _ => candle_core::bail!("block_table must be a cuda tensor"),
             };
@@ -829,6 +829,26 @@ impl FlashAttentionVarLen {
             std::ptr::null()
         };
 
+        let seqused_k = if let Some(seqused_k) = &self.seqused_k {
+            let (seqused_k_storage, seqused_k_layout) = seqused_k.storage_and_layout();
+            let seqused_k_ptr = match &*seqused_k_storage {
+                candle_core::Storage::Cuda(c) => {
+                    let cuda_slice = c.as_cuda_slice::<u32>()?;
+                    let seqused_k = cuda_slice.slice(seqused_k_layout.start_offset()..);
+                    let seqused_k_stride = seqused_k_layout.stride();
+                    let seqused_k_rank = seqused_k_stride.len();
+                    if seqused_k_stride[seqused_k_rank - 1] != 1 {
+                        candle_core::bail!("block_table must be contiguous")
+                    }
+                    *seqused_k.device_ptr() as *const i32
+                }
+                _ => candle_core::bail!("block_table must be a cuda tensor"),
+            };    
+            seqused_k_ptr
+        } else {
+            std::ptr::null()
+        };
+
         // if window_size_left > self.max_seqlen_k or None => -1
         let mut window_size_left = self
             .window_size_left
@@ -961,6 +981,7 @@ impl FlashAttentionVarLen {
                 /* block_table */ block_table_ptr,
                 /* block_table_batch_stride */ block_table_batch_stride,
                 /* page_block_size */ page_block_size as i32,
+                /* seqused_k */ seqused_k,
                 /* seqlen_q */ self.max_seqlen_q as u32,
                 /* seqlen_k */ self.max_seqlen_k as u32,
                 /* seqlen_q_rounded */ seqlen_q_rounded as u32,
@@ -984,6 +1005,59 @@ impl FlashAttentionVarLen {
         let dst = candle_core::CudaStorage::wrap_cuda_slice(dst, dev.clone());
         Ok((dst, out_shape))
     }
+}
+
+
+#[allow(clippy::too_many_arguments)]
+/// Flash-attention v2 layer with variable-length batching.
+///
+/// This implements scaled dot-product attention, `softmax(Q @ K^T . softmax_scale) @ V`.
+/// Multi-query and grouped-query attention are supported by using tensors k and v with fewer heads
+/// than q, the number of heads in k and v has to be divisible by the number of heads in q.
+///
+/// # Arguments
+///
+/// * `q` - Query tensor with shape `(total_q, num_heads_q, head_size)`.
+/// * `k` - Key tensor with shape `(total_kv, num_heads_kv, head_size)`.
+/// * `v` - Value tensor with shape `(total_kv, num_heads_kv, head_size)`.
+/// * `seqlens_q` - The cumulative lengths of the sequences in the batch, used to index in q.
+/// * `seqlens_k` - The cumulative lengths of the sequences in the batch, used to index in k and v.
+/// * `max_seqlen_q` - The maximum query sequence length for q in the batch.
+/// * `max_seqlen_k` - The maximum query sequence length for k and v in the batch.
+///
+/// `seqlens_q` and `seqlens_k` contain `batch_size + 1` elements, typically `0`, `seqlen_1`,
+/// `seqlen_1 + seqlen_2`, etc.
+///
+/// The resulting tensor has dimensions `(total_q, num_heads_q, head_size)`.
+pub fn flash_attn_varlen(
+    q: &Tensor,
+    k: &Tensor,
+    v: &Tensor,
+    seqlens_q: &Tensor,
+    seqlens_k: &Tensor,
+    max_seqlen_q: usize,
+    max_seqlen_k: usize,
+    softmax_scale: f32,
+    causal: bool,
+) -> Result<Tensor> {
+    let window_size_left = None;
+    let window_size_right = if causal { Some(0) } else { None };
+
+    let op = FlashAttentionVarLen {
+        softmax_scale,
+        max_seqlen_q,
+        max_seqlen_k,
+        seqlens_q: seqlens_q.clone(),
+        seqlens_k: seqlens_k.clone(),
+        alibi_slopes: None,
+        window_size_left,
+        window_size_right,
+        softcap: None,
+        block_table: None,
+        is_causal: causal,
+        seqused_k: None,
+    };
+    q.apply_op3(k, v, op)
 }
 
 pub(crate) mod utils {

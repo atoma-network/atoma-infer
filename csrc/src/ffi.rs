@@ -42,6 +42,7 @@ extern "C" {
         block_table_batch_stride: u32,
         page_block_size: c_int,
 
+        seqused_k: *const c_int,
         seqlen_q: u32,
         seqlen_k: u32,
         seqlen_q_rounded: u32,

@@ -55,6 +55,7 @@ extern "C" void run_mha(
     uint32_t block_table_batch_stride,
     int page_block_size,
 
+    int *seqused_k,
     uint32_t seqlen_q,
     uint32_t seqlen_k,
     uint32_t seqlen_q_rounded,
@@ -122,7 +123,7 @@ extern "C" void run_mha(
     params.cu_seqlens_q = cu_seqlens_q_ptr;
     params.cu_seqlens_k = cu_seqlens_k_ptr;
     params.p_ptr = nullptr; // used for `return_softmax`.
-    params.seqused_k = nullptr;
+    params.seqused_k = seqused_k;
 
     params.is_causal = is_causal;
     params.window_size_left = window_size_left;
