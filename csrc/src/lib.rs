@@ -6,6 +6,7 @@ use candle_core::backend::BackendStorage;
 use candle_core::cuda_backend::cudarc::driver::DevicePtr;
 use candle_core::cuda_backend::WrapErr;
 use candle_core::{CpuStorage, DType, Layout, Result, Shape, Tensor};
+use candle_nn::seq;
 use half::{bf16, f16};
 
 pub struct FlashAttention {
@@ -238,6 +239,14 @@ impl FlashAttention {
             let v_ptr = *v.device_ptr() as *const core::ffi::c_void;
             let dst_ptr = *dst.device_ptr() as *const core::ffi::c_void;
             let softmax_lse_ptr = *softmax_lse.device_ptr() as *const core::ffi::c_void;
+            let (q_batch_stride, o_batch_stride) = if !seqlenq_ngroups_swapped {
+                (q_stride[0] as u32, o_stride[0] as u32)
+            } else {
+                (
+                    (q_stride[0] * seqlen_q) as u32,
+                    (o_stride[0] * seqlen_q) as u32,
+                )
+            };
             ffi::run_mha(
                 q_ptr,
                 k_ptr,
@@ -247,10 +256,10 @@ impl FlashAttention {
                 /* alibi_slopes_ptr */ alibi_slopes_ptr,
                 /* cu_seqlens_q_ptr */ std::ptr::null(),
                 /* cu_seqlens_k_ptr */ std::ptr::null(),
-                /* q_batch_stride */ q_stride[0] as u32,
+                /* q_batch_stride */ q_batch_stride,
                 /* k_batch_stride */ k_stride[0] as u32,
                 /* v_batch_stride */ v_stride[0] as u32,
-                /* o_batch_stride */ o_stride[0] as u32,
+                /* o_batch_stride */ o_batch_stride,
                 /* alibi_slopes_batch_stride */ 0,
                 /* q_row_stride   */ q_stride[q_rank - 3] as u32,
                 /* k_row_stride   */ k_stride[k_rank - 3] as u32,
@@ -280,6 +289,7 @@ impl FlashAttention {
                 /* window_size_left */ window_size_left,
                 /* window_size_right */ window_size_right,
                 /* softcap */ softcap,
+                false,
                 false,
             )
         }
@@ -505,6 +515,8 @@ struct FlashAttnVarLen {
     pub window_size_left: Option<usize>,
     /// Window size for right sided slicing attention
     pub window_size_right: Option<usize>,
+    /// Softcap parameter, used in Grok and Gemma2 models
+    pub softcap: Option<f32>,
 }
 
 impl FlashAttnVarLen {
@@ -557,6 +569,43 @@ impl FlashAttnVarLen {
         let k = k.slice(k_l.start_offset()..);
         let v = v.slice(v_l.start_offset()..);
 
+        let nseqlens_q = seqlens_q_layout.shape().dims1()?;
+        let batch_size = nseqlens_q - 1;
+        let (_total_q, num_heads, head_size_og) = q_l.shape().dims3()?;
+
+        let seqlenq_ngroups_swapped = self.max_seqlen_q == 1
+            && num_heads > num_heads_k
+            && self.window_size_left.is_none()
+            && self.window_size_right.is_none()
+            && head_size_og % 8 == 0
+            && self.alibi_slopes.is_none();
+        // Faster to transpose q from (b, 1, (nheads_kv ngroups), d) to (b, ngroups, nheads_kv, d) in this case
+        let (q_l, out_l, out_shape, max_seqlen_q, num_heads) = if seqlenq_ngroups_swapped {
+            let ngroups = num_heads / num_heads_k;
+            let new_shape = Shape::from((batch_size, ngroups, num_heads_k, head_size_og));
+
+            // Create new layout for q, maintaining the original start_offset
+            let new_q_l =
+                Layout::contiguous_with_offset(&new_shape, q_l.start_offset()).transpose(1, 2)?;
+            // TODO: use `Layout` reshape
+            (
+                new_q_l,
+                Layout::contiguous(&new_shape),
+                new_shape,
+                ngroups,
+                num_heads_k,
+            )
+        } else {
+            let out_shape = q_l.shape().clone();
+            (
+                q_l.clone(),
+                Layout::contiguous(&out_shape),
+                out_shape,
+                seqlen_q,
+                num_heads,
+            )
+        };
+
         let q_stride = q_l.stride();
         let k_stride = k_l.stride();
         let v_stride = v_l.stride();
@@ -599,10 +648,6 @@ impl FlashAttnVarLen {
             (None, None)
         };
 
-        let nseqlens_q = seqlens_q_layout.shape().dims1()?;
-        let batch_size = nseqlens_q - 1;
-        let (_total_q, num_heads, head_size_og) = q_l.shape().dims3()?;
-
         let (num_blocks, total_k, num_heads_k, head_size_og) = if block_table.is_some() {
             k_l.shape().dims4()?
         } else {
@@ -628,6 +673,12 @@ impl FlashAttnVarLen {
         }
         if head_size_og > 256 {
             candle_core::bail!("only supports head dimension at most 256 (got {head_size_og})")
+        }
+        if head_size_og % 8 != 0 {
+            // TODO: Handle head sizes that are not a multiple of 8 via some padding.
+            candle_core::bail!(
+                "only supports head sizes that are a multiple of 8 (got {head_size_og})"
+            )
         }
         if num_heads % num_heads_k != 0 {
             candle_core::bail!("number of k/v heads {num_heads_k} must divide number of heads in query {num_heads}")
@@ -687,7 +738,6 @@ impl FlashAttnVarLen {
             )
         }
 
-        let nseqlens_q = seqlens_q_layout.shape().dims1()?;
         if nseqlens_q < 2 {
             candle_core::bail!("seqlens_q should have a len >= 2 {nseqlens_q}")
         }
@@ -768,14 +818,69 @@ impl FlashAttnVarLen {
             window_size_right = self.max_seqlen_k as i32;
         }
 
+        let num_splits = if seqlenq_ngroups_swapped {
+            // Only apply split-k for decoding
+            utils::compute_num_splits(
+                batch_size,
+                num_heads,
+                head_size,
+                max_seqlen_k,
+                max_seqlen_q,
+                device.ordinal(),
+            )?
+        } else {
+            1
+        };
+
+        let mut softcap = self.softcap.unwrap_or(0.0);
+        let (softmax_scale, scale_softmatx_log2) = if softcap > 0.0 {
+            softcap = self.softmax_scale / softcap;
+            (softcap, softcap * std::f32::consts::LOG2_E)
+        } else {
+            // Remove potential NaN
+            softcap = 0.0;
+            (
+                self.softmax_scale,
+                self.softmax_scale * std::f32::consts::LOG2_E,
+            )
+        };
+
         unsafe {
             let q_ptr = *q.device_ptr() as *const core::ffi::c_void;
             let k_ptr = *k.device_ptr() as *const core::ffi::c_void;
             let v_ptr = *v.device_ptr() as *const core::ffi::c_void;
+            let block_table_ptr = if let Some(block_table) = &self.block_table {
+                *block_table.device_ptr() as *const core::ffi::c_void
+            } else {
+                std::ptr::null()
+            };
+            let block_table_batch_stride = if let Some(layout) = block_table_layout {
+                layout.stride()[0] as u32
+            } else {
+                0
+            };
             let dst_ptr = *dst.device_ptr() as *const core::ffi::c_void;
             let softmax_lse_ptr = *softmax_lse.device_ptr() as *const core::ffi::c_void;
-            let seqlens_q_ptr = *seqlens_q.device_ptr() as *const core::ffi::c_int;
+            let seqlens_q_ptr = if !seqlenq_ngroups_swapped {
+                *seqlens_q.device_ptr() as *const core::ffi::c_int
+            } else {
+                std::ptr::null()
+            };
             let seqlens_k_ptr = *seqlens_k.device_ptr() as *const core::ffi::c_int;
+            let (q_batch_stride, o_batch_stride) =
+                match (seqlens_q_ptr.is_null(), seqlenq_ngroups_swapped) {
+                    (false, _) => (0, 0),
+                    (true, true) => (
+                        (q_stride[0] * seqlen_q) as u32,
+                        (o_stride[0] * seqlen_q) as u32,
+                    ),
+                    (true, false) => (q_stride[0] as u32, o_stride[0] as u32),
+                };
+            let (k_batch_stride, v_batch_stride) = block_table
+                .as_ref()
+                .map(|_| (k_stride[0] as u32, v_stride[0] as u32))
+                .unwrap_or((0, 0));
+            // TODO: handle case where max_seqlen_q == 0, separately
             ffi::run_mha(
                 q_ptr,
                 k_ptr,
@@ -785,10 +890,10 @@ impl FlashAttnVarLen {
                 /* alibi_slopes_ptr */ alibi_slopes_ptr,
                 /* cu_seqlens_q_ptr */ seqlens_q_ptr,
                 /* cu_seqlens_k_ptr */ seqlens_k_ptr,
-                /* q_batch_stride */ 0,
-                /* k_batch_stride */ 0,
-                /* v_batch_stride */ 0,
-                /* o_batch_stride */ 0,
+                /* q_batch_stride */ q_batch_stride,
+                /* k_batch_stride */ k_batch_stride,
+                /* v_batch_stride */ v_batch_stride,
+                /* o_batch_stride */ o_batch_stride,
                 /* alibi_slopes_batch_stride */ 0,
                 /* q_row_stride   */ q_stride[q_rank - 3] as u32,
                 /* k_row_stride   */ k_stride[k_rank - 3] as u32,
@@ -798,22 +903,36 @@ impl FlashAttnVarLen {
                 /* k_head_stride  */ k_stride[k_rank - 2] as u32,
                 /* v_head_stride  */ v_stride[v_rank - 2] as u32,
                 /* o_head_stride  */ o_stride[o_rank - 2] as u32,
+                /* num_splits */ num_splits as u32,
                 /* b */ batch_size as u32,
                 /* h */ num_heads as u32,
                 /* h_k */ num_heads_k as u32,
                 /* d */ head_size as u32,
                 /* d_rounded */ head_size_rounded as u32,
                 /* softmax_scale*/ self.softmax_scale,
+                /* scale_softmatx_log2 */ scale_softmatx_log2,
                 /* seqlen_q */ self.max_seqlen_q as u32,
                 /* seqlen_k */ self.max_seqlen_k as u32,
+                /* block_table */ block_table_ptr,
+                /* block_table_batch_stride */ block_table_batch_stride,
+                /* page_block_size */ page_block_size,
                 /* seqlen_q_rounded */ seqlen_q_rounded as u32,
                 /* seqlen_k_rounded */ seqlen_k_rounded as u32,
                 /* is_bf16 */ is_bf16,
                 /* is_causal */ is_causal,
                 /* window_size_left */ window_size_left,
                 /* window_size_right */ window_size_right,
+                /* softcap */ softcap,
+                /* unpadded_lse */ unpadded_lse,
+                block_table.is_some(),
             )
         }
+
+        let out_shape = if seqlenq_ngroups_swapped {
+            Shape::from((batch_size, 1, num_heads_k * max_seqlen_q, head_size_og))
+        } else {
+            out_shape
+        };
 
         let dst = candle_core::CudaStorage::wrap_cuda_slice(dst, dev.clone());
         Ok((dst, out_shape))

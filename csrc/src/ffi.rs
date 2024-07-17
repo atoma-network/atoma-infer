@@ -54,6 +54,6 @@ extern "C" {
         window_size_right: c_int,
         softcap: f32,
         unpadded_lse: bool,
+        force_split_kernel: bool,
     );
-
 }

@@ -66,7 +66,8 @@ extern "C" void run_mha(
     int window_size_left,
     int window_size_right,
     float softcap,
-    bool unpadded_lse
+    bool unpadded_lse,
+    bool force_split_kernel=false
 ) {
     Flash_fwd_params params;
     // Reset the parameters
@@ -140,5 +141,5 @@ extern "C" void run_mha(
     params.unpadded_lse = unpadded_lse;
 
     cudaStream_t stream = 0; // Use the default stream.
-    run_mha_fwd(params, stream);
+    run_mha_fwd(params, stream, force_split_kernel);
 }
