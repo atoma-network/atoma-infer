@@ -4,6 +4,9 @@
 
 #pragma once
 
+// Disable dropout for now
+#define FLASHATTENTION_DISABLE_DROPOUT
+
 /// @param COND       - a boolean expression to switch by
 /// @param CONST_NAME - a name given for the constexpr bool variable.
 /// @param ...       - code to execute for true and false

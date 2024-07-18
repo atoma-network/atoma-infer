@@ -102,7 +102,7 @@ fn compile_cuda_files(build_dir: &PathBuf) -> Result<()> {
         .kernel_paths(kernels)
         .out_dir(build_dir.clone())
         .arg("-std=c++17")
-        .arg("-O2")
+        .arg("-O3")
         .arg("-Icutlass/include")
         .arg("-U__CUDA_NO_HALF_OPERATORS__")
         .arg("-U__CUDA_NO_HALF_CONVERSIONS__")
