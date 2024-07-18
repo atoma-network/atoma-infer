@@ -77,11 +77,33 @@ fn main() -> Result<()> {
     for kernel_file in KERNEL_FILES.iter() {
         println!("cargo:rerun-if-changed={kernel_file}");
     }
+    println!("cargo:rerun-if-changed=kernels/flash_fwd_kernel.h");
+    println!("cargo:rerun-if-changed=kernels/flash_fwd_launch_template.h");
+    println!("cargo:rerun-if-changed=kernels/flash.h");
+    println!("cargo:rerun-if-changed=kernels/philox.cuh");
+    println!("cargo:rerun-if-changed=kernels/softmax.h");
+    println!("cargo:rerun-if-changed=kernels/utils.h");
+    println!("cargo:rerun-if-changed=kernels/kernel_traits.h");
+    println!("cargo:rerun-if-changed=kernels/block_info.h");
+    println!("cargo:rerun-if-changed=kernels/static_switch.h");
+    println!("cargo:rerun-if-changed=kernels/rotary.h");
+    println!("cargo:rerun-if-changed=kernels/alibi.h");
 
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").context("OUT_DIR not set")?);
     let build_dir = match std::env::var("ATOMA_FLASH_ATTN_BUILD_DIR") {
-        Err(_) => out_dir.clone(),
-        Ok(build_dir) => PathBuf::from(build_dir).canonicalize().context("Failed to canonicalize build directory")?
+        Err(_) =>
+        {
+            #[allow(clippy::redundant_clone)]
+            out_dir.clone()
+        }
+        Ok(build_dir) => {
+            let path = PathBuf::from(build_dir);
+            path.canonicalize().expect(&format!(
+                "Directory doesn't exists: {} (the current directory is {})",
+                &path.display(),
+                std::env::current_dir()?.display()
+            ))
+        }
     };
     println!("cargo:warning=Build directory: {:?}", build_dir.display());
 
