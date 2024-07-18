@@ -33,7 +33,7 @@ impl FlashAttention {
         // https://github.com/Dao-AILab/flash-attention/blob/main/csrc/flash_attn/flash_api.cpp#L341
         let device = q.device();
 
-        check_gpu_compatibility(device.ordinal())?;
+        utils::check_gpu_compatibility(device.ordinal())?;
 
         if q.dtype() != k.dtype() {
             candle_core::bail!("query and key must have the same dtype");
