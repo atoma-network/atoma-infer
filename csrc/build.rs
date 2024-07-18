@@ -4,7 +4,8 @@
 use anyhow::{Context, Result};
 use std::path::PathBuf;
 
-const KERNEL_FILES: [&str; 64] = [
+const KERNEL_FILES: [&str; 65] = [
+    "kernels/flash_api.cu",
     "kernels/flash_fwd_hdim32_bf16_causal_sm80.cu",
     "kernels/flash_fwd_hdim32_bf16_sm80.cu",
     "kernels/flash_fwd_hdim32_fp16_causal_sm80.cu",
@@ -72,7 +73,7 @@ const KERNEL_FILES: [&str; 64] = [
 ];
 
 fn main() -> Result<()> {
-    std::env::set_var("RAYON_NUM_THREADS", "4");
+    std::env::set_var("RAYON_NUM_THREADS", "16");
     println!("cargo:rerun-if-changed=build.rs");
     for kernel_file in KERNEL_FILES.iter() {
         println!("cargo:rerun-if-changed={kernel_file}");
@@ -88,7 +89,6 @@ fn main() -> Result<()> {
     println!("cargo:rerun-if-changed=kernels/static_switch.h");
     println!("cargo:rerun-if-changed=kernels/rotary.h");
     println!("cargo:rerun-if-changed=kernels/alibi.h");
-    println!("cargo:rerun-if-changed=kernels/flash_api.cpp");
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").context("OUT_DIR not set")?);
     let build_dir = match std::env::var("ATOMA_FLASH_ATTN_BUILD_DIR") {
         Err(_) =>
@@ -122,6 +122,10 @@ fn main() -> Result<()> {
         .arg("-U__CUDA_NO_HALF_CONVERSIONS__")
         .arg("-U__CUDA_NO_HALF2_OPERATORS__")
         .arg("-U__CUDA_NO_BFLOAT16_CONVERSIONS__")
+        .arg("-I/usr/local/lib/python3.10/dist-packages/torch/include/")
+        .arg("-I/usr/local/lib/python3.10/dist-packages/torch/include/")
+        .arg("-I/usr/local/lib/python3.10/dist-packages/torch/include/torch/csrc/api/include")
+        .arg("-DTORCH_CUDA_CU")
         .arg(cutlass_include_arg)
         .arg("--expt-relaxed-constexpr")
         .arg("--expt-extended-lambda")
@@ -130,7 +134,7 @@ fn main() -> Result<()> {
 
     println!("cargo:info={builder:?}");
 
-    let out_file = build_dir.join(format!("libflashattention.a"));
+    let out_file = build_dir.join("libflashattention.a");
     builder.build_lib(&out_file);
 
     println!("cargo:rustc-link-search={}", build_dir.display());
