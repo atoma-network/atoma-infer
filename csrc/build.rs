@@ -73,7 +73,6 @@ const KERNEL_FILES: [&str; 65] = [
 ];
 
 fn main() -> Result<()> {
-    std::env::set_var("RAYON_NUM_THREADS", "16");
     println!("cargo:rerun-if-changed=build.rs");
     for kernel_file in KERNEL_FILES.iter() {
         println!("cargo:rerun-if-changed={kernel_file}");
@@ -89,6 +88,7 @@ fn main() -> Result<()> {
     println!("cargo:rerun-if-changed=kernels/static_switch.h");
     println!("cargo:rerun-if-changed=kernels/rotary.h");
     println!("cargo:rerun-if-changed=kernels/alibi.h");
+
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").context("OUT_DIR not set")?);
     let build_dir = match std::env::var("ATOMA_FLASH_ATTN_BUILD_DIR") {
         Err(_) =>
@@ -105,28 +105,31 @@ fn main() -> Result<()> {
             ))
         }
     };
-    println!("cargo:warning={:?}", build_dir.display());
+    println!("cargo:warning=Build directory: {:?}", build_dir.display());
 
-    let current_dir = std::env::current_dir()?;
-    let cutlass_include_dir = current_dir.join("cutlass/include");
-    let cutlass_include_arg = format!("-I{}", cutlass_include_dir.display());
-    let cutlass_include_arg = Box::leak(cutlass_include_arg.into_boxed_str());
+    compile_cuda_files(&build_dir)?;
 
-    let kernels = KERNEL_FILES.iter().collect();
+    // Link libraries
+    println!("cargo:rustc-link-search={}", build_dir.display());
+    println!("cargo:rustc-link-lib=static=flashattention");
+    println!("cargo:rustc-link-lib=dylib=cudart");
+    println!("cargo:rustc-link-lib=dylib=stdc++");
+
+    Ok(())
+}
+
+fn compile_cuda_files(build_dir: &PathBuf) -> Result<()> {
+    let kernels: Vec<_> = KERNEL_FILES.iter().map(|&s| s.to_string()).collect();
     let builder = bindgen_cuda::Builder::default()
         .kernel_paths(kernels)
         .out_dir(build_dir.clone())
         .arg("-std=c++17")
         .arg("-O3")
+        .arg("-Icutlass/include")
         .arg("-U__CUDA_NO_HALF_OPERATORS__")
         .arg("-U__CUDA_NO_HALF_CONVERSIONS__")
         .arg("-U__CUDA_NO_HALF2_OPERATORS__")
         .arg("-U__CUDA_NO_BFLOAT16_CONVERSIONS__")
-        .arg("-I/usr/local/lib/python3.10/dist-packages/torch/include/")
-        .arg("-I/usr/local/lib/python3.10/dist-packages/torch/include/")
-        .arg("-I/usr/local/lib/python3.10/dist-packages/torch/include/torch/csrc/api/include")
-        .arg("-DTORCH_CUDA_CU")
-        .arg(cutlass_include_arg)
         .arg("--expt-relaxed-constexpr")
         .arg("--expt-extended-lambda")
         .arg("--use_fast_math")
@@ -136,11 +139,6 @@ fn main() -> Result<()> {
 
     let out_file = build_dir.join("libflashattention.a");
     builder.build_lib(&out_file);
-
-    println!("cargo:rustc-link-search={}", build_dir.display());
-    println!("cargo:rustc-link-lib=flashattention");
-    println!("cargo:rustc-link-lib=dylib=cudart");
-    println!("cargo:rustc-link-lib=dylib=stdc++");
 
     Ok(())
 }

@@ -33,6 +33,8 @@ impl FlashAttention {
         // https://github.com/Dao-AILab/flash-attention/blob/main/csrc/flash_attn/flash_api.cpp#L341
         let device = q.device();
 
+        check_gpu_compatibility(device.ordinal())?;
+
         if q.dtype() != k.dtype() {
             candle_core::bail!("query and key must have the same dtype");
         }
@@ -326,7 +328,6 @@ impl candle_core::CustomOp3 for FlashAttention {
     }
 }
 
-
 /// Flash-attention v2 layer.
 ///
 /// This implements scaled dot-product attention, `softmax(Q @ K^T . softmax_scale) @ V`.
@@ -362,6 +363,8 @@ pub fn flash_attn(
 }
 
 pub(crate) mod utils {
+
+    use cuda_runtime_sys::*;
 
     use super::*;
     pub(crate) fn round_multiple(x: usize, m: usize) -> usize {
@@ -456,8 +459,6 @@ pub(crate) mod utils {
     }
 
     pub(crate) fn get_multiprocessor_count(device_index: usize) -> Result<usize> {
-        use cuda_runtime_sys::*;
-
         unsafe {
             let mut count = MaybeUninit::uninit();
             let error = cudaDeviceGetAttribute(
@@ -470,5 +471,24 @@ pub(crate) mod utils {
             }
             Ok(count.assume_init() as usize)
         }
+    }
+
+    pub(crate) fn check_gpu_compatibility(device_index: usize) -> Result<()> {
+        use core::ffi::c_int;
+        let mut props = cudaDeviceProp::default();
+        unsafe {
+            let error =
+                cudaGetDeviceProperties(&mut props as *mut cudaDeviceProp, device_index as c_int);
+            if error != cudaError::cudaSuccess {
+                candle_core::bail!("CUDA error: {:?}", error)
+            }
+            let is_sm8x = props.major == 8 && props.minor >= 0;
+            let is_sm90 = props.major == 9 && props.minor == 0;
+
+            if !(is_sm90 || is_sm8x) {
+                candle_core::bail!("FlashAttention only supports Ampere GPUs or newer.")
+            }
+        }
+        Ok(())
     }
 }
