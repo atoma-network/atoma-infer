@@ -207,9 +207,11 @@ void run_mha_fwd_hdim64(Flash_fwd_params &params, cudaStream_t stream) {
 template<typename T, bool Is_causal>
 void run_mha_fwd_hdim96(Flash_fwd_params &params, cudaStream_t stream) {
     constexpr static int Headdim = 96;
-    // cudaDeviceProp props;
-    // cudaGetDeviceProperties(&props, 0);  // Assuming device 0
-    bool is_sm8x = true; // props.major == 8 && props.minor > 0;
+    cudaDeviceProp dprops;
+    int device;
+    cudaGetDevice(&device);
+    cudaGetDeviceProperties(&prop, device);
+    bool is_sm8x = dprops.major == 8 && dprops.minor > 0;
     DROPOUT_SWITCH(params.p_dropout < 1.f, Is_dropout, [&] {
         // For sm86 or sm89, 64 x 64 is the fastest for causal (because it's square),
         if (is_sm8x) {
@@ -233,7 +235,9 @@ template<typename T, bool Is_causal>
 void run_mha_fwd_hdim128(Flash_fwd_params &params, cudaStream_t stream) {
     constexpr static int Headdim = 128;
     cudaDeviceProp dprops;
-    cudaGetDeviceProperties(&dprops, cudaGetDevice());
+    int device;
+    cudaGetDevice(&device);
+    cudaGetDeviceProperties(&prop, device);
     bool is_sm8x = dprops.major == 8 && dprops.minor > 0;
     DROPOUT_SWITCH(params.p_dropout < 1.f, Is_dropout, [&] {
         if constexpr(!Is_dropout) {
@@ -269,7 +273,9 @@ template<typename T, bool Is_causal>
 void run_mha_fwd_hdim160(Flash_fwd_params &params, cudaStream_t stream) {
     constexpr static int Headdim = 160;
     cudaDeviceProp dprops;
-    cudaGetDeviceProperties(&dprops, cudaGetDevice());
+    int device;
+    cudaGetDevice(&device);
+    cudaGetDeviceProperties(&prop, device);
     bool is_sm8x = dprops.major == 8 && dprops.minor > 0;
     DROPOUT_SWITCH(params.p_dropout < 1.f, Is_dropout, [&] {
         // For A100, H100, 128 x 32 is the fastest.
