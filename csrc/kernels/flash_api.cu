@@ -1,6 +1,11 @@
-#include "flash_fwd_launch_template.h"
+#include <cutlass/array.h>
+#include <cutlass/cutlass.h>
+#include <cutlass/numeric_types.h>
 
-void run_mha_fwd(Flash_fwd_params &params, cudaStream_t stream, bool force_split_kernel=false) {
+#include "flash.h"
+#include "static_switch.h"
+
+void run_mha_fwd(Flash_fwd_params &params, cudaStream_t stream, bool force_split_kernel = false) {
     FP16_SWITCH(!params.is_bf16, [&] {
         HEADDIM_SWITCH(params.d, [&] {
             BOOL_SWITCH(params.is_causal, Is_causal, [&] {
@@ -41,7 +46,7 @@ extern "C" void run_mha(
     uint32_t v_head_stride,
     uint32_t o_head_stride,
 
-    uint32_t num_splits, // For split-KV version
+    uint32_t num_splits,  // For split-KV version
 
     uint32_t b,
     uint32_t h,
@@ -66,8 +71,7 @@ extern "C" void run_mha(
     int window_size_left,
     int window_size_right,
     float softcap,
-    bool unpadded_lse
-) {
+    bool unpadded_lse) {
     Flash_fwd_params params;
     // Reset the parameters
     memset(&params, 0, sizeof(params));
@@ -113,14 +117,14 @@ extern "C" void run_mha(
     params.scale_softmax = softmax_scale;
     params.scale_softmax_log2 = scale_softmatx_log2;
 
-    params.p_dropout = 1.; // probability to keep
+    params.p_dropout = 1.;  // probability to keep
     params.p_dropout_in_uint8_t = uint8_t(std::floor(params.p_dropout * 255.0));
     params.rp_dropout = 1.f / params.p_dropout;
     params.scale_softmax_rp_dropout = params.rp_dropout * params.scale_softmax;
     params.is_bf16 = is_bf16;
     params.cu_seqlens_q = cu_seqlens_q_ptr;
     params.cu_seqlens_k = cu_seqlens_k_ptr;
-    params.p_ptr = nullptr; // used for `return_softmax`.
+    params.p_ptr = nullptr;  // used for `return_softmax`.
     params.seqused_k = nullptr;
 
     params.is_causal = is_causal;
@@ -139,6 +143,6 @@ extern "C" void run_mha(
 
     params.unpadded_lse = unpadded_lse;
 
-    cudaStream_t stream = 0; // Use the default stream.
+    cudaStream_t stream = 0;  // Use the default stream.
     run_mha_fwd(params, stream);
 }
