@@ -1733,7 +1733,7 @@ impl FlashAttentionKvCache {
             if seqlens_k_stride[seqlens_k_rank - 1] != 1 {
                 candle_core::bail!("the last dim of seqlens_k must be contiguous {seqlens_k_stride:?}")
             }
-            *seqlens_k.device_ptr() as *const core::ffi::c_void
+            *seqlens_k.device_ptr() as *const core::ffi::c_int
         } else { 
             std::ptr::null()
         };
