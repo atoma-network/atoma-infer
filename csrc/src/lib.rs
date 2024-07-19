@@ -1418,13 +1418,14 @@ pub fn flash_attn_varlen_full(
 }
 
 /// Flash-attention v2 layer, with Key-Value cache.
+/// 
+/// NOTE: We are not using this code, as we plan to use paged attention with flash attention.
+/// In that case, the key and value tensors at each decoding phase are stored within the
+/// kv cache tensor, separately. So we don't need to pass the key and value tensors to the
+/// flash attention kernel, directly.
 struct FlashAttentionKvCache {
     /// Softmax scale
     pub softmax_scale: f32,
-    /// Optional Key tensor
-    pub k: Option<Tensor>,
-    /// Optional Value tensor
-    pub v: Option<Tensor>,
     /// Sequence lengths for the key tensor,
     /// of shape `[batch_size, ]`
     pub seqlens_k: Tensor,
