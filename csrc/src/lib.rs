@@ -113,10 +113,10 @@ impl FlashAttention {
         if q_stride[q_rank - 1] != 1 {
             candle_core::bail!("the last dim of q must be contiguous {q_stride:?}")
         }
-        if kc_stride[kc_rank - 1] != 1 {
+        if k_stride[k_rank - 1] != 1 {
             candle_core::bail!("the last dim of k must be contiguous {k_stride:?}")
         }
-        if vc_stride[vc_rank - 1] != 1 {
+        if v_stride[v_rank - 1] != 1 {
             candle_core::bail!("the last dim of v must be contiguous {v_stride:?}")
         }
 
@@ -1732,7 +1732,7 @@ impl FlashAttentionKvCache {
                 candle_core::bail!(
                     "DType mismatch seqlens_k {:?}, expected {:?}",
                     seqlens_k.dtype(),
-                    DType::I32
+                    DType::U32
                 );
             }
             let (seqlens_k, seqlens_k_layout) = seqlens_k.storage_and_layout();
@@ -1811,7 +1811,7 @@ impl FlashAttentionKvCache {
             let softmax_lse_ptr = *softmax_lse.device_ptr() as *const core::ffi::c_void;
             let (k_batch_stride, v_batch_stride) = block_table_layout
                 .as_ref()
-                .map(|_| (k_stride[0] as u32, v_stride[0] as u32))
+                .map(|_| (kc_stride[0] as u32, vc_stride[0] as u32))
                 .unwrap_or((0, 0));
 
             let o_stride = out_l.stride();
