@@ -3,10 +3,9 @@
 // variable in order to cache the compiled artifacts and avoid recompiling too often.
 use anyhow::{Context, Result};
 use std::path::PathBuf;
-use std::process::Command;
 
-const KERNEL_FILES: [&str; 64] = [
-    // "kernels/flash_api.cu",
+const KERNEL_FILES: [&str; 65] = [
+    "kernels/flash_api.cu",
     "kernels/flash_fwd_hdim32_bf16_causal_sm80.cu",
     "kernels/flash_fwd_hdim32_bf16_sm80.cu",
     "kernels/flash_fwd_hdim32_fp16_causal_sm80.cu",
@@ -81,7 +80,17 @@ fn main() -> Result<()> {
     {
         println!("cargo:rerun-if-changed={kernel_file}");
     }
-    // Your existing rerun-if-changed statements for header files
+    println!("cargo:rerun-if-changed=kernels/flash_fwd_kernel.h");
+    println!("cargo:rerun-if-changed=kernels/flash_fwd_launch_template.h");
+    println!("cargo:rerun-if-changed=kernels/flash.h");
+    println!("cargo:rerun-if-changed=kernels/philox.cuh");
+    println!("cargo:rerun-if-changed=kernels/softmax.h");
+    println!("cargo:rerun-if-changed=kernels/utils.h");
+    println!("cargo:rerun-if-changed=kernels/kernel_traits.h");
+    println!("cargo:rerun-if-changed=kernels/block_info.h");
+    println!("cargo:rerun-if-changed=kernels/static_switch.h");
+    println!("cargo:rerun-if-changed=kernels/rotary.h");
+    println!("cargo:rerun-if-changed=kernels/alibi.h");
 
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").context("OUT_DIR not set")?);
     let build_dir = match std::env::var("ATOMA_FLASH_ATTN_BUILD_DIR") {
@@ -92,16 +101,10 @@ fn main() -> Result<()> {
     };
     println!("cargo:warning=Build directory: {:?}", build_dir.display());
 
-    let current_dir = std::env::current_dir()?;
-    let cutlass_include_dir = current_dir.join("cutlass/include");
-    let cutlass_include_arg = format!("-I{}", cutlass_include_dir.display());
+    compile_cuda_files(&build_dir)?;
 
-    compile_cuda_files(&build_dir, &cutlass_include_arg)?;
-    compile_flash_api(&build_dir, &cutlass_include_arg)?;
-
-    // Step 3: Link libraries
+    // Link libraries
     println!("cargo:rustc-link-search={}", build_dir.display());
-    println!("cargo:rustc-link-lib=static=flash_api");
     println!("cargo:rustc-link-lib=static=flashattention");
     println!("cargo:rustc-link-lib=dylib=cudart");
     println!("cargo:rustc-link-lib=dylib=stdc++");
@@ -109,56 +112,14 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn compile_flash_api(build_dir: &PathBuf, cutlass_include_arg: &str) -> Result<()> {
-    let flash_api_o = build_dir.join("flash_api.o");
-    let status = Command::new("nvcc")
-        .args(&[
-            "-c",
-            "kernels/flash_api.cu",
-            "-o",
-            flash_api_o.to_str().unwrap(),
-            "-O2",
-            // "--gpu-architecture=sm_89",
-            cutlass_include_arg,
-            "-U__CUDA_NO_HALF_OPERATORS__",
-            "-U__CUDA_NO_HALF_CONVERSIONS__",
-            "-U__CUDA_NO_HALF2_OPERATORS__",
-            "-U__CUDA_NO_BFLOAT16_CONVERSIONS__",
-            "--expt-relaxed-constexpr",
-            "--expt-extended-lambda",
-            "--use_fast_math",
-            "--verbose",
-        ])
-        .status()
-        .context("Failed to compile flash_api.cu")?;
-
-    if !status.success() {
-        return Err(anyhow::anyhow!("nvcc command for flash_api.cu failed"));
-    }
-
-    // Create libflash_api.a
-    let status = Command::new("ar")
-        .args(&["rcs", "libflash_api.a", "flash_api.o"])
-        .current_dir(build_dir)
-        .status()
-        .context("Failed to create libflash_api.a")?;
-
-    if !status.success() {
-        return Err(anyhow::anyhow!("ar command for libflash_api.a failed"));
-    }
-
-    Ok(())
-}
-
-fn compile_cuda_files(build_dir: &PathBuf, cutlass_include_arg: &String) -> Result<()> {
-    let cutlass_include_arg = Box::leak(cutlass_include_arg.clone().into_boxed_str());
+fn compile_cuda_files(build_dir: &PathBuf) -> Result<()> {
     let kernels: Vec<_> = KERNEL_FILES.iter().map(|&s| s.to_string()).collect();
     let builder = bindgen_cuda::Builder::default()
         .kernel_paths(kernels)
         .out_dir(build_dir.clone())
-        .arg("--gpu-architecture=sm_89")
-        .arg("-O2")
-        .arg(cutlass_include_arg)
+        .arg("-std=c++17")
+        .arg("-O3")
+        .arg("-Icutlass/include")
         .arg("-U__CUDA_NO_HALF_OPERATORS__")
         .arg("-U__CUDA_NO_HALF_CONVERSIONS__")
         .arg("-U__CUDA_NO_HALF2_OPERATORS__")
