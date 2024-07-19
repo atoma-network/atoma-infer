@@ -135,8 +135,9 @@ fn flash_attn_varlen() -> Result<()> {
 }
 
 #[test]
-#[serial]
 fn flash_attn_varlen_with_block_table() -> Result<()> {
+    // Wait in order for CUDA state to sync
+    std::thread::sleep(std::time::Duration::from_millis(1));
     let device = Device::new_cuda(0)?;
     let block_size = 16;
     let num_blocks = 2;
