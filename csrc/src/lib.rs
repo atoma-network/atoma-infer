@@ -141,40 +141,44 @@ impl FlashAttention {
             candle_core::bail!("number of k/v heads {num_heads_k} must divide number of heads in query {num_heads}")
         }
 
-        let (alibi_slopes_ptr, alibi_slopes_batch_stride) = if let Some(alibi_slopes) = &self.alibi_slopes {
-            if alibi_slopes.dtype() != DType::F32 {
-                candle_core::bail!(
-                    "DType mismatch alibi_slopes {:?}, expected {:?}",
-                    alibi_slopes.dtype(),
-                    DType::F32
-                );
-            }
+        let (alibi_slopes_ptr, alibi_slopes_batch_stride) =
+            if let Some(alibi_slopes) = &self.alibi_slopes {
+                if alibi_slopes.dtype() != DType::F32 {
+                    candle_core::bail!(
+                        "DType mismatch alibi_slopes {:?}, expected {:?}",
+                        alibi_slopes.dtype(),
+                        DType::F32
+                    );
+                }
 
-            let alibi_slopes_batch_stride = if alibi_slopes.dims().len() == 2 {
-                alibi_slopes.stride()[0]
+                let alibi_slopes_batch_stride = if alibi_slopes.dims().len() == 2 {
+                    alibi_slopes.stride()[0]
+                } else {
+                    0
+                };
+
+                let (alibi_slopes, alibi_slopes_layout) = alibi_slopes.storage_and_layout();
+
+                if num_heads != alibi_slopes_layout.shape().dims1()? {
+                    candle_core::bail!(
+                        "shape mismatch alibi_slopes {:?}, expected {:?}",
+                        alibi_slopes_layout.shape(),
+                        (num_heads)
+                    );
+                }
+
+                let alibi_slopes = match &*alibi_slopes {
+                    candle_core::Storage::Cuda(c) => c.as_cuda_slice::<f32>()?,
+                    _ => candle_core::bail!("alibi_slopes must be a cuda tensor"),
+                };
+
+                (
+                    *alibi_slopes.device_ptr() as *const core::ffi::c_void,
+                    alibi_slopes_batch_stride,
+                )
             } else {
-                0
+                (std::ptr::null(), 0)
             };
-
-            let (alibi_slopes, alibi_slopes_layout) = alibi_slopes.storage_and_layout();
-
-            if num_heads != alibi_slopes_layout.shape().dims1()? {
-                candle_core::bail!(
-                    "shape mismatch alibi_slopes {:?}, expected {:?}",
-                    alibi_slopes_layout.shape(),
-                    (num_heads)
-                );
-            }
-
-            let alibi_slopes = match &*alibi_slopes {
-                candle_core::Storage::Cuda(c) => c.as_cuda_slice::<f32>()?,
-                _ => candle_core::bail!("alibi_slopes must be a cuda tensor"),
-            };
-
-            (*alibi_slopes.device_ptr() as *const core::ffi::c_void, alibi_slopes_batch_stride)
-        } else {
-            (std::ptr::null(), 0)
-        };
 
         // if window_size_left > self.max_seqlen_k or None => -1
         let mut window_size_left = self
@@ -821,42 +825,46 @@ impl FlashAttentionVarLen {
             candle_core::bail!("seqlens_q and seqlens_k should have the same number of elements {nseqlens_q} <> {nseqlens_k}")
         }
 
-        let (alibi_slopes_ptr, alibi_slopes_batch_stride) = if let Some(alibi_slopes) = &self.alibi_slopes {
-            if alibi_slopes.dtype() != DType::F32 {
-                candle_core::bail!(
-                    "DType mismatch alibi_slopes {:?}, expected {:?}",
-                    alibi_slopes.dtype(),
-                    DType::F32
-                );
-            }
+        let (alibi_slopes_ptr, alibi_slopes_batch_stride) =
+            if let Some(alibi_slopes) = &self.alibi_slopes {
+                if alibi_slopes.dtype() != DType::F32 {
+                    candle_core::bail!(
+                        "DType mismatch alibi_slopes {:?}, expected {:?}",
+                        alibi_slopes.dtype(),
+                        DType::F32
+                    );
+                }
 
-            let alibi_slopes_batch_stride = if alibi_slopes.dims().len() == 2 {
-                alibi_slopes.stride()[0]
+                let alibi_slopes_batch_stride = if alibi_slopes.dims().len() == 2 {
+                    alibi_slopes.stride()[0]
+                } else {
+                    0
+                };
+
+                let (alibi_slopes, alibi_slopes_layout) = alibi_slopes.storage_and_layout();
+
+                if num_heads != alibi_slopes_layout.shape().dims1()? {
+                    candle_core::bail!(
+                        "shape mismatch alibi_slopes {:?}, expected {:?}",
+                        alibi_slopes_layout.shape(),
+                        (num_heads)
+                    );
+                }
+
+                let alibi_slopes = match &*alibi_slopes {
+                    candle_core::Storage::Cuda(c) => c.as_cuda_slice::<f32>()?,
+                    _ => candle_core::bail!("alibi_slopes must be a cuda tensor"),
+                };
+
+                let alibi_slopes = alibi_slopes.slice(alibi_slopes_layout.start_offset()..);
+
+                (
+                    *alibi_slopes.device_ptr() as *const core::ffi::c_void,
+                    alibi_slopes_batch_stride,
+                )
             } else {
-                0
+                (std::ptr::null(), 0)
             };
-
-            let (alibi_slopes, alibi_slopes_layout) = alibi_slopes.storage_and_layout();
-
-            if num_heads != alibi_slopes_layout.shape().dims1()? {
-                candle_core::bail!(
-                    "shape mismatch alibi_slopes {:?}, expected {:?}",
-                    alibi_slopes_layout.shape(),
-                    (num_heads)
-                );
-            }
-
-            let alibi_slopes = match &*alibi_slopes {
-                candle_core::Storage::Cuda(c) => c.as_cuda_slice::<f32>()?,
-                _ => candle_core::bail!("alibi_slopes must be a cuda tensor"),
-            };
-
-            let alibi_slopes = alibi_slopes.slice(alibi_slopes_layout.start_offset()..);
-
-            (*alibi_slopes.device_ptr() as *const core::ffi::c_void, alibi_slopes_batch_stride)
-        } else {
-            (std::ptr::null(), 0)
-        };
 
         let seqused_k = if let Some(seqused_k) = &self.seqused_k {
             let (seqused_k_storage, seqused_k_layout) = seqused_k.storage_and_layout();
@@ -1654,42 +1662,46 @@ impl FlashAttentionKvCache {
             )
         };
 
-        let (alibi_slopes_ptr, alibi_slopes_batch_stride) = if let Some(alibi_slopes) = &self.alibi_slopes {
-            if alibi_slopes.dtype() != DType::F32 {
-                candle_core::bail!(
-                    "DType mismatch alibi_slopes {:?}, expected {:?}",
-                    alibi_slopes.dtype(),
-                    DType::F32
-                );
-            }
+        let (alibi_slopes_ptr, alibi_slopes_batch_stride) =
+            if let Some(alibi_slopes) = &self.alibi_slopes {
+                if alibi_slopes.dtype() != DType::F32 {
+                    candle_core::bail!(
+                        "DType mismatch alibi_slopes {:?}, expected {:?}",
+                        alibi_slopes.dtype(),
+                        DType::F32
+                    );
+                }
 
-            let alibi_slopes_batch_stride = if alibi_slopes.dims().len() == 2 {
-                alibi_slopes.stride()[0]
+                let alibi_slopes_batch_stride = if alibi_slopes.dims().len() == 2 {
+                    alibi_slopes.stride()[0]
+                } else {
+                    0
+                };
+
+                let (alibi_slopes, alibi_slopes_layout) = alibi_slopes.storage_and_layout();
+
+                if num_heads != alibi_slopes_layout.shape().dims1()? {
+                    candle_core::bail!(
+                        "shape mismatch alibi_slopes {:?}, expected {:?}",
+                        alibi_slopes_layout.shape(),
+                        (num_heads)
+                    );
+                }
+
+                let alibi_slopes = match &*alibi_slopes {
+                    candle_core::Storage::Cuda(c) => c.as_cuda_slice::<f32>()?,
+                    _ => candle_core::bail!("alibi_slopes must be a cuda tensor"),
+                };
+
+                let alibi_slopes = alibi_slopes.slice(alibi_slopes_layout.start_offset()..);
+
+                (
+                    *alibi_slopes.device_ptr() as *const core::ffi::c_void,
+                    alibi_slopes_batch_stride,
+                )
             } else {
-                0
+                (std::ptr::null(), 0)
             };
-
-            let (alibi_slopes, alibi_slopes_layout) = alibi_slopes.storage_and_layout();
-
-            if num_heads != alibi_slopes_layout.shape().dims1()? {
-                candle_core::bail!(
-                    "shape mismatch alibi_slopes {:?}, expected {:?}",
-                    alibi_slopes_layout.shape(),
-                    (num_heads)
-                );
-            }
-
-            let alibi_slopes = match &*alibi_slopes {
-                candle_core::Storage::Cuda(c) => c.as_cuda_slice::<f32>()?,
-                _ => candle_core::bail!("alibi_slopes must be a cuda tensor"),
-            };
-
-            let alibi_slopes = alibi_slopes.slice(alibi_slopes_layout.start_offset()..);
-
-            (*alibi_slopes.device_ptr() as *const core::ffi::c_void, alibi_slopes_batch_stride)
-        } else {
-            (std::ptr::null(), 0)
-        };
 
         // if window_size_left > self.max_seqlen_k or None => -1
         let mut window_size_left = self
@@ -1847,7 +1859,7 @@ impl FlashAttentionKvCache {
                 /* k_head_stride  */ kc_stride[kc_rank - 2] as u32,
                 /* v_head_stride  */ vc_stride[vc_rank - 2] as u32,
                 /* o_head_stride  */ o_stride[o_rank - 2] as u32,
-                /* num_splits */ 1,
+                /* num_splits */ num_splits,
                 /* b */ batch_size as u32,
                 /* h */ num_heads as u32,
                 /* h_k */ num_heads_k as u32,
@@ -1883,7 +1895,6 @@ impl FlashAttentionKvCache {
         Ok((dst, out_shape))
     }
 }
-
 
 impl candle_core::CustomOp3 for FlashAttentionKvCache {
     fn name(&self) -> &'static str {
