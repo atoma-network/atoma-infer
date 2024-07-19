@@ -1847,7 +1847,7 @@ impl FlashAttentionKvCache {
                 /* k_head_stride  */ kc_stride[kc_rank - 2] as u32,
                 /* v_head_stride  */ vc_stride[vc_rank - 2] as u32,
                 /* o_head_stride  */ o_stride[o_rank - 2] as u32,
-                /* num_splits */ num_splits,
+                /* num_splits */ 1,
                 /* b */ batch_size as u32,
                 /* h */ num_heads as u32,
                 /* h_k */ num_heads_k as u32,
