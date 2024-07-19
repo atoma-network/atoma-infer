@@ -6,7 +6,6 @@ use candle_core::backend::BackendStorage;
 use candle_core::cuda_backend::cudarc::driver::DevicePtr;
 use candle_core::cuda_backend::WrapErr;
 use candle_core::{CpuStorage, DType, Layout, Result, Shape, Tensor};
-use candle_nn::sequential;
 use half::{bf16, f16};
 
 /// Flash-attention v2 layer.
@@ -98,7 +97,7 @@ impl FlashAttention {
         let q_stride = q_l.stride();
         let k_stride = k_l.stride();
         let v_stride = v_l.stride();
-        let o_stride = out_l.stride();
+        let o_stride: &[usize] = out_l.stride();
 
         let q_rank = q_stride.len();
         let k_rank = k_stride.len();
@@ -114,10 +113,10 @@ impl FlashAttention {
         if q_stride[q_rank - 1] != 1 {
             candle_core::bail!("the last dim of q must be contiguous {q_stride:?}")
         }
-        if k_stride[k_rank - 1] != 1 {
+        if kc_stride[kc_rank - 1] != 1 {
             candle_core::bail!("the last dim of k must be contiguous {k_stride:?}")
         }
-        if v_stride[v_rank - 1] != 1 {
+        if vc_stride[vc_rank - 1] != 1 {
             candle_core::bail!("the last dim of v must be contiguous {v_stride:?}")
         }
 
@@ -142,7 +141,7 @@ impl FlashAttention {
             candle_core::bail!("number of k/v heads {num_heads_k} must divide number of heads in query {num_heads}")
         }
 
-        let alibi_slopes_ptr = if let Some(alibi_slopes) = &self.alibi_slopes {
+        let (alibi_slopes_ptr, alibi_slopes_batch_stride) = if let Some(alibi_slopes) = &self.alibi_slopes {
             if alibi_slopes.dtype() != DType::F32 {
                 candle_core::bail!(
                     "DType mismatch alibi_slopes {:?}, expected {:?}",
@@ -150,6 +149,12 @@ impl FlashAttention {
                     DType::F32
                 );
             }
+
+            let alibi_slopes_batch_stride = if alibi_slopes.dims().len() == 2 {
+                alibi_slopes.stride()[0]
+            } else {
+                0
+            };
 
             let (alibi_slopes, alibi_slopes_layout) = alibi_slopes.storage_and_layout();
 
@@ -166,11 +171,9 @@ impl FlashAttention {
                 _ => candle_core::bail!("alibi_slopes must be a cuda tensor"),
             };
 
-            let alibi_slopes = alibi_slopes.slice(alibi_slopes_layout.start_offset()..);
-
-            *alibi_slopes.device_ptr() as *const core::ffi::c_void
+            (*alibi_slopes.device_ptr() as *const core::ffi::c_void, alibi_slopes_batch_stride)
         } else {
-            std::ptr::null()
+            (std::ptr::null(), 0)
         };
 
         // if window_size_left > self.max_seqlen_k or None => -1
@@ -266,7 +269,7 @@ impl FlashAttention {
                 /* k_batch_stride */ k_stride[0] as u32,
                 /* v_batch_stride */ v_stride[0] as u32,
                 /* o_batch_stride */ o_batch_stride,
-                /* alibi_slopes_batch_stride */ 0,
+                /* alibi_slopes_batch_stride */ alibi_slopes_batch_stride,
                 /* q_row_stride   */ q_stride[q_rank - 3] as u32,
                 /* k_row_stride   */ k_stride[k_rank - 3] as u32,
                 /* v_row_stride   */ v_stride[v_rank - 3] as u32,
@@ -818,7 +821,7 @@ impl FlashAttentionVarLen {
             candle_core::bail!("seqlens_q and seqlens_k should have the same number of elements {nseqlens_q} <> {nseqlens_k}")
         }
 
-        let alibi_slopes_ptr = if let Some(alibi_slopes) = &self.alibi_slopes {
+        let (alibi_slopes_ptr, alibi_slopes_batch_stride) = if let Some(alibi_slopes) = &self.alibi_slopes {
             if alibi_slopes.dtype() != DType::F32 {
                 candle_core::bail!(
                     "DType mismatch alibi_slopes {:?}, expected {:?}",
@@ -826,6 +829,12 @@ impl FlashAttentionVarLen {
                     DType::F32
                 );
             }
+
+            let alibi_slopes_batch_stride = if alibi_slopes.dims().len() == 2 {
+                alibi_slopes.stride()[0]
+            } else {
+                0
+            };
 
             let (alibi_slopes, alibi_slopes_layout) = alibi_slopes.storage_and_layout();
 
@@ -844,9 +853,9 @@ impl FlashAttentionVarLen {
 
             let alibi_slopes = alibi_slopes.slice(alibi_slopes_layout.start_offset()..);
 
-            *alibi_slopes.device_ptr() as *const core::ffi::c_void
+            (*alibi_slopes.device_ptr() as *const core::ffi::c_void, alibi_slopes_batch_stride)
         } else {
-            std::ptr::null()
+            (std::ptr::null(), 0)
         };
 
         let seqused_k = if let Some(seqused_k) = &self.seqused_k {
@@ -982,7 +991,7 @@ impl FlashAttentionVarLen {
                 /* k_batch_stride */ k_batch_stride,
                 /* v_batch_stride */ v_batch_stride,
                 /* o_batch_stride */ o_batch_stride,
-                /* alibi_slopes_batch_stride */ 0,
+                /* alibi_slopes_batch_stride */ alibi_slopes_batch_stride,
                 /* q_row_stride   */ q_stride[q_rank - 3] as u32,
                 /* k_row_stride   */ k_stride[k_rank - 3] as u32,
                 /* v_row_stride   */ v_stride[v_rank - 3] as u32,
@@ -1478,33 +1487,31 @@ impl FlashAttentionKvCache {
         let kc = kc.as_cuda_slice::<f16>()?;
         let vc = vc.as_cuda_slice::<f16>()?;
         let q = q.slice(q_l.start_offset()..);
-        let kc = kc.slice(k_l.start_offset()..);
-        let vc = vc.slice(v_l.start_offset()..);
+        let kc = kc.slice(kc_l.start_offset()..);
+        let vc = vc.slice(vc_l.start_offset()..);
 
         let q_stride = q_l.stride();
         let kc_stride = kc_l.stride();
         let vc_stride = vc_l.stride();
-        let o_stride = out_l.stride();
 
         let q_rank = q_stride.len();
         let kc_rank = kc_stride.len();
         let vc_rank = vc_stride.len();
-        let o_rank = o_stride.len();
 
         if q_rank != 4 || kc_rank != 4 || vc_rank != 4 {
             candle_core::bail!(
-                "flash-attn expects input tensors of rank 4 (q: {q_rank}, k: {k_rank}, v: {v_rank})"
+                "flash-attn expects input tensors of rank 4 (q: {q_rank}, k: {kc_rank}, v: {vc_rank})"
             )
         }
 
         if q_stride[q_rank - 1] != 1 {
             candle_core::bail!("the last dim of q must be contiguous {q_stride:?}")
         }
-        if k_stride[k_rank - 1] != 1 {
-            candle_core::bail!("the last dim of k must be contiguous {k_stride:?}")
+        if kc_stride[kc_rank - 1] != 1 {
+            candle_core::bail!("the last dim of k must be contiguous {kc_stride:?}")
         }
-        if v_stride[v_rank - 1] != 1 {
-            candle_core::bail!("the last dim of v must be contiguous {v_stride:?}")
+        if vc_stride[vc_rank - 1] != 1 {
+            candle_core::bail!("the last dim of v must be contiguous {vc_stride:?}")
         }
 
         let (block_table_ptr, block_table_layout) = if let Some(block_table) = &self.block_table {
@@ -1572,7 +1579,7 @@ impl FlashAttentionKvCache {
                 }
             }
             None => {
-                let expected_shape = (batch_size_cache, seqlen_k, num_heads_k, head_size_og);
+                let expected_shape = (batch_size_cache, seqlens_k, num_heads_k, head_size_og);
                 if kc_l.shape().dims4()? != expected_shape {
                     candle_core::bail!(
                         "shape mismatch of k_cache (got {:?}) expected {:?})",
@@ -1647,7 +1654,7 @@ impl FlashAttentionKvCache {
             )
         };
 
-        let alibi_slopes_ptr = if let Some(alibi_slopes) = &self.alibi_slopes {
+        let (alibi_slopes_ptr, alibi_slopes_batch_stride) = if let Some(alibi_slopes) = &self.alibi_slopes {
             if alibi_slopes.dtype() != DType::F32 {
                 candle_core::bail!(
                     "DType mismatch alibi_slopes {:?}, expected {:?}",
@@ -1655,6 +1662,12 @@ impl FlashAttentionKvCache {
                     DType::F32
                 );
             }
+
+            let alibi_slopes_batch_stride = if alibi_slopes.dims().len() == 2 {
+                alibi_slopes.stride()[0]
+            } else {
+                0
+            };
 
             let (alibi_slopes, alibi_slopes_layout) = alibi_slopes.storage_and_layout();
 
@@ -1673,22 +1686,22 @@ impl FlashAttentionKvCache {
 
             let alibi_slopes = alibi_slopes.slice(alibi_slopes_layout.start_offset()..);
 
-            *alibi_slopes.device_ptr() as *const core::ffi::c_void
+            (*alibi_slopes.device_ptr() as *const core::ffi::c_void, alibi_slopes_batch_stride)
         } else {
-            std::ptr::null()
+            (std::ptr::null(), 0)
         };
 
         // if window_size_left > self.max_seqlen_k or None => -1
         let mut window_size_left = self
             .window_size_left
-            .filter(|v| v <= &seqlen_k)
+            .filter(|v| v <= &seqlens_k)
             .map(|v| v as i32)
             .unwrap_or(-1);
 
         // if window_size_right > self.max_seqlen_k or None => -1
         let mut window_size_right = self
             .window_size_right
-            .filter(|v| v <= &seqlen_k)
+            .filter(|v| v <= &seqlens_k)
             .map(|v| v as i32)
             .unwrap_or(-1);
 
@@ -1705,7 +1718,7 @@ impl FlashAttentionKvCache {
         let head_size = utils::round_multiple(head_size_og, 8);
         let head_size_rounded = utils::round_multiple(head_size, 32);
         let seqlen_q_rounded = utils::round_multiple(seqlen_q, 128);
-        let seqlen_k_rounded = utils::round_multiple(seqlen_k, 128);
+        let seqlen_k_rounded = utils::round_multiple(seqlens_k, 128);
 
         let cu_seqlens_k_ptr = if let Some(seqlens_k) = &self.seqlens_k {
             if seqlens_k.dims() != &[batch_size] {
@@ -1767,8 +1780,8 @@ impl FlashAttentionKvCache {
             batch_size,
             num_heads,
             head_size,
-            self.max_seqlen_k,
-            max_seqlen_q,
+            seqlens_k,
+            seqlen_q,
             dev.ordinal(),
         )?;
 
@@ -1796,26 +1809,12 @@ impl FlashAttentionKvCache {
             };
             let dst_ptr = *dst.device_ptr() as *const core::ffi::c_void;
             let softmax_lse_ptr = *softmax_lse.device_ptr() as *const core::ffi::c_void;
-            let seqlens_q_ptr = if !seqlenq_ngroups_swapped {
-                *seqlens_q.device_ptr() as *const core::ffi::c_int
-            } else {
-                std::ptr::null()
-            };
-            let seqlens_k_ptr = *seqlens_k.device_ptr() as *const core::ffi::c_int;
-            let (q_batch_stride, o_batch_stride) =
-                match (seqlens_q_ptr.is_null(), seqlenq_ngroups_swapped) {
-                    (false, _) => (0, 0),
-                    (true, true) => (
-                        (q_stride[0] * max_seqlen_q) as u32,
-                        (o_stride[0] * max_seqlen_q) as u32,
-                    ),
-                    (true, false) => (q_stride[0] as u32, o_stride[0] as u32),
-                };
             let (k_batch_stride, v_batch_stride) = block_table_layout
                 .as_ref()
                 .map(|_| (k_stride[0] as u32, v_stride[0] as u32))
                 .unwrap_or((0, 0));
 
+            let o_stride = out_l.stride();
             ffi::run_mha(
                 q_ptr,
                 kc_ptr,
@@ -1830,14 +1829,14 @@ impl FlashAttentionKvCache {
                 /* k_batch_stride */ k_batch_stride,
                 /* v_batch_stride */ v_batch_stride,
                 /* o_batch_stride */ o_batch_stride,
-                /* alibi_slopes_batch_stride */ 0,
+                /* alibi_slopes_batch_stride */ alibi_slopes_batch_stride,
                 /* q_row_stride   */ q_stride[q_rank - 3] as u32,
-                /* k_row_stride   */ k_stride[k_rank - 3] as u32,
-                /* v_row_stride   */ v_stride[v_rank - 3] as u32,
+                /* k_row_stride   */ kc_stride[k_rank - 3] as u32,
+                /* v_row_stride   */ vc_stride[v_rank - 3] as u32,
                 /* o_row_stride   */ o_stride[o_rank - 3] as u32,
                 /* q_head_stride  */ q_stride[q_rank - 2] as u32,
-                /* k_head_stride  */ k_stride[k_rank - 2] as u32,
-                /* v_head_stride  */ v_stride[v_rank - 2] as u32,
+                /* k_head_stride  */ kc_stride[k_rank - 2] as u32,
+                /* v_head_stride  */ vc_stride[v_rank - 2] as u32,
                 /* o_head_stride  */ o_stride[o_rank - 2] as u32,
                 /* num_splits */ num_splits,
                 /* b */ batch_size as u32,
