@@ -1757,7 +1757,7 @@ impl FlashAttentionKvCache {
         let elem_count = out_shape.elem_count();
         let dst = unsafe { dev.alloc::<f16>(elem_count) }.w()?;
         let softmax_lse = dev
-            .alloc_zeros::<f32>(batch_size * num_heads * self.max_seqlen_q)
+            .alloc_zeros::<f32>(batch_size * num_heads * seqlen_q)
             .w()?;
 
         let is_bf16 = if is_bf16 { 1 } else { 0 };
