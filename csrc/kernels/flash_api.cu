@@ -141,7 +141,7 @@ extern "C" void run_mha(
     params.block_table_batch_stride = block_table_batch_stride;
     params.page_block_size = page_block_size;
 
-    params.is_seqlens_k_cumulative = true;
+    params.is_seqlens_k_cumulative = is_seqlens_k_cumulative;
     params.num_splits = num_splits;
 
     params.softcap = softcap;
