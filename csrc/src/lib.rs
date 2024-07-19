@@ -269,7 +269,7 @@ impl FlashAttention {
                 /* k_batch_stride */ k_stride[0] as u32,
                 /* v_batch_stride */ v_stride[0] as u32,
                 /* o_batch_stride */ o_batch_stride,
-                /* alibi_slopes_batch_stride */ alibi_slopes_batch_stride,
+                /* alibi_slopes_batch_stride */ alibi_slopes_batch_stride as u32,
                 /* q_row_stride   */ q_stride[q_rank - 3] as u32,
                 /* k_row_stride   */ k_stride[k_rank - 3] as u32,
                 /* v_row_stride   */ v_stride[v_rank - 3] as u32,
@@ -991,7 +991,7 @@ impl FlashAttentionVarLen {
                 /* k_batch_stride */ k_batch_stride,
                 /* v_batch_stride */ v_batch_stride,
                 /* o_batch_stride */ o_batch_stride,
-                /* alibi_slopes_batch_stride */ alibi_slopes_batch_stride,
+                /* alibi_slopes_batch_stride */ alibi_slopes_batch_stride as u32,
                 /* q_row_stride   */ q_stride[q_rank - 3] as u32,
                 /* k_row_stride   */ k_stride[k_rank - 3] as u32,
                 /* v_row_stride   */ v_stride[v_rank - 3] as u32,
@@ -1770,10 +1770,10 @@ impl FlashAttentionKvCache {
             0
         };
         if window_size_left < 0 && window_size_right >= 0 {
-            window_size_left = self.max_seqlen_k as i32;
+            window_size_left = seqlens_k as i32;
         }
         if window_size_left >= 0 && window_size_right < 0 {
-            window_size_right = self.max_seqlen_k as i32;
+            window_size_right = seqlens_k as i32;
         }
 
         let num_splits = utils::compute_num_splits(
@@ -1829,7 +1829,7 @@ impl FlashAttentionKvCache {
                 /* k_batch_stride */ k_batch_stride,
                 /* v_batch_stride */ v_batch_stride,
                 /* o_batch_stride */ o_batch_stride,
-                /* alibi_slopes_batch_stride */ alibi_slopes_batch_stride,
+                /* alibi_slopes_batch_stride */ alibi_slopes_batch_stride as u32,
                 /* q_row_stride   */ q_stride[q_rank - 3] as u32,
                 /* k_row_stride   */ kc_stride[k_rank - 3] as u32,
                 /* v_row_stride   */ vc_stride[v_rank - 3] as u32,
