@@ -1030,8 +1030,12 @@ impl FlashAttentionVarLen {
                 /* window_size_right */ window_size_right,
                 /* softcap */ softcap,
                 /* unpadded_lse */ true,
-                /* force_split_kernel */ false,
+                /* force_split_kernel */ !block_table_ptr.is_null(),
             )
+        }
+
+        if seqlenq_ngroups_swapped { 
+            panic!("FLAG");
         }
 
         let out_shape = if seqlenq_ngroups_swapped {
