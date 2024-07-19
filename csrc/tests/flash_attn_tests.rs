@@ -195,7 +195,7 @@ fn flash_attn_kv_cache() -> Result<()> {
     let device = Device::new_cuda(0)?;
     let q = Tensor::arange(0u32, 48, &device)?
         .to_dtype(DType::F16)?
-        .reshape((3, 2, 8))?;
+        .reshape((1, 3, 2, 8))?;
     let k = (&q / 40.)?;
     let v = (&q / 50.)?;
     let q = (&q / 30.)?;
