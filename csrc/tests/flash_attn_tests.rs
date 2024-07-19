@@ -168,8 +168,6 @@ fn flash_attn_varlen_with_block_table() -> Result<()> {
 
     assert_eq!(ys.dims(), &[32, 2, 8]);
 
-    let block_size = 16;
-    let num_blocks = 2;
     let q = Tensor::arange(0u32, 512, &device)?
         .to_dtype(DType::F16)?
         .reshape((32, 2, 8))?;

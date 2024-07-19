@@ -975,7 +975,7 @@ impl FlashAttentionVarLen {
                 /* k_head_stride  */ k_stride[k_rank - 2] as u32,
                 /* v_head_stride  */ v_stride[v_rank - 2] as u32,
                 /* o_head_stride  */ o_stride[o_rank - 2] as u32,
-                /* num_splits */ 1u32,
+                /* num_splits */ num_splits,
                 /* b */ batch_size as u32,
                 /* h */ num_heads as u32,
                 /* h_k */ num_heads_k as u32,
