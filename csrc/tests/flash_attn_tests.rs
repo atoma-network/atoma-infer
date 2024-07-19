@@ -200,7 +200,7 @@ fn flash_attn_kv_cache() -> Result<()> {
     let v = (&q / 50.)?;
     let q = (&q / 30.)?;
 
-    let seqlens_k = Tensor::new(&[0u32], &device)?;
+    let seqlens_k = Tensor::new(&[3u32], &device)?;
 
     let ys = {
         // let q = q.transpose(0, 1)?;
