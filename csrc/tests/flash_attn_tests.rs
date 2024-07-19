@@ -149,8 +149,8 @@ fn flash_attn_varlen_with_block_table() -> Result<()> {
 
     let ys = {
         let q = q.transpose(0, 1)?;
-        let k = k.transpose(1, 2)?.transpose(0, 1)?;
-        let v = v.transpose(1, 2)?.transpose(0, 1)?;
+        let k = k.transpose(0, 2)?;
+        let v = v.transpose(0, 2)?;
         let block_table = Some(Tensor::arange(0u32, 4, &device)?.reshape((2, 2))?);
         csrc::flash_attn_varlen_with_block_table(
             &q,
@@ -166,7 +166,6 @@ fn flash_attn_varlen_with_block_table() -> Result<()> {
             None,
             block_table,
         )?
-        .transpose(1, 2)?
         .transpose(0, 1)?
     };
     let ys = ys.to_dtype(DType::F32)?;
