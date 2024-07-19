@@ -1875,6 +1875,41 @@ impl FlashAttentionKvCache {
     }
 }
 
+
+impl candle_core::CustomOp3 for FlashAttentionKvCache {
+    fn name(&self) -> &'static str {
+        "flash-attn"
+    }
+
+    fn cpu_fwd(
+        &self,
+        _: &CpuStorage,
+        _: &Layout,
+        _: &CpuStorage,
+        _: &Layout,
+        _: &CpuStorage,
+        _: &Layout,
+    ) -> Result<(CpuStorage, Shape)> {
+        candle_core::bail!("no cpu support for flash-attn")
+    }
+
+    fn cuda_fwd(
+        &self,
+        q: &candle_core::CudaStorage,
+        q_l: &Layout,
+        kc: &candle_core::CudaStorage,
+        kc_l: &Layout,
+        vc: &candle_core::CudaStorage,
+        vc_l: &Layout,
+    ) -> Result<(candle_core::CudaStorage, Shape)> {
+        match q.dtype() {
+            candle_core::DType::F16 => self.cuda_fwd_t::<f16>(q, q_l, kc, kc_l, vc, vc_l, false),
+            candle_core::DType::BF16 => self.cuda_fwd_t::<bf16>(q, q_l, kc, kc_l, vc, vc_l, true),
+            dt => candle_core::bail!("flash-attn is only supported for f16/bf16 ({dt:?})"),
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 /// Flash-attention v2 layer with key and value tensors cached.
 ///
