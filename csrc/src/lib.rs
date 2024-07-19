@@ -261,6 +261,7 @@ impl FlashAttention {
                 /* alibi_slopes_ptr */ alibi_slopes_ptr,
                 /* cu_seqlens_q_ptr */ std::ptr::null(),
                 /* cu_seqlens_k_ptr */ std::ptr::null(),
+                /* is_seqlens_k_cumulative */ true,
                 /* q_batch_stride */ q_batch_stride,
                 /* k_batch_stride */ k_stride[0] as u32,
                 /* v_batch_stride */ v_stride[0] as u32,
@@ -976,6 +977,7 @@ impl FlashAttentionVarLen {
                 /* alibi_slopes_ptr */ alibi_slopes_ptr,
                 /* cu_seqlens_q_ptr */ seqlens_q_ptr,
                 /* cu_seqlens_k_ptr */ seqlens_k_ptr,
+                /* is_seqlens_k_cumulative */ true,
                 /* q_batch_stride */ q_batch_stride,
                 /* k_batch_stride */ k_batch_stride,
                 /* v_batch_stride */ v_batch_stride,
@@ -1419,16 +1421,14 @@ pub fn flash_attn_varlen_full(
 
 /// Flash-attention v2 layer, with Key-Value cache.
 /// 
-/// NOTE: We are not using this code, as we plan to use paged attention with flash attention.
+/// NOTE: We are not passing in each Key and Value tensor for the decoding phase. This is
+/// because we plan to use paged attention with flash attention.
 /// In that case, the key and value tensors at each decoding phase are stored within the
 /// kv cache tensor, separately. So we don't need to pass the key and value tensors to the
 /// flash attention kernel, directly.
 struct FlashAttentionKvCache {
     /// Softmax scale
     pub softmax_scale: f32,
-    /// Sequence lengths for the key tensor,
-    /// of shape `[batch_size, ]`
-    pub seqlens_k: Tensor,
     /// Block table, used for paged attention algorithm
     /// of shape [batch_size, max_num_block_per_sequence]
     pub block_table: Option<Tensor>,
@@ -1439,6 +1439,9 @@ struct FlashAttentionKvCache {
     pub window_size_left: Option<usize>,
     /// Window size for right sided slicing attention
     pub window_size_right: Option<usize>,
+    /// Sequence lengths for the key tensor,
+    /// of shape `[batch_size, ]`
+    pub seqlens_k: Option<Tensor>,
     /// Softcap parameter, used in Grok and Gemma2 models
     pub softcap: Option<f32>,
 }
@@ -1704,6 +1707,38 @@ impl FlashAttentionKvCache {
         let seqlen_q_rounded = utils::round_multiple(seqlen_q, 128);
         let seqlen_k_rounded = utils::round_multiple(seqlen_k, 128);
 
+        let cu_seqlens_k_ptr =if let Some(seqlens_k) = &self.seqlens_k {
+            if seqlens_k.dims() != &[batch_size] {
+                candle_core::bail!(
+                    "shape mismatch of seqlens_k (got {:?}) expected {:?})",
+                    seqlens_k.dims(),
+                    [batch_size]
+                )
+            }
+            if seqlens_k.dtype() != DType::I32 {
+                candle_core::bail!(
+                    "DType mismatch seqlens_k {:?}, expected {:?}",
+                    seqlens_k.dtype(),
+                    DType::I32
+                );
+            }
+            let (seqlens_k, seqlens_k_layout) = seqlens_k.storage_and_layout();
+            let seqlens_k = match &*seqlens_k {
+                candle_core::Storage::Cuda(c) => c.as_cuda_slice::<i32>()?,
+                _ => candle_core::bail!("seqlens_k must be a cuda tensor"),
+            };
+            let seqlens_k = seqlens_k.slice(seqlens_k_layout.start_offset()..);
+            let seqlens_k_stride = seqlens_k_layout.stride();
+            let seqlens_k_rank = seqlens_k_stride.len();
+            if seqlens_k_stride[seqlens_k_rank - 1] != 1 {
+                candle_core::bail!("the last dim of seqlens_k must be contiguous {seqlens_k_stride:?}")
+            }
+            *seqlens_k.device_ptr() as *const core::ffi::c_void
+        } else { 
+            std::ptr::null()
+        };
+        let is_seqlens_k_cumulative = self.seqlens_k.is_none();
+
         let elem_count = out_shape.elem_count();
         let dst = unsafe { dev.alloc::<f16>(elem_count) }.w()?;
         let softmax_lse = dev
@@ -1748,71 +1783,6 @@ impl FlashAttentionKvCache {
             )
         };
 
-        // NOTE: We are not using this code, as we plan to use paged attention with flash attention.
-        // In that case, the key and value tensors at each decoding phase are stored within the
-        // kv cache tensor, separately. So we don't need to pass the key and value tensors to the
-        // flash attention kernel, directly.
-        let (k, v) = if let Some(k) = &self.k {
-            let v = self
-                .v
-                .as_ref()
-                .ok_or_else(|| candle_core::bail!("v must be provided when k is provided"))?;
-            if self.seqlens_k.is_none() {
-                candle_core::bail!("seqlens_k must be provided when k is provided")
-            }
-            if seqlen_q > seqlens_k {
-                candle_core::bail!(
-                    "seqlen_q must be less than or equal to seqlens_k, if key is provided"
-                )
-            }
-            if q.dtype() != k.dtype() {
-                candle_core::bail!("query and key must have the same dtype");
-            }
-
-            if q.dtype() != v.dtype() {
-                candle_core::bail!("query and value must have the same dtype");
-            }
-            let (k, k_l) = k.storage_and_layout();
-            let (v, v_l) = v.storage_and_layout();
-
-            let k = match &*k {
-                candle_core::Storage::Cuda(c) => c.as_cuda_slice::<f32>()?,
-                _ => candle_core::bail!("alibi_slopes must be a cuda tensor"),
-            };
-            let v = match &*v {
-                candle_core::Storage::Cuda(c) => c.as_cuda_slice::<f32>()?,
-                _ => candle_core::bail!("alibi_slopes must be a cuda tensor"),
-            };
-
-            let k = k.slice(k_l.start_offset()..);
-            let v = v.slice(v_l.start_offset()..);
-            let k_stride = k_l.stride();
-            let v_stride = v_l.stride();
-            let k_rank = k_stride.len();
-            let v_rank = v_stride.len();
-            if k_stride[k_rank - 1] != 1 {
-                candle_core::bail!("the last dim of k must be contiguous {k_stride:?}")
-            }
-            if v_stride[v_rank - 1] != 1 {
-                candle_core::bail!("the last dim of v must be contiguous {v_stride:?}")
-            }
-            let (_b_sz, seqlen_knew, _num_heads_k, _head_size_og) = k_l.shape().dims4()?;
-            if k_l.shape() != (batch_size, seqlen_knew, num_heads_k, head_size_og) {
-                candle_core::bail!(
-                    "shape mismatch of k (got {:?}) expected {:?})",
-                    k_l.shape(),
-                    (batch_size, seqlen_knew, num_heads_k, head_size_og)
-                )
-            }
-
-            (
-                k.device_ptr() as *const core::ffi::c_void,
-                v.device_ptr() as *const core::ffi::c_void,
-            )
-        } else {
-            (std::ptr::null(), std::ptr::null())
-        };
-
         unsafe {
             let q_ptr = *q.device_ptr() as *const core::ffi::c_void;
             let kc_ptr = *kc.device_ptr() as *const core::ffi::c_void;
@@ -1843,7 +1813,7 @@ impl FlashAttentionKvCache {
                 .as_ref()
                 .map(|_| (k_stride[0] as u32, v_stride[0] as u32))
                 .unwrap_or((0, 0));
-            // TODO: handle case where max_seqlen_q == 0, separately
+
             ffi::run_mha(
                 q_ptr,
                 kc_ptr,
@@ -1852,7 +1822,8 @@ impl FlashAttentionKvCache {
                 softmax_lse_ptr,
                 /* alibi_slopes_ptr */ alibi_slopes_ptr,
                 /* cu_seqlens_q_ptr */ std::ptr::null(),
-                /* cu_seqlens_k_ptr */ std::ptr::null(),
+                /* cu_seqlens_k_ptr */ cu_seqlens_k_ptr,
+                /* is_seqlens_k_cumulative */ is_seqlens_k_cumulative,
                 /* q_batch_stride */ q_batch_stride,
                 /* k_batch_stride */ k_batch_stride,
                 /* v_batch_stride */ v_batch_stride,
@@ -1902,6 +1873,220 @@ impl FlashAttentionKvCache {
         Ok((dst, out_shape))
     }
 }
+
+#[allow(clippy::too_many_arguments)]
+/// Flash-attention v2 layer with key and value tensors cached.
+///
+/// This implements scaled dot-product attention, `softmax(Q @ K^T . softmax_scale) @ V`.
+/// Multi-query and grouped-query attention are supported by using tensors k and v with fewer heads
+/// than q, the number of heads in k and v has to be divisible by the number of heads in q.
+///
+/// # Arguments
+///
+/// * `q` - Query tensor with shape `[batch_size, seqlen_q, num_heads, head_size]`.
+/// * `k` - Key tensor with shape `[batch_size_cache, seqlen_k, num_heads_k, head_size]` or `[num_blocks, page_block_size, num_heads_k, head_size]` if block_table.is_some().
+/// * `v` - Value tensor with shape `[batch_size_cache, seqlen_k, num_heads_k, head_size]` or `[num_blocks, page_block_size, num_heads_k, head_size]` if block_table.is_some().
+///
+/// The resulting tensor has dimensions `[batch_size, seqlen_q, num_heads, head_size]`.
+pub fn flash_attn_kv_cache(
+    q: &Tensor,
+    k: &Tensor,
+    v: &Tensor,
+    softmax_scale: f32,
+    causal: bool,
+) -> Result<Tensor> {
+    let window_size_left = None;
+    let window_size_right = if causal { Some(0) } else { None };
+
+    let op = FlashAttentionKvCache {
+        softmax_scale,
+        alibi_slopes: None,
+        window_size_left,
+        window_size_right,
+        softcap: None,
+        block_table: None,
+        seqlens_k: None,
+    };
+    q.apply_op3(k, v, op)
+}
+
+#[allow(clippy::too_many_arguments)]
+/// Flash-attention v2 layer with key and value tensors cached.
+///
+/// This implements scaled dot-product attention, `softmax(Q @ K^T . softmax_scale) @ V`.
+/// Multi-query and grouped-query attention are supported by using tensors k and v with fewer heads
+/// than q, the number of heads in k and v has to be divisible by the number of heads in q.
+///
+/// # Arguments
+///
+/// * `q` - Query tensor with shape `[batch_size, seqlen_q, num_heads, head_size]`.
+/// * `k` - Key tensor with shape `[batch_size_cache, seqlen_k, num_heads_k, head_size]` or `[num_blocks, page_block_size, num_heads_k, head_size]` if block_table.is_some().
+/// * `v` - Value tensor with shape `[batch_size_cache, seqlen_k, num_heads_k, head_size]` or `[num_blocks, page_block_size, num_heads_k, head_size]` if block_table.is_some().
+///
+/// The resulting tensor has dimensions `[batch_size, seqlen_q, num_heads, head_size]`.
+///
+/// # Causal mask
+///
+/// `window_size_left=None` with `window_size_right=Some(0)` applies a causal mask to the result
+/// of  `Q @ K^T`
+pub fn flash_attn_kv_cache_windowed(
+    q: &Tensor,
+    k: &Tensor,
+    v: &Tensor,
+    seqlens_k: Option<Tensor>,
+    softmax_scale: f32,
+    window_size_left: Option<usize>,
+    window_size_right: Option<usize>,
+) -> Result<Tensor> {
+    let op = FlashAttentionKvCache {
+        softmax_scale,
+        alibi_slopes: None,
+        window_size_left,
+        window_size_right,
+        softcap: None,
+        block_table: None,
+        seqlens_k: None,
+    };
+    q.apply_op3(k, v, op)
+}
+
+#[allow(clippy::too_many_arguments)]
+/// Flash-attention v2 layer with key and value tensors cached.
+///
+/// This implements scaled dot-product attention, `softmax(Q @ K^T . softmax_scale) @ V`.
+/// Multi-query and grouped-query attention are supported by using tensors k and v with fewer heads
+/// than q, the number of heads in k and v has to be divisible by the number of heads in q.
+///
+/// # Arguments
+///
+/// * `q` - Query tensor with shape `[batch_size, seqlen_q, num_heads, head_size]`.
+/// * `k` - Key tensor with shape `[batch_size_cache, seqlen_k, num_heads_k, head_size]` or `[num_blocks, page_block_size, num_heads_k, head_size]` if block_table.is_some().
+/// * `v` - Value tensor with shape `[batch_size_cache, seqlen_k, num_heads_k, head_size]` or `[num_blocks, page_block_size, num_heads_k, head_size]` if block_table.is_some().
+/// * `alibi_slopes` - Alibi slopes tensor with shape `(num_heads_q)`.
+///
+/// `seqlens_q` and `seqlens_k` contain `batch_size + 1` elements, typically `0`, `seqlen_1`,
+/// `seqlen_1 + seqlen_2`, etc.
+///
+/// The resulting tensor has dimensions `(total_q, num_heads_q, head_size)`.
+pub fn flash_attn_kv_cache_alibi(
+    q: &Tensor,
+    k: &Tensor,
+    v: &Tensor,
+    alibi_slopes: &Tensor,
+    seqlens_q: &Tensor,
+    seqlens_k: &Tensor,
+    max_seqlen_q: usize,
+    max_seqlen_k: usize,
+    softmax_scale: f32,
+    causal: bool,
+) -> Result<Tensor> {
+    let window_size_left = None;
+    let window_size_right = if causal { Some(0) } else { None };
+
+    let op = FlashAttentionKvCache {
+        softmax_scale,
+        alibi_slopes: Some(alibi_slopes.clone()),
+        window_size_left,
+        window_size_right,
+        softcap: None,
+        block_table: None,
+        seqlens_k: None,
+    };
+    q.apply_op3(k, v, op)
+}
+
+#[allow(clippy::too_many_arguments)]
+/// Flash-attention v2 layer with key and value tensors cached.
+///
+/// This implements scaled dot-product attention, `softmax(Q @ K^T . softmax_scale) @ V`.
+/// Multi-query and grouped-query attention are supported by using tensors k and v with fewer heads
+/// than q, the number of heads in k and v has to be divisible by the number of heads in q.
+///
+/// # Arguments
+///
+/// * `q` - Query tensor with shape `[batch_size, seqlen_q, num_heads, head_size]`.
+/// * `k` - Key tensor with shape `[batch_size_cache, seqlen_k, num_heads_k, head_size]` or `[num_blocks, page_block_size, num_heads_k, head_size]` if block_table.is_some().
+/// * `v` - Value tensor with shape `[batch_size_cache, seqlen_k, num_heads_k, head_size]` or `[num_blocks, page_block_size, num_heads_k, head_size]` if block_table.is_some().
+/// * `alibi_slopes` - Alibi slopes tensor with shape `(num_heads_q)`.
+/// * `window_size_left` - Limit left attention to value tokens.
+/// * `window_size_right` - Limit right attention to value tokens.
+///
+/// The resulting tensor has dimensions `(total_q, num_heads_q, head_size)`.
+///
+/// # Causal mask
+///
+/// `window_size_left=None` with `window_size_right=Some(0)` applies a causal mask to the result
+/// of  `Q @ K^T`
+pub fn flash_attn_kv_cache_alibi_windowed(
+    q: &Tensor,
+    k: &Tensor,
+    v: &Tensor,
+    alibi_slopes: &Tensor,
+    softmax_scale: f32,
+    window_size_left: Option<usize>,
+    window_size_right: Option<usize>,
+) -> Result<Tensor> {
+    let op = FlashAttentionKvCache {
+        softmax_scale,
+        alibi_slopes: Some(alibi_slopes.clone()),
+        window_size_left,
+        window_size_right,
+        block_table: None,
+        seqlens_k: None,
+        softcap: None,
+    };
+    q.apply_op3(k, v, op)
+}
+
+#[allow(clippy::too_many_arguments)]
+/// Flash-attention v2 layer with key and value tensors cached.
+///
+/// This implements scaled dot-product attention, `softmax(Q @ K^T . softmax_scale) @ V`.
+/// Multi-query and grouped-query attention are supported by using tensors k and v with fewer heads
+/// than q, the number of heads in k and v has to be divisible by the number of heads in q.
+///
+/// # Arguments
+///
+/// * `q` - Query tensor with shape `[batch_size, seqlen_q, num_heads, head_size]`.
+/// * `k` - Key tensor with shape `[batch_size_cache, seqlen_k, num_heads_k, head_size]` or `[num_blocks, page_block_size, num_heads_k, head_size]` if block_table.is_some().
+/// * `v` - Value tensor with shape `[batch_size_cache, seqlen_k, num_heads_k, head_size]` or `[num_blocks, page_block_size, num_heads_k, head_size]` if block_table.is_some().
+/// * `alibi_slopes` - Alibi slopes tensor with shape `(num_heads_q)`.
+/// * `window_size_left` - Limit left attention to value tokens.
+/// * `window_size_right` - Limit right attention to value tokens.
+/// * `block_table` - Block table tensor with shape `[batch_size, max_num_block_per_sequence]`.
+/// * `softcap` - Softcap parameter, used in Grok and Gemma2 models.
+/// * `seqlens_k` - The cumulative lengths of the sequences in the batch, used to index in k and v.
+///
+/// The resulting tensor has dimensions `(total_q, num_heads_q, head_size)`.
+///
+/// # Causal mask
+///
+/// `window_size_left=None` with `window_size_right=Some(0)` applies a causal mask to the result
+/// of  `Q @ K^T`
+pub fn flash_attn_kv_cache_full(
+    q: &Tensor,
+    k: &Tensor,
+    v: &Tensor,
+    alibi_slopes: Option<Tensor>,
+    softmax_scale: f32,
+    window_size_left: Option<usize>,
+    window_size_right: Option<usize>,
+    block_table: Option<Tensor>,
+    seqlens_k: Option<Tensor>,
+    softcap: Option<f32>,
+) -> Result<Tensor> {
+    let op = FlashAttentionKvCache {
+        softmax_scale,
+        alibi_slopes,
+        window_size_left,
+        window_size_right,
+        block_table,
+        seqlens_k,
+        softcap,
+    };
+    q.apply_op3(k, v, op)
+}
+
 
 pub(crate) mod utils {
 

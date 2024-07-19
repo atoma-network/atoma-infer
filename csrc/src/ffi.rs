@@ -12,6 +12,8 @@ extern "C" {
         cu_seqlens_q_ptr: *const i32,
         cu_seqlens_k_ptr: *const i32,
 
+        is_seqlens_k_cumulative: bool,
+
         q_batch_stride: u32,
         k_batch_stride: u32,
         v_batch_stride: u32,

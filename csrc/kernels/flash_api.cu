@@ -30,6 +30,8 @@ extern "C" void run_mha(
     int32_t *cu_seqlens_q_ptr,
     int32_t *cu_seqlens_k_ptr,
 
+    bool is_seqlens_k_cumulative,
+
     uint32_t q_batch_stride,
     uint32_t k_batch_stride,
     uint32_t v_batch_stride,
