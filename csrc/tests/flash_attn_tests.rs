@@ -189,7 +189,7 @@ fn flash_attn_varlen_with_block_table() -> Result<()> {
             .transpose(0, 1)?
     };
     let should_be_ys = should_be_ys.to_dtype(DType::F32)?;
-    assert_eq!(ys.dims(), &[32, 2, 8]);
+    assert_eq!(should_be_ys.dims(), &[32, 2, 8]);
 
     // assert_eq!(
     //     to_vec3_round(ys, 4)?,
