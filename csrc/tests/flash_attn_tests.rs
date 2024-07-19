@@ -171,6 +171,26 @@ fn flash_attn_varlen_with_block_table() -> Result<()> {
     let ys = ys.to_dtype(DType::F32)?;
 
     assert_eq!(ys.dims(), &[32, 2, 8]);
+
+    let block_size = 16;
+    let num_blocks = 2;
+    let q = Tensor::arange(0u32, 512, &device)?
+        .to_dtype(DType::F16)?
+        .reshape((32, 2, 8))?;
+    let k = (&q / 40.)?.reshape((num_blocks, block_size, 2, 8))?;
+    let v = (&q / 50.)?.reshape((num_blocks, block_size, 2, 8))?;
+    let q = (&q / 30.)?;
+
+    let should_be_ys = {
+        let q = q.transpose(0, 1)?;
+        let k = k.transpose(0, 1)?;
+        let v = v.transpose(0, 1)?;
+        csrc::flash_attn_varlen(&q, &k, &v, &seqlens_q, &seqlens_k, 32, 32, 0.5, false)?
+            .transpose(0, 1)?
+    };
+    let should_be_ys = should_be_ys.to_dtype(DType::F32)?;
+    assert_eq!(ys.dims(), &[32, 2, 8]);
+
     // assert_eq!(
     //     to_vec3_round(ys, 4)?,
     //     &[

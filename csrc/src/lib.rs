@@ -288,8 +288,8 @@ impl FlashAttention {
                 /* window_size_left */ window_size_left,
                 /* window_size_right */ window_size_right,
                 /* softcap */ softcap,
-                false,
-                false,
+                /* unpadded_lse */ true,
+                /* force_split_kernel */ false,
             )
         }
 
@@ -997,7 +997,7 @@ impl FlashAttentionVarLen {
                 /* window_size_right */ window_size_right,
                 /* softcap */ softcap,
                 /* unpadded_lse */ true,
-                false,
+                /* force_split_kernel */ false,
             )
         }
 
