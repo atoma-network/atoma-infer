@@ -134,7 +134,7 @@ fn flash_attn_varlen() -> Result<()> {
 
 #[test]
 fn flash_attn_varlen_with_block_table() -> Result<()> {
-    std::thread::sleep(Duration::from_secs(1));
+    std::thread::sleep(std::time::Duration::from_secs(1));
     let device = Device::new_cuda(0)?;
     let block_size = 16;
     let num_blocks = 2;
