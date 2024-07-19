@@ -33,10 +33,6 @@ impl FlashAttention {
         // https://github.com/Dao-AILab/flash-attention/blob/7551202cb2dd245432bc878447e19015c0af3c22/csrc/flash_attn/flash_api.cpp#L341
         let device = q.device();
 
-<<<<<<< HEAD
-        // Check GPU device compatibility
-=======
->>>>>>> main
         utils::check_gpu_compatibility(device.ordinal())?;
 
         if q.dtype() != k.dtype() {
@@ -714,10 +710,14 @@ impl FlashAttentionVarLen {
             0
         };
 
-        let page_block_size = if block_table_layout.is_some() { total_k } else { 1 };
+        let page_block_size = if block_table_layout.is_some() {
+            total_k
+        } else {
+            1
+        };
 
         if !block_table_ptr.is_null() && page_block_size % 16 != 0 {
-            // NOTE: We are following the vLLM flash attention fork, where the paged 
+            // NOTE: We are following the vLLM flash attention fork, where the paged
             // block size must be divisible by 16. In the actual flash attention
             // repository, the paged block size must be divisible by 256, instead.
             // TODO: benchmark the performance of block sizes such as
@@ -848,7 +848,7 @@ impl FlashAttentionVarLen {
                     *seqused_k.device_ptr() as *const i32
                 }
                 _ => candle_core::bail!("block_table must be a cuda tensor"),
-            };    
+            };
             seqused_k_ptr
         } else {
             std::ptr::null()
@@ -1206,7 +1206,6 @@ pub fn flash_attn_varlen_alibi(
     q.apply_op3(k, v, op)
 }
 
-
 #[allow(clippy::too_many_arguments)]
 /// Flash-attention v2 layer with variable-length batching.
 ///
@@ -1265,7 +1264,6 @@ pub fn flash_attn_varlen_alibi_windowed(
     q.apply_op3(k, v, op)
 }
 
-
 #[allow(clippy::too_many_arguments)]
 /// Flash-attention v2 layer with variable-length batching.
 ///
@@ -1295,12 +1293,12 @@ pub fn flash_attn_varlen_alibi_windowed(
 ///
 /// `window_size_left=None` with `window_size_right=Some(0)` applies a causal mask to the result
 /// of  `Q @ K^T`
-/// 
-/// # Block table 
-/// 
+///
+/// # Block table
+///
 /// Enables the paged attention algorithm. The block table is a tensor of shape `[batch_size, max_num_block_per_sequence]`
 /// that contains the block table for each sequence in the batch. The block table is used to determine the
-/// the number of blocks per sequence. 
+/// the number of blocks per sequence.
 pub fn flash_attn_varlen_with_block_table(
     q: &Tensor,
     k: &Tensor,
@@ -1360,13 +1358,13 @@ pub fn flash_attn_varlen_with_block_table(
 ///
 /// `window_size_left=None` with `window_size_right=Some(0)` applies a causal mask to the result
 /// of  `Q @ K^T`
-/// 
-/// # Block table 
-/// 
+///
+/// # Block table
+///
 /// Enables the paged attention algorithm. The block table is a tensor of shape `[batch_size, max_num_block_per_sequence]`
 /// that contains the block table for each sequence in the batch. The block table is used to determine the
-/// the number of blocks per sequence. 
-/// 
+/// the number of blocks per sequence.
+///
 /// # Softcap
 ///
 /// `softcap` is applied to the softmax output. Softcap is a multiplicative factor that is applied to the

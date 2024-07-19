@@ -74,10 +74,7 @@ const KERNEL_FILES: [&str; 65] = [
 
 fn main() -> Result<()> {
     println!("cargo:rerun-if-changed=build.rs");
-    for kernel_file in KERNEL_FILES
-        .iter()
-        .chain(std::iter::once(&"kernels/flash_api.cu"))
-    {
+    for kernel_file in KERNEL_FILES.iter() {
         println!("cargo:rerun-if-changed={kernel_file}");
     }
     println!("cargo:rerun-if-changed=kernels/flash_fwd_kernel.h");
