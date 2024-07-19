@@ -177,8 +177,8 @@ fn flash_attn_varlen_with_block_table() -> Result<()> {
     let q = Tensor::arange(0u32, 512, &device)?
         .to_dtype(DType::F16)?
         .reshape((32, 2, 8))?;
-    let k = (&q / 40.)?.reshape((num_blocks, block_size, 2, 8))?;
-    let v = (&q / 50.)?.reshape((num_blocks, block_size, 2, 8))?;
+    let k = (&q / 40.)?;
+    let v = (&q / 50.)?;
     let q = (&q / 30.)?;
 
     let should_be_ys = {
