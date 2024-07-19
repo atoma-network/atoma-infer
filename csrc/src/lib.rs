@@ -97,7 +97,7 @@ impl FlashAttention {
         let q_stride = q_l.stride();
         let k_stride = k_l.stride();
         let v_stride = v_l.stride();
-        let o_stride: &[usize] = out_l.stride();
+        let o_stride = out_l.stride();
 
         let q_rank = q_stride.len();
         let k_rank = k_stride.len();
