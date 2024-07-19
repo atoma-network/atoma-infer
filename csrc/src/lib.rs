@@ -941,10 +941,6 @@ impl FlashAttentionVarLen {
             0
         };
 
-        if seqlenq_ngroups_swapped { 
-            panic!("FLAG");
-        }
-
         let mut softcap = self.softcap.unwrap_or(0.0);
         let (softmax_scale, scale_softmatx_log2) = if softcap > 0.0 {
             softcap = self.softmax_scale / softcap;
