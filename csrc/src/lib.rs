@@ -1420,7 +1420,7 @@ pub fn flash_attn_varlen_full(
 }
 
 /// Flash-attention v2 layer, with Key-Value cache.
-/// 
+///
 /// NOTE: We are not passing in each Key and Value tensor for the decoding phase. This is
 /// because we plan to use paged attention with flash attention.
 /// In that case, the key and value tensors at each decoding phase are stored within the
@@ -1707,7 +1707,7 @@ impl FlashAttentionKvCache {
         let seqlen_q_rounded = utils::round_multiple(seqlen_q, 128);
         let seqlen_k_rounded = utils::round_multiple(seqlen_k, 128);
 
-        let cu_seqlens_k_ptr =if let Some(seqlens_k) = &self.seqlens_k {
+        let cu_seqlens_k_ptr = if let Some(seqlens_k) = &self.seqlens_k {
             if seqlens_k.dims() != &[batch_size] {
                 candle_core::bail!(
                     "shape mismatch of seqlens_k (got {:?}) expected {:?})",
@@ -1731,10 +1731,12 @@ impl FlashAttentionKvCache {
             let seqlens_k_stride = seqlens_k_layout.stride();
             let seqlens_k_rank = seqlens_k_stride.len();
             if seqlens_k_stride[seqlens_k_rank - 1] != 1 {
-                candle_core::bail!("the last dim of seqlens_k must be contiguous {seqlens_k_stride:?}")
+                candle_core::bail!(
+                    "the last dim of seqlens_k must be contiguous {seqlens_k_stride:?}"
+                )
             }
             *seqlens_k.device_ptr() as *const core::ffi::c_int
-        } else { 
+        } else {
             std::ptr::null()
         };
         let is_seqlens_k_cumulative = self.seqlens_k.is_none();
@@ -2086,7 +2088,6 @@ pub fn flash_attn_kv_cache_full(
     };
     q.apply_op3(k, v, op)
 }
-
 
 pub(crate) mod utils {
 
