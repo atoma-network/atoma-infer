@@ -1747,6 +1747,10 @@ impl FlashAttentionKvCache {
             )
         };
 
+        // NOTE: We are not using this code, as we plan to use paged attention with flash attention.
+        // In that case, the key and value tensors at each decoding phase are stored within the
+        // kv cache tensor, separately. So we don't need to pass the key and value tensors to the
+        // flash attention kernel, directly.
         let (k, v) = if let Some(k) = &self.k {
             let v = self
                 .v
@@ -1799,6 +1803,11 @@ impl FlashAttentionKvCache {
                     (batch_size, seqlen_knew, num_heads_k, head_size_og)
                 )
             }
+
+            (
+                k.device_ptr() as *const core::ffi::c_void,
+                v.device_ptr() as *const core::ffi::c_void,
+            )
         } else {
             (std::ptr::null(), std::ptr::null())
         };
