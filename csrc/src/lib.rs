@@ -1737,7 +1737,7 @@ impl FlashAttentionKvCache {
             }
             let (seqlens_k, seqlens_k_layout) = seqlens_k.storage_and_layout();
             let seqlens_k = match &*seqlens_k {
-                candle_core::Storage::Cuda(c) => c.as_cuda_slice::<i32>()?,
+                candle_core::Storage::Cuda(c) => c.as_cuda_slice::<u32>()?,
                 _ => candle_core::bail!("seqlens_k must be a cuda tensor"),
             };
             let seqlens_k = seqlens_k.slice(seqlens_k_layout.start_offset()..);
@@ -1815,6 +1815,7 @@ impl FlashAttentionKvCache {
                 .unwrap_or((0, 0));
 
             let o_stride = out_l.stride();
+            let o_rank = o_stride.len();
             ffi::run_mha(
                 q_ptr,
                 kc_ptr,
@@ -1831,12 +1832,12 @@ impl FlashAttentionKvCache {
                 /* o_batch_stride */ o_batch_stride,
                 /* alibi_slopes_batch_stride */ alibi_slopes_batch_stride as u32,
                 /* q_row_stride   */ q_stride[q_rank - 3] as u32,
-                /* k_row_stride   */ kc_stride[k_rank - 3] as u32,
-                /* v_row_stride   */ vc_stride[v_rank - 3] as u32,
+                /* k_row_stride   */ kc_stride[kc_rank - 3] as u32,
+                /* v_row_stride   */ vc_stride[vc_rank - 3] as u32,
                 /* o_row_stride   */ o_stride[o_rank - 3] as u32,
                 /* q_head_stride  */ q_stride[q_rank - 2] as u32,
-                /* k_head_stride  */ kc_stride[k_rank - 2] as u32,
-                /* v_head_stride  */ vc_stride[v_rank - 2] as u32,
+                /* k_head_stride  */ kc_stride[kc_rank - 2] as u32,
+                /* v_head_stride  */ vc_stride[vc_rank - 2] as u32,
                 /* o_head_stride  */ o_stride[o_rank - 2] as u32,
                 /* num_splits */ num_splits,
                 /* b */ batch_size as u32,
@@ -1865,7 +1866,7 @@ impl FlashAttentionKvCache {
         }
 
         let out_shape = if seqlenq_ngroups_swapped {
-            Shape::from((batch_size, 1, num_heads_k * max_seqlen_q, head_size_og))
+            Shape::from((batch_size, 1, num_heads_k * seqlen_q, head_size_og))
         } else {
             out_shape
         };
