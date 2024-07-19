@@ -2,7 +2,6 @@ use anyhow::Result;
 use candle_core::{DType, Device, IndexOp, Tensor, D};
 use serial_test::serial;
 
-
 fn to_vec3_round(t: Tensor, digits: i32) -> Result<Vec<Vec<Vec<f32>>>> {
     let b = 10f32.powi(digits);
     let t = t.to_vec3::<f32>()?;
@@ -88,6 +87,11 @@ fn flash_attn_acausal() -> Result<()> {
         ]
     );
     assert!(diff.to_vec0::<f32>()?.abs() < 1e-5);
+
+    // To reset Cuda state
+    unsafe {
+        cuda_runtime_sys::cudaDeviceSynchronize();
+    }
     Ok(())
 }
 
@@ -131,6 +135,11 @@ fn flash_attn_varlen() -> Result<()> {
             ]
         ]
     );
+
+    unsafe {
+        cuda_runtime_sys::cudaDeviceSynchronize();
+    }
+
     Ok(())
 }
 
@@ -191,6 +200,10 @@ fn flash_attn_varlen_with_block_table() -> Result<()> {
     assert_eq!(should_be_ys.dims(), &[32, 2, 8]);
     assert_eq!(to_vec3_round(ys, 10)?, to_vec3_round(should_be_ys, 10)?);
 
+    unsafe {
+        cuda_runtime_sys::cudaDeviceSynchronize();
+    }
+
     Ok(())
 }
 
@@ -244,5 +257,10 @@ fn flash_attn_kv_cache() -> Result<()> {
             ]
         ]
     );
+
+    unsafe {
+        cuda_runtime_sys::cudaDeviceSynchronize();
+    }
+
     Ok(())
 }
