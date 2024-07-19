@@ -2025,7 +2025,7 @@ pub fn flash_attn_kv_cache_alibi(
     k: &Tensor,
     v: &Tensor,
     alibi_slopes: &Tensor,
-    seqlens_k: &Tensor,
+    seqlens_k: Option<Tensor>,
     softmax_scale: f32,
     causal: bool,
 ) -> Result<Tensor> {
@@ -2039,7 +2039,7 @@ pub fn flash_attn_kv_cache_alibi(
         window_size_right,
         softcap: None,
         block_table: None,
-        seqlens_k: None,
+        seqlens_k,
     };
     q.apply_op3(k, v, op)
 }
