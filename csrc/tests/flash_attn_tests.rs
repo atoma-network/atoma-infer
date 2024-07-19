@@ -180,7 +180,7 @@ fn flash_attn_varlen_with_block_table() -> Result<()> {
         // let k = k.transpose(0, 1)?;
         // let v = v.transpose(0, 1)?;
         csrc::flash_attn_varlen(&q, &k, &v, &seqlens_q, &seqlens_k, 32, 32, 0.5, false)?
-            // .transpose(0, 1)?
+        // .transpose(0, 1)?
     };
     let should_be_ys = should_be_ys.to_dtype(DType::F32)?;
 
