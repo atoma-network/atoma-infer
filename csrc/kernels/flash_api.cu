@@ -60,6 +60,7 @@ extern "C" void run_mha(
     uint32_t block_table_batch_stride,
     int page_block_size,
 
+    int *seqused_k,
     uint32_t seqlen_q,
     uint32_t seqlen_k,
     uint32_t seqlen_q_rounded,
@@ -71,7 +72,9 @@ extern "C" void run_mha(
     int window_size_left,
     int window_size_right,
     float softcap,
-    bool unpadded_lse) {
+    bool unpadded_lse,
+    bool force_split_kernel=false
+) {
     Flash_fwd_params params;
     // Reset the parameters
     memset(&params, 0, sizeof(params));
@@ -124,8 +127,8 @@ extern "C" void run_mha(
     params.is_bf16 = is_bf16;
     params.cu_seqlens_q = cu_seqlens_q_ptr;
     params.cu_seqlens_k = cu_seqlens_k_ptr;
-    params.p_ptr = nullptr;  // used for `return_softmax`.
-    params.seqused_k = nullptr;
+    params.p_ptr = nullptr; // used for `return_softmax`.
+    params.seqused_k = seqused_k;
 
     params.is_causal = is_causal;
     params.window_size_left = window_size_left;
@@ -143,6 +146,6 @@ extern "C" void run_mha(
 
     params.unpadded_lse = unpadded_lse;
 
-    cudaStream_t stream = 0;  // Use the default stream.
-    run_mha_fwd(params, stream);
+    cudaStream_t stream = 0; // Use the default stream.
+    run_mha_fwd(params, stream, force_split_kernel);
 }

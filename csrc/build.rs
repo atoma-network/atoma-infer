@@ -91,19 +91,10 @@ fn main() -> Result<()> {
 
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").context("OUT_DIR not set")?);
     let build_dir = match std::env::var("ATOMA_FLASH_ATTN_BUILD_DIR") {
-        Err(_) =>
-        {
-            #[allow(clippy::redundant_clone)]
-            out_dir.clone()
-        }
-        Ok(build_dir) => {
-            let path = PathBuf::from(build_dir);
-            path.canonicalize().expect(&format!(
-                "Directory doesn't exists: {} (the current directory is {})",
-                &path.display(),
-                std::env::current_dir()?.display()
-            ))
-        }
+        Err(_) => out_dir.clone(),
+        Ok(build_dir) => PathBuf::from(build_dir)
+            .canonicalize()
+            .context("Failed to canonicalize build directory")?,
     };
     println!("cargo:warning=Build directory: {:?}", build_dir.display());
 
