@@ -1030,7 +1030,7 @@ impl FlashAttentionVarLen {
                 /* window_size_right */ window_size_right,
                 /* softcap */ softcap,
                 /* unpadded_lse */ true,
-                /* force_split_kernel */ !block_table_ptr.is_null(),
+                /* force_split_kernel */ false,
             )
         }
 
