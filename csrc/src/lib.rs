@@ -1728,7 +1728,7 @@ impl FlashAttentionKvCache {
                     [batch_size]
                 )
             }
-            if seqlens_k.dtype() != DType::I32 {
+            if seqlens_k.dtype() != DType::U32 {
                 candle_core::bail!(
                     "DType mismatch seqlens_k {:?}, expected {:?}",
                     seqlens_k.dtype(),
@@ -1816,6 +1816,14 @@ impl FlashAttentionKvCache {
 
             let o_stride = out_l.stride();
             let o_rank = o_stride.len();
+            let (q_batch_stride, o_batch_stride) = if !seqlenq_ngroups_swapped {
+                (q_stride[0] as u32, o_stride[0] as u32)
+            } else {
+                (
+                    (q_stride[0] * seqlen_q) as u32,
+                    (o_stride[0] * seqlen_q) as u32,
+                )
+            };
             ffi::run_mha(
                 q_ptr,
                 kc_ptr,
