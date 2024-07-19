@@ -1491,37 +1491,6 @@ impl FlashAttentionKvCache {
             candle_core::bail!("query and value must have the same dtype");
         }
 
-        let q = q.as_cuda_slice::<f16>()?;
-        let kc = kc.as_cuda_slice::<f16>()?;
-        let vc = vc.as_cuda_slice::<f16>()?;
-        let q = q.slice(q_l.start_offset()..);
-        let kc = kc.slice(kc_l.start_offset()..);
-        let vc = vc.slice(vc_l.start_offset()..);
-
-        let q_stride = q_l.stride();
-        let kc_stride = kc_l.stride();
-        let vc_stride = vc_l.stride();
-
-        let q_rank = q_stride.len();
-        let kc_rank = kc_stride.len();
-        let vc_rank = vc_stride.len();
-
-        if q_rank != 4 || kc_rank != 4 || vc_rank != 4 {
-            candle_core::bail!(
-                "flash-attn expects input tensors of rank 4 (q: {q_rank}, k: {kc_rank}, v: {vc_rank})"
-            )
-        }
-
-        if q_stride[q_rank - 1] != 1 {
-            candle_core::bail!("the last dim of q must be contiguous {q_stride:?}")
-        }
-        if kc_stride[kc_rank - 1] != 1 {
-            candle_core::bail!("the last dim of k must be contiguous {kc_stride:?}")
-        }
-        if vc_stride[vc_rank - 1] != 1 {
-            candle_core::bail!("the last dim of v must be contiguous {vc_stride:?}")
-        }
-
         let (block_table_ptr, block_table_layout) = if let Some(block_table) = &self.block_table {
             let (block_table_storage, block_table_layout) = block_table.storage_and_layout();
             let block_table_ptr = match &*block_table_storage {
@@ -1662,6 +1631,37 @@ impl FlashAttentionKvCache {
             )
         };
 
+        let q = q.as_cuda_slice::<f16>()?;
+        let kc = kc.as_cuda_slice::<f16>()?;
+        let vc = vc.as_cuda_slice::<f16>()?;
+        let q = q.slice(q_l.start_offset()..);
+        let kc = kc.slice(kc_l.start_offset()..);
+        let vc = vc.slice(vc_l.start_offset()..);
+
+        let q_stride = q_l.stride();
+        let kc_stride = kc_l.stride();
+        let vc_stride = vc_l.stride();
+
+        let q_rank = q_stride.len();
+        let kc_rank = kc_stride.len();
+        let vc_rank = vc_stride.len();
+
+        if q_rank != 4 || kc_rank != 4 || vc_rank != 4 {
+            candle_core::bail!(
+                "flash-attn expects input tensors of rank 4 (q: {q_rank}, k: {kc_rank}, v: {vc_rank})"
+            )
+        }
+
+        if q_stride[q_rank - 1] != 1 {
+            candle_core::bail!("the last dim of q must be contiguous {q_stride:?}")
+        }
+        if kc_stride[kc_rank - 1] != 1 {
+            candle_core::bail!("the last dim of k must be contiguous {kc_stride:?}")
+        }
+        if vc_stride[vc_rank - 1] != 1 {
+            candle_core::bail!("the last dim of v must be contiguous {vc_stride:?}")
+        }
+
         let (alibi_slopes_ptr, alibi_slopes_batch_stride) =
             if let Some(alibi_slopes) = &self.alibi_slopes {
                 if alibi_slopes.dtype() != DType::F32 {
@@ -1717,16 +1717,6 @@ impl FlashAttentionKvCache {
             .map(|v| v as i32)
             .unwrap_or(-1);
 
-        let mut is_causal = if window_size_left < 0 && window_size_right == 0 {
-            1
-        } else {
-            0
-        };
-        if seqlen_q == 1 && !self.alibi_slopes.is_some() {
-            // is_causal = true is the same as is_causal = false, in this case
-            is_causal = 0;
-        }
-
         let head_size = utils::round_multiple(head_size_og, 8);
         let head_size_rounded = utils::round_multiple(head_size, 32);
         let seqlen_q_rounded = utils::round_multiple(seqlen_q, 128);
@@ -1776,11 +1766,17 @@ impl FlashAttentionKvCache {
 
         // Causal is the special case where window_size_right == 0 and window_size_left < 0.
         // Local is the more general case where window_size_right >= 0 or window_size_left >= 0.
-        let is_causal = if window_size_left < 0 && window_size_right == 0 {
+        let mut is_causal = if window_size_left < 0 && window_size_right == 0 {
             1
         } else {
             0
         };
+
+        if seqlen_q == 1 && !self.alibi_slopes.is_some() {
+            // is_causal = true is the same as is_causal = false, in this case
+            is_causal = 0;
+        }
+
         if window_size_left < 0 && window_size_right >= 0 {
             window_size_left = seqlens_k as i32;
         }
@@ -2001,7 +1997,7 @@ pub fn flash_attn_kv_cache_windowed(
         window_size_right,
         softcap: None,
         block_table: None,
-        seqlens_k: None,
+        seqlens_k,
     };
     q.apply_op3(k, v, op)
 }
@@ -2029,10 +2025,7 @@ pub fn flash_attn_kv_cache_alibi(
     k: &Tensor,
     v: &Tensor,
     alibi_slopes: &Tensor,
-    seqlens_q: &Tensor,
     seqlens_k: &Tensor,
-    max_seqlen_q: usize,
-    max_seqlen_k: usize,
     softmax_scale: f32,
     causal: bool,
 ) -> Result<Tensor> {
