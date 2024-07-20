@@ -103,7 +103,7 @@ fn swap_blocks_t<
         (Device::Cuda(src_device), Device::Cpu) => {
             let (src, src_l) = src.storage_and_layout();
             let src_ptr = match &*src {
-                candle_core::Storage::Cuda(src_c) {
+                candle_core::Storage::Cuda(src_c) => {
                     let src_c = src_c.as_cuda_slice::<T>()?;
                     let src_c = src_c.slice(src_l.start_offset()..);
 
