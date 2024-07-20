@@ -233,8 +233,8 @@ unsafe fn copy_blocks_t<
         value_cache_ptrs.push(value_cache_ptr);
     }
 
-    let key_cache_ptrs = key_cache_ptrs.as_ptr();
-    let value_cache_ptrs = value_cache_ptrs.as_ptr();
+    let key_cache_ptrs = key_cache_ptrs.as_ptr() as *const i64;
+    let value_cache_ptrs = value_cache_ptrs.as_ptr() as *const i64;
     let num_pairs = block_mapping.dims()[0];
 
     if &[num_pairs, 2] != block_mapping.shape().dims() {
