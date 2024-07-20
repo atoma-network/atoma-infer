@@ -275,7 +275,7 @@ unsafe fn copy_blocks_t<
             ffi::copy_blocks_bf16(
                 key_cache_ptrs.as_mut_ptr(),
                 value_cache_ptrs.as_mut_ptr(),
-                block_mapping.data_ptr() as *const i64,
+                block_mapping_ptr,
                 num_layers as i32,
                 num_pairs as i32,
                 numel_per_block,
