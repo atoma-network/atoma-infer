@@ -3,7 +3,7 @@ use candle_core::{Result, Tensor, Device};
 #[test]
 fn test_copy_blocks() -> Result<()> {
     // Create a CUDA device
-    let device = Device::Cuda(0)?;
+    let device = Device::new_cuda(0)?;
 
     // Create sample tensors
     let mut key_cache1 = Tensor::arange(0f32, 6f32, &device)?.reshape((2, 3, 1, 1))?;
