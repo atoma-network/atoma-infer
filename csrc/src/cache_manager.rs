@@ -107,7 +107,8 @@ fn swap_blocks_t<
                 (candle_core::Storage::Cuda(src_c), candle_core::Storage::Cpu(dst_c)) => {
                     let src_c = src_c.as_cuda_slice::<T>()?;
                     let src_c = src_c.slice(src_l.start_offset()..);
-                    let mut dst_c = dst_c.clone().as_slice()?;
+                    let dst_c = dst_c.clone();
+                    let dst_c = dst_c.as_slice()?.as_mut();
 
                     (*src_c.device_ptr(), dst_c)
                 }
