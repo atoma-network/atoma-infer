@@ -29,7 +29,7 @@ fn swap_blocks_t<
     dst: &mut Tensor,
     block_mapping: HashMap<i64, i64>,
 ) -> Result<()> {
-    let block_size_in_bytes = (src.dtype().size_in_bytes() * src.dims()[0]) as u64;
+    let block_size_in_bytes = (src.dtype().size_in_bytes() * src.dims()[0]);
     let src_device = src.device();
     let dst_device = dst.device();
     match (src_device, dst_device) {
@@ -57,12 +57,12 @@ fn swap_blocks_t<
             };
 
             for (src_block, dst_block) in block_mapping.iter() {
-                let src_offset = (*src_block as u64) * block_size_in_bytes;
-                let dst_offset = (*dst_block as u64) * block_size_in_bytes;
+                let src_offset = (*src_block as u64) * (block_size_in_bytes as u64);
+                let dst_offset = (*dst_block as u64) * (block_size_in_bytes as u64);
                 let src_slice: CudaSlice<u8> = unsafe {
                     src_device.upgrade_device_ptr(src_ptr + src_offset, block_size_in_bytes)
                 };
-                let dst_slice: CudaSlice<u8> = unsafe {
+                let mut dst_slice: CudaSlice<u8> = unsafe {
                     dst_device.upgrade_device_ptr(dst_ptr + dst_offset, block_size_in_bytes)
                 };
                 src_device
@@ -87,14 +87,14 @@ fn swap_blocks_t<
             };
 
             for (src_block, dst_block) in block_mapping.iter() {
-                let src_offset = (*src_block as usize) * (block_size_in_bytes as usize);
-                let dst_offset = (*dst_block as u64) * block_size_in_bytes;
-                let dst_slice: CudaSlice<u8> = unsafe {
+                let src_offset = (*src_block as usize) * block_size_in_bytes;
+                let dst_offset = (*dst_block as u64) * (block_size_in_bytes as u64);
+                let mut dst_slice: CudaSlice<u8> = unsafe {
                     dst_device.upgrade_device_ptr(dst_ptr + dst_offset, block_size_in_bytes)
                 };
                 dst_device
                     .htod_sync_copy_into(
-                        &src_slice[src_offset..src_offset + block_size_in_bytes as usize],
+                        &src_slice[src_offset..src_offset + block_size_in_bytes],
                         &mut dst_slice,
                     )
                     .map_err(|e| candle_core::Error::Cuda(e.to_string().into()))?;
@@ -117,15 +117,15 @@ fn swap_blocks_t<
             };
 
             for (src_block, dst_block) in block_mapping.iter() {
-                let src_offset = (*src_block as u64) * block_size_in_bytes;
-                let dst_offset = (*dst_block as usize) * (block_size_in_bytes as usize);
+                let src_offset = (*src_block as u64) * (block_size_in_bytes as u64);
+                let dst_offset = (*dst_block as usize) * block_size_in_bytes;
                 let src_slice: CudaSlice<u8> = unsafe {
                     src_device.upgrade_device_ptr(src_ptr + src_offset, block_size_in_bytes)
                 };
                 src_device
                     .dtoh_sync_copy_into(
                         &src_slice,
-                        &mut dst_slice[dst_offset..dst_offset + block_size_in_bytes as usize],
+                        &mut dst_slice[dst_offset..dst_offset + block_size_in_bytes],
                     )
                     .map_err(|e| candle_core::Error::Cuda(e.into()))?;
             }
