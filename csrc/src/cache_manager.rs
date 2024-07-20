@@ -1,9 +1,10 @@
-use candle_core::backend::BackendDevice;
+use candle_core::backend::{BackendDevice, BackendStorage};
 use candle_core::cuda::cudarc::driver::{CudaSlice, DevicePtr};
 use candle_core::cuda_backend::cudarc::driver::CudaStream;
 use candle_core::{DType, Device, Result, Tensor};
 use cuda_runtime_sys::cudaMemcpyKind;
 use half::{bf16, f16};
+use std::borrow::BorrowMut;
 use std::collections::HashMap;
 
 /// Swaps blocks from `src` to `dst` tensors, through the block_mapping.
@@ -107,23 +108,26 @@ fn swap_blocks_t<
                 (candle_core::Storage::Cuda(src_c), candle_core::Storage::Cpu(dst_c)) => {
                     let src_c = src_c.as_cuda_slice::<T>()?;
                     let src_c = src_c.slice(src_l.start_offset()..);
-                    let dst_c = dst_c.as_slice_mut::<T>()?;
-                    (*src_c.device_ptr(), dst_c)
+                    let dst_ptr = dst_c.as_slice::<u8>() as *mut u8;
+                    let dst_len = dst_c.len() * std::mem::size_of::<T>();
+                    let dst_slice = unsafe { std::slice::from_raw_parts_mut(dst_ptr, dst_len) };
                 }
                 _ => {
                     candle_core::bail!("Invalid combination of src and dst tensors storage to swap")
                 }
             };
-        
+
             for (src_block, dst_block) in block_mapping.iter() {
                 let src_offset = (*src_block as u64) * (block_size_in_bytes as u64);
-                let dst_offset = (*dst_block as usize) * block_size_in_bytes / std::mem::size_of::<T>();
+                let dst_offset =
+                    (*dst_block as usize) * block_size_in_bytes / std::mem::size_of::<T>();
                 let src_slice: CudaSlice<u8> = unsafe {
                     src_device.upgrade_device_ptr(src_ptr + src_offset, block_size_in_bytes)
                 };
-                let dst_block_slice = &mut dst_slice[dst_offset..dst_offset + block_size_in_bytes / std::mem::size_of::<T>()];
+                let dst_block_slice = &mut dst_slice
+                    [dst_offset..dst_offset + block_size_in_bytes / std::mem::size_of::<T>()];
                 src_device
-                    .dtoh_sync_copy_into(dst_block_slice)
+                    .dtoh_sync_copy_into(&src_slice, dst_block_slice)
                     .map_err(|e| candle_core::Error::Cuda(e.into()))?;
             }
         }
