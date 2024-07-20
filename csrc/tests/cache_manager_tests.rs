@@ -1,4 +1,4 @@
-use candle_core::Result;
+use candle_core::{Result, Tensor};
 
 #[test]
 fn test_copy_blocks() -> Result<()> {
@@ -16,8 +16,7 @@ fn test_copy_blocks() -> Result<()> {
     let value_caches = vec![&mut value_cache1, &mut value_cache2];
 
     // Create block mapping
-    let mut block_mapping = HashMap::new();
-    block_mapping.insert(0, vec![1]); // Copy block 0 to block 1
+    let block_mapping = Tensor::from_vec(vec![0, 1], (1, 2), &device)?; // Copy block 0 to block 1
 
     // Call the copy_blocks function
     unsafe { csrc::copy_blocks(key_caches, value_caches, block_mapping)? };

@@ -4,8 +4,8 @@
 use anyhow::{Context, Result};
 use std::path::PathBuf;
 
-const KERNEL_FILES: [&str; 66] = [
-    "kernels/cache_manager.cu",
+const KERNEL_FILES: [&str; 65] = [
+    // "kernels/cache_manager.cu",
     "kernels/flash_api.cu",
     "kernels/flash_fwd_hdim32_bf16_causal_sm80.cu",
     "kernels/flash_fwd_hdim32_bf16_sm80.cu",
