@@ -107,7 +107,7 @@ fn swap_blocks_t<
                 (candle_core::Storage::Cuda(src_c), candle_core::Storage::Cpu(dst_c)) => {
                     let src_c = src_c.as_cuda_slice::<T>()?;
                     let src_c = src_c.slice(src_l.start_offset()..);
-                    let mut dst_c = dst_c.as_slice::<u8>()?;
+                    let mut dst_c = dst_c.as_slice()?;
 
                     (*src_c.device_ptr(), dst_c)
                 }
@@ -123,10 +123,12 @@ fn swap_blocks_t<
                     src_device.upgrade_device_ptr(src_ptr + src_offset, block_size_in_bytes)
                 };
                 src_device
-                    .dtoh_sync_copy_into(
-                        &src_slice,
-                        &mut dst_slice[dst_offset..dst_offset + block_size_in_bytes],
-                    )
+                    .dtoh_sync_copy_into(&src_slice, unsafe {
+                        // SAFETY: The writing happens synchronously, and does not overlap with
+                        // any other writes.
+                        &mut *(&mut dst_slice[dst_offset..dst_offset + block_size_in_bytes]
+                            as *const [u8] as *mut [u8])
+                    })
                     .map_err(|e| candle_core::Error::Cuda(e.into()))?;
             }
         }
