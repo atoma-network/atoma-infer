@@ -1,3 +1,4 @@
+pub mod cache_manager;
 mod ffi;
 
 use std::mem::MaybeUninit;
