@@ -123,12 +123,10 @@ fn swap_blocks_t<
                     src_device.upgrade_device_ptr(src_ptr + src_offset, block_size_in_bytes)
                 };
                 src_device
-                    .dtoh_sync_copy_into(&src_slice, unsafe {
-                        // SAFETY: The writing happens synchronously, and does not overlap with
-                        // any other writes.
-                        &mut *(&dst_slice[dst_offset..dst_offset + block_size_in_bytes]
-                            as *const [u8] as *mut [u8])
-                    })
+                    .dtoh_sync_copy_into(
+                        &src_slice,
+                        &mut dst_slice[dst_offset..dst_offset + block_size_in_bytes].clone(),
+                    )
                     .map_err(|e| candle_core::Error::Cuda(e.into()))?;
             }
         }
