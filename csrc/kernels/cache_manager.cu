@@ -58,7 +58,7 @@ extern "C" {
         cudaStream_t stream;
         cudaStreamGetCurrent(&stream);
 
-        copy_blocks_kernel<int16_t><<<grid, block, 0, stream>>>(
+        vllm::copy_blocks_kernel<int16_t><<<grid, block, 0, stream>>>(
             key_cache_ptrs,
             value_cache_ptrs,
             block_mapping,
@@ -82,7 +82,7 @@ extern "C" {
         cudaStream_t stream;
         cudaStreamGetCurrent(&stream);
 
-        copy_blocks_kernel<int16_t><<<grid, block, 0, stream>>>(
+        vllm::copy_blocks_kernel<int16_t><<<grid, block, 0, stream>>>(
             key_cache_ptrs,
             value_cache_ptrs,
             block_mapping,
