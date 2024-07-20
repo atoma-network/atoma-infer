@@ -67,7 +67,7 @@ fn swap_blocks_t<
                 };
                 src_device
                     .dtod_copy(&src_slice, &mut dst_slice)
-                    .map_err(|e| candle_core::Error::Cuda(e.to_string()))?;
+                    .map_err(|e| candle_core::Error::Cuda(e.to_string().into()))?;
             }
         }
         (Device::Cpu, Device::Cuda(dst_device)) => {
@@ -97,7 +97,7 @@ fn swap_blocks_t<
                         &src_slice[src_offset..src_offset + block_size_in_bytes as usize],
                         &mut dst_slice,
                     )
-                    .map_err(|e| candle_core::Error::Cuda(e.to_string()))?;
+                    .map_err(|e| candle_core::Error::Cuda(e.to_string().into()))?;
             }
         }
         (Device::Cuda(src_device), Device::Cpu) => {
