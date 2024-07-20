@@ -54,9 +54,9 @@ extern "C" {
     ) {
         dim3 grid(num_layers, num_pairs);
         dim3 block(std::min(1024, numel_per_block));
-        
+
         cudaStream_t stream;
-        udaStreamGetCurrent(&stream);
+        cudaStreamGetCurrent(&stream);
 
         copy_blocks_kernel<int16_t><<<grid, block, 0, stream>>>(
             key_cache_ptrs,

@@ -4,6 +4,7 @@ use candle_core::cuda_backend::cudarc::driver::CudaStream;
 use candle_core::{DType, Device, Result, Tensor};
 use cuda_runtime_sys::cudaMemcpyKind;
 use half::{bf16, f16};
+use core::num;
 use std::borrow::BorrowMut;
 use std::collections::HashMap;
 use crate::ffi;
@@ -221,7 +222,7 @@ pub unsafe fn copy_blocks(
         candle_core::bail!("block_mapping must have shape [num_pairs, 2]")
     }
 
-    let numel_per_block: c_int = key_caches
+    let numel_per_block = key_caches
         .first()
         .unwrap()
         .i(0)?
@@ -234,18 +235,22 @@ pub unsafe fn copy_blocks(
 
     match dtype {
         DType::F16 => unsafe {
-            ffi::copy_blocks_kernel_f16(
+            ffi::copy_blocks_f16(
                 key_cache_ptrs.as_mut_ptr(),
                 value_cache_ptrs.as_mut_ptr(),
                 block_mapping.data_ptr() as *const i64,
+                num_layers as i32,
+                num_pairs as i32,
                 numel_per_block,
             );
         },
         DType::BF16 => unsafe {
-            ffi::copy_blocks_kernel_bf16(
+            ffi::copy_blocks_bf16(
                 key_cache_ptrs.as_mut_ptr(),
                 value_cache_ptrs.as_mut_ptr(),
                 block_mapping.data_ptr() as *const i64,
+                num_layers as i32,
+                num_pairs as i32,
                 numel_per_block,
             );
         },
