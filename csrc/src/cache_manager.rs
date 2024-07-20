@@ -94,7 +94,7 @@ fn swap_blocks_t<
                 };
                 dst_device
                     .htod_sync_copy_into(
-                        &src_slice[src_offset..src_offset + block_size_in_bytes],
+                        &src_slice[src_offset..src_offset + block_size_in_bytes as usize],
                         &mut dst_slice,
                     )
                     .map_err(|e| candle_core::Error::Cuda(e.to_string()))?;
@@ -125,7 +125,7 @@ fn swap_blocks_t<
                 src_device
                     .dtoh_sync_copy_into(
                         &src_slice,
-                        &mut dst_slice[dst_offset..dst_offset + block_size_in_bytes],
+                        &mut dst_slice[dst_offset..dst_offset + block_size_in_bytes as usize],
                     )
                     .map_err(|e| candle_core::Error::Cuda(e.into()))?;
             }
@@ -171,7 +171,7 @@ pub unsafe fn copy_blocks_t<
     if !device.is_cuda() {
         candle_core::bail!("device must be a cuda device")
     }
-    if device != value_caches[0].device() {
+    if !value_caches[0].device().is_cuda() {
         candle_core::bail!("key_caches and value_caches must be on the same device")
     }
     if key_caches[0].dtype() != value_caches[0].dtype() {
