@@ -112,7 +112,7 @@ fn main() -> Result<()> {
 }
 
 fn compile_cuda_files(build_dir: &PathBuf) -> Result<()> {
-    let kernels: Vec<_> = KERNEL_FILES.iter().map(|&s| s.to_string()).collect();
+    let kernels: Vec<_> = KERNEL_FILES[1..].iter().map(|&s| s.to_string()).collect();
     let builder = bindgen_cuda::Builder::default()
         .kernel_paths(kernels)
         .out_dir(build_dir.clone())
