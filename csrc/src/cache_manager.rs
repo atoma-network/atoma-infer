@@ -1,13 +1,13 @@
+use crate::ffi;
 use candle_core::backend::{BackendDevice, BackendStorage};
 use candle_core::cuda::cudarc::driver::{CudaSlice, DevicePtr};
 use candle_core::cuda_backend::cudarc::driver::CudaStream;
 use candle_core::{DType, Device, Result, Tensor};
+use core::num;
 use cuda_runtime_sys::cudaMemcpyKind;
 use half::{bf16, f16};
-use core::num;
 use std::borrow::BorrowMut;
 use std::collections::HashMap;
-use crate::ffi;
 
 /// Swaps blocks from `src` to `dst` tensors, through the block_mapping.
 /// Both `src` and `dst` tensors must have the same dtype, and either be on
