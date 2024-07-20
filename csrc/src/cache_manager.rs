@@ -110,7 +110,7 @@ fn swap_blocks_t<
                     let src_c = src_c.slice(src_l.start_offset()..);
                     let dst_slice = dst_c.as_slice::<u8>()?;
                     let dst_slice_len = dst_slice.len() * std::mem::size_of::<T>();
-                    let dst_slice = unsafe { std::slice::from_raw_parts_mut(dst_slice.as_mut_ptr(), dst_slice_len) };
+                    let dst_slice = unsafe { std::slice::from_raw_parts_mut(dst_slice.as_ptr() as *mut u8, dst_slice_len) };
                     (src_c.device_ptr(), dst_slice)
                 }
                 _ => {
