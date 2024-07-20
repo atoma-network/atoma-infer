@@ -104,10 +104,10 @@ fn swap_blocks_t<
             let (src, src_l) = src.storage_and_layout();
             let (dst, dst_l) = dst.storage_and_layout();
             let (src_ptr, dst_slice) = match (&*src, &*dst) {
-                (candle_core::Storage::Cuda(src_c), candle_core::Storage::Cpu(ref mut dst_c)) => {
+                (candle_core::Storage::Cuda(src_c), candle_core::Storage::Cpu(dst_c)) => {
                     let src_c = src_c.as_cuda_slice::<T>()?;
                     let src_c = src_c.slice(src_l.start_offset()..);
-                    let mut dst_c = dst_c.as_slice::<u8>()?.as_mut();
+                    let mut dst_c = dst_c.as_slice::<u8>()?;
 
                     (*src_c.device_ptr(), dst_c)
                 }
