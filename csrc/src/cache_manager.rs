@@ -126,7 +126,7 @@ fn swap_blocks_t<
                     .dtoh_sync_copy_into(&src_slice, unsafe {
                         // SAFETY: The writing happens synchronously, and does not overlap with
                         // any other writes.
-                        &mut *(&mut dst_slice[dst_offset..dst_offset + block_size_in_bytes]
+                        &mut *(&dst_slice[dst_offset..dst_offset + block_size_in_bytes]
                             as *const [u8] as *mut [u8])
                     })
                     .map_err(|e| candle_core::Error::Cuda(e.into()))?;
