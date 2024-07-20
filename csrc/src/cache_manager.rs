@@ -102,15 +102,12 @@ fn swap_blocks_t<
         }
         (Device::Cuda(src_device), Device::Cpu) => {
             let (src, src_l) = src.storage_and_layout();
-            let (dst, dst_l) = dst.storage_and_layout();
-            let (src_ptr, dst_slice) = match (&*src, &*dst) {
+            let src_ptr = match (&*src, &*dst) {
                 (candle_core::Storage::Cuda(src_c), candle_core::Storage::Cpu(dst_c)) => {
                     let src_c = src_c.as_cuda_slice::<T>()?;
                     let src_c = src_c.slice(src_l.start_offset()..);
-                    let mut dst_c = dst_c.clone();
-                    let dst_c = dst_c.as_slice()?.as_mut();
 
-                    (*src_c.device_ptr(), dst_c)
+                    *src_c.device_ptr()
                 }
                 _ => {
                     candle_core::bail!("Invalid combination of src and dst tensors storage to swap")
@@ -123,12 +120,13 @@ fn swap_blocks_t<
                 let src_slice: CudaSlice<u8> = unsafe {
                     src_device.upgrade_device_ptr(src_ptr + src_offset, block_size_in_bytes)
                 };
-                src_device
-                    .dtoh_sync_copy_into(
-                        &src_slice,
-                        &mut dst_slice[dst_offset..dst_offset + block_size_in_bytes],
-                    )
-                    .map_err(|e| candle_core::Error::Cuda(e.into()))?;
+                let dst_buffer = Tensor::from_vec(
+                    src_device
+                        .dtoh_sync_copy(&src_slice)
+                        .map_err(|e| candle_core::Error::Cuda(e.into()))?,
+                    dst.shape(),
+                    &Device::Cpu,
+                )?;
             }
         }
         _ => {
