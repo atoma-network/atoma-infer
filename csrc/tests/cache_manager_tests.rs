@@ -16,7 +16,7 @@ fn test_copy_blocks() -> Result<()> {
     let value_caches = vec![&mut value_cache1, &mut value_cache2];
 
     // Create block mapping
-    let block_mapping = Tensor::from_vec(vec![0, 1], (1, 2), &device)?; // Copy block 0 to block 1
+    let block_mapping = Tensor::from_vec(vec![0_i64, 1], (1, 2), &device)?; // Copy block 0 to block 1
 
     // Call the copy_blocks function
     unsafe { csrc::copy_blocks(key_caches, value_caches, block_mapping)? };
