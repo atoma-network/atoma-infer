@@ -108,9 +108,10 @@ fn swap_blocks_t<
                 (candle_core::Storage::Cuda(src_c), candle_core::Storage::Cpu(dst_c)) => {
                     let src_c = src_c.as_cuda_slice::<T>()?;
                     let src_c = src_c.slice(src_l.start_offset()..);
-                    let dst_ptr = dst_c.as_slice::<u8>() as *mut u8;
-                    let dst_len = dst_c.len() * std::mem::size_of::<T>();
-                    let dst_slice = unsafe { std::slice::from_raw_parts_mut(dst_ptr, dst_len) };
+                    let dst_slice = dst_c.as_slice::<u8>()?;
+                    let dst_slice_len = dst_slice.len() * std::mem::size_of::<T>();
+                    let dst_slice = unsafe { std::slice::from_raw_parts_mut(dst_slice.as_mut_ptr(), dst_slice_len) };
+                    (src_c.device_ptr(), dst_slice)
                 }
                 _ => {
                     candle_core::bail!("Invalid combination of src and dst tensors storage to swap")
