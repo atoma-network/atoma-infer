@@ -263,8 +263,8 @@ unsafe fn copy_blocks_t<
     match dtype {
         DType::F16 => unsafe {
             ffi::copy_blocks_f16(
-                key_cache_ptrs.as_mut_ptr(),
-                value_cache_ptrs.as_mut_ptr(),
+                key_cache_ptrs,
+                value_cache_ptrs,
                 block_mapping_ptr,
                 num_layers as i32,
                 num_pairs as i32,
@@ -273,8 +273,8 @@ unsafe fn copy_blocks_t<
         },
         DType::BF16 => unsafe {
             ffi::copy_blocks_bf16(
-                key_cache_ptrs.as_mut_ptr(),
-                value_cache_ptrs.as_mut_ptr(),
+                key_cache_ptrs,
+                value_cache_ptrs,
                 block_mapping_ptr,
                 num_layers as i32,
                 num_pairs as i32,
