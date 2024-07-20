@@ -111,7 +111,7 @@ fn swap_blocks_t<
                     let dst_slice = dst_c.as_slice::<u8>()?;
                     let dst_slice_len = dst_slice.len() * std::mem::size_of::<T>();
                     let dst_slice = unsafe { std::slice::from_raw_parts_mut(dst_slice.as_ptr() as *mut u8, dst_slice_len) };
-                    (src_c.device_ptr(), dst_slice)
+                    (*src_c.device_ptr(), dst_slice)
                 }
                 _ => {
                     candle_core::bail!("Invalid combination of src and dst tensors storage to swap")
