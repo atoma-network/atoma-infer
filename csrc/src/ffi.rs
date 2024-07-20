@@ -1,5 +1,5 @@
 use core::{
-    ffi::{c_int, c_void},
+    ffi::{c_char, c_int, c_void},
     num,
 };
 
@@ -70,7 +70,7 @@ extern "C" {
         numel_per_block: i32,
     ) -> *const c_char;
 
-    fn copy_blocks_bf16(
+    pub(crate) fn copy_blocks_bf16(
         key_cache_ptrs: *mut i64,
         value_cache_ptrs: *mut i64,
         block_mapping: *const i64,

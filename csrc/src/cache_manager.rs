@@ -174,7 +174,7 @@ pub unsafe fn copy_blocks(
     }
 
     let device = key_caches[0].device();
-    let device = if let Device::Cuda(device) = device.is_cuda() {
+    let device = if let Device::Cuda(device) = device {
         device
     } else {
         candle_core::bail!("device must be a cuda device")
@@ -203,7 +203,13 @@ pub unsafe fn copy_blocks(
         };
         let value_cache_ptr = match &*value_cache_storage_and_layout.0 {
             candle_core::Storage::Cuda(c) => {
-                let cuda_slice = c.as_cuda_slice::<T>()?;
+                let cuda_slice = match dtype {
+                    DType::BF16 => c.as_cuda_slice::<bf16>()?,
+                    DType::F16 => c.as_cuda_slice::<f16>()?,
+                    _ => candle_core::bail!(
+                        "Only support f16/bf16 dtypes and src and dst must have same dtype"
+                    ),
+                };
                 let cuda_slice =
                     cuda_slice.slice(value_cache_storage_and_layout.1.start_offset()..);
                 *cuda_slice.device_ptr()
@@ -218,13 +224,11 @@ pub unsafe fn copy_blocks(
     let value_cache_ptrs = value_cache_ptrs.as_ptr();
     let num_pairs = block_mapping.dims()[0];
 
-    if (num_pairs, 2) != block_mapping.shape().dims() {
+    if &[num_pairs, 2] != block_mapping.shape().dims() {
         candle_core::bail!("block_mapping must have shape [num_pairs, 2]")
     }
 
-    let numel_per_block = key_caches
-        .first()
-        .unwrap()
+    let numel_per_block = key_caches[0]
         .i(0)?
         .shape()
         .dims()
