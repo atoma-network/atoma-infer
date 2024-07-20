@@ -40,7 +40,7 @@ fn swap_blocks_t<
 
             let (src, src_l) = src.storage_and_layout();
             let (dst, dst_l) = dst.storage_and_layout();
-            let (src_ptr, dst_ptr) = match (&*src.0, &*dst.0) {
+            let (src_ptr, dst_ptr) = match (&*src, &*dst) {
                 (candle_core::Storage::Cuda(src_c), candle_core::Storage::Cuda(dst_c)) => {
                     let src_c = src_c.as_cuda_slice::<T>()?;
                     let dst_c = dst_c.as_cuda_slice::<T>()?;
@@ -73,7 +73,7 @@ fn swap_blocks_t<
         (Device::Cpu, Device::Cuda(dst_device)) => {
             let (src, src_l) = src.storage_and_layout();
             let (dst, dst_l) = dst.storage_and_layout();
-            let (src_slice, dst_ptr) = match (&*src.0, &*dst.0) {
+            let (src_slice, dst_ptr) = match (&*src, &*dst) {
                 (candle_core::Storage::Cpu(src_c), candle_core::Storage::Cuda(dst_c)) => {
                     let src_c = src_c.as_slice::<u8>()?;
                     let dst_c = dst_c.as_cuda_slice::<T>()?;
@@ -103,7 +103,7 @@ fn swap_blocks_t<
         (Device::Cuda(src_device), Device::Cpu) => {
             let (src, src_l) = src.storage_and_layout();
             let (dst, dst_l) = dst.storage_and_layout();
-            let (src_ptr, dst_slice) = match (&*src.0, &*dst.0) {
+            let (src_ptr, dst_slice) = match (&*src, &*dst) {
                 (candle_core::Storage::Cuda(src_c), candle_core::Storage::Cpu(dst_c)) => {
                     let src_c = src_c.as_cuda_slice::<T>()?;
                     let src_c = src_c.slice(src_l.start_offset()..);
