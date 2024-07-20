@@ -1,4 +1,4 @@
-#include "cuda_compat.h"
+#include "cuda_runtime.h"
 #include "dispatch_utils.h"
 
 
@@ -43,18 +43,52 @@ __global__ void copy_blocks_kernel(int64_t* key_cache_ptrs,
 
 // f16, bf16 are special cases: We use a 16-bit integer to simulate the bit width. 
 // SAFETY: This is technically UB due to aliasing, but it is OK because the width is compatible.
-extern "C" __global__ void copy_blocks_kernel_f16(int64_t* key_cache_ptrs,
-  int64_t* value_cache_ptrs,
-  const int64_t* __restrict__ block_mapping,
-  const int numel_per_block) {
-  copy_blocks_internal_kernel<int16_t>(key_cache_ptrs, value_cache_ptrs, block_mapping, numel_per_block);
+extern "C" {
+    void copy_blocks_f16(
+        int64_t* key_cache_ptrs,
+        int64_t* value_cache_ptrs,
+        const int64_t* block_mapping,
+        int num_layers,
+        int num_pairs,
+        int numel_per_block
+    ) {
+        dim3 grid(num_layers, num_pairs);
+        dim3 block(std::min(1024, numel_per_block));
+        
+        cudaStream_t stream;
+        udaStreamGetCurrent(&stream);
+
+        copy_blocks_kernel<int16_t><<<grid, block, 0, stream>>>(
+            key_cache_ptrs,
+            value_cache_ptrs,
+            block_mapping,
+            numel_per_block
+        );
+    }
 }
 
-extern "C" __global__ void copy_blocks_kernel_bf16(int64_t* key_cache_ptrs,
-  int64_t* value_cache_ptrs,
-  const int64_t* __restrict__ block_mapping,
-  const int numel_per_block) {
-  copy_blocks_internal_kernel<int16_t>(key_cache_ptrs, value_cache_ptrs, block_mapping, numel_per_block);
+extern "C" {
+    void copy_blocks_bf16(
+        int64_t* key_cache_ptrs,
+        int64_t* value_cache_ptrs,
+        const int64_t* block_mapping,
+        int num_layers,
+        int num_pairs,
+        int numel_per_block
+    ) {
+        dim3 grid(num_layers, num_pairs);
+        dim3 block(std::min(1024, numel_per_block));
+
+        cudaStream_t stream;
+        cudaStreamGetCurrent(&stream);
+
+        copy_blocks_kernel<int16_t><<<grid, block, 0, stream>>>(
+            key_cache_ptrs,
+            value_cache_ptrs,
+            block_mapping,
+            numel_per_block
+        );
+    }
 }
 
 // // Note: the key_caches and value_caches vectors are constant but

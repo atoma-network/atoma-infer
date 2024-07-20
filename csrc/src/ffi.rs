@@ -1,4 +1,4 @@
-use core::ffi::{c_int, c_void};
+use core::{ffi::{c_int, c_void}, num};
 
 extern "C" {
     pub(crate) fn run_mha(
@@ -58,17 +58,21 @@ extern "C" {
         force_split_kernel: bool,
     );
 
-    pub(crate) fn copy_blocks_kernel_f16(
+    pub(crate) fn copy_blocks_f16(
         key_cache_ptrs: *mut i64,
         value_cache_ptrs: *mut i64,
         block_mapping: *const i64,
+        num_layers: i32,
+        num_pairs: i32,
         numel_per_block: i32,
     );
 
-    pub(crate) fn copy_blocks_kernel_bf16(
+    pub(crate) fn copy_blocks_bf16(
         key_cache_ptrs: *mut i64,
         value_cache_ptrs: *mut i64,
         block_mapping: *const i64,
+        num_layers: i32,
+        num_pairs: i32,
         numel_per_block: i32,
     );
 }
