@@ -217,6 +217,10 @@ pub unsafe fn copy_blocks(
     let value_cache_ptrs = value_cache_ptrs.as_ptr();
     let num_pairs = block_mapping.dims()[0];
 
+    if (num_pairs, 2) != block_mapping.shape().dims() {
+        candle_core::bail!("block_mapping must have shape [num_pairs, 2]")
+    }
+
     let numel_per_block: c_int = key_caches
         .first()
         .unwrap()

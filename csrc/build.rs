@@ -100,6 +100,7 @@ fn main() -> Result<()> {
     println!("cargo:warning=Build directory: {:?}", build_dir.display());
 
     compile_cuda_files(&build_dir)?;
+    compile_cache_manager_to_ptx(&build_dir)?;
 
     // Link libraries
     println!("cargo:rustc-link-search={}", build_dir.display());
@@ -132,5 +133,20 @@ fn compile_cuda_files(build_dir: &PathBuf) -> Result<()> {
     let out_file = build_dir.join("libflashattention.a");
     builder.build_lib(&out_file);
 
+    Ok(())
+}
+
+fn compile_cache_manager_to_ptx(out_dir: &PathBuf) -> Result<()> { 
+    let status = std::process::Command::new("nvcc")
+        .args(&[
+            "kernels/cache_manager.cu",
+            "-ptx",
+            "-o",
+            out_dir.join("cache_manager.ptx").to_str().unwrap(),
+        ])
+        .status()?;
+    if !status.success() {
+        return Err(anyhow::anyhow!("Failed to compile cache_manager.cu to ptx")); 
+    }
     Ok(())
 }
