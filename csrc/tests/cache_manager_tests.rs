@@ -1,4 +1,4 @@
-use candle_core::{Result, Tensor};
+use candle_core::{Result, Tensor, Device};
 
 #[test]
 fn test_copy_blocks() -> Result<()> {
