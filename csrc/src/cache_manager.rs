@@ -6,6 +6,7 @@ use cuda_runtime_sys::cudaMemcpyKind;
 use half::{bf16, f16};
 use std::borrow::BorrowMut;
 use std::collections::HashMap;
+use crate::ffi;
 
 /// Swaps blocks from `src` to `dst` tensors, through the block_mapping.
 /// Both `src` and `dst` tensors must have the same dtype, and either be on
@@ -110,7 +111,11 @@ fn swap_blocks_t<
                     let src_c = src_c.slice(src_l.start_offset()..);
                     let dst_slice = dst_c.as_slice::<u8>()?;
                     let dst_slice_len = dst_slice.len() * std::mem::size_of::<T>();
-                    let dst_slice = unsafe { std::slice::from_raw_parts_mut(dst_slice.as_ptr() as *mut u8, dst_slice_len) };
+                    // SAFETY: this code should run synchronously, therefore we can have
+                    // safe mutable access to the slice, once we are reading from it.
+                    let dst_slice = unsafe {
+                        std::slice::from_raw_parts_mut(dst_slice.as_ptr() as *mut u8, dst_slice_len)
+                    };
                     (*src_c.device_ptr(), dst_slice)
                 }
                 _ => {
@@ -154,9 +159,7 @@ fn swap_blocks_t<
 /// * `value_caches` - A vector of `Tensor`s to copy the blocks to.
 /// * `block_mapping` - A `Tensor` of shape `[num_pairs, 2]` that maps the block indices
 ///    to be copied, where `num_pairs` is the number of block pairs to be copied.
-pub unsafe fn copy_blocks_t<
-    T: candle_core::cuda_backend::CudaDType + candle_core::cuda_backend::cudarc::driver::DeviceRepr,
->(
+pub unsafe fn copy_blocks(
     key_caches: Vec<&mut Tensor>,
     value_caches: Vec<&mut Tensor>,
     block_mapping: Tensor,
@@ -170,15 +173,19 @@ pub unsafe fn copy_blocks_t<
     }
 
     let device = key_caches[0].device();
-    if !device.is_cuda() {
+    let device = if let Device::Cuda(device) = device.is_cuda() {
+        device
+    } else {
         candle_core::bail!("device must be a cuda device")
-    }
+    };
     if !value_caches[0].device().is_cuda() {
         candle_core::bail!("key_caches and value_caches must be on the same device")
     }
     if key_caches[0].dtype() != value_caches[0].dtype() {
         candle_core::bail!("key_caches and value_caches must have the same dtype")
     }
+
+    let dtype = key_caches[0].dtype();
 
     let mut key_cache_ptrs = Vec::with_capacity(num_layers);
     let mut value_cache_ptrs = Vec::with_capacity(num_layers);
@@ -189,7 +196,7 @@ pub unsafe fn copy_blocks_t<
             candle_core::Storage::Cuda(c) => {
                 let cuda_slice = c.as_cuda_slice::<T>()?;
                 let cuda_slice = cuda_slice.slice(key_cache_storage_and_layout.1.start_offset()..);
-                *cuda_slice.device_ptr() as *const core::ffi::c_void
+                *cuda_slice.device_ptr()
             }
             _ => candle_core::bail!("key_caches must be a cuda tensor"),
         };
@@ -198,7 +205,7 @@ pub unsafe fn copy_blocks_t<
                 let cuda_slice = c.as_cuda_slice::<T>()?;
                 let cuda_slice =
                     cuda_slice.slice(value_cache_storage_and_layout.1.start_offset()..);
-                *cuda_slice.device_ptr() as *const core::ffi::c_void
+                *cuda_slice.device_ptr()
             }
             _ => candle_core::bail!("value_caches must be a cuda tensor"),
         };
@@ -206,7 +213,42 @@ pub unsafe fn copy_blocks_t<
         value_cache_ptrs.push(value_cache_ptr);
     }
 
+    let key_cache_ptrs = key_cache_ptrs.as_ptr();
+    let value_cache_ptrs = value_cache_ptrs.as_ptr();
     let num_pairs = block_mapping.dims()[0];
+
+    let numel_per_block: c_int = key_caches
+        .first()
+        .unwrap()
+        .i(0)?
+        .shape()
+        .dims()
+        .iter()
+        .product::<usize>()
+        .try_into()
+        .unwrap();
+
+    match dtype {
+        DType::F16 => unsafe {
+            ffi::copy_blocks_kernel_f16(
+                key_cache_ptrs.as_mut_ptr(),
+                value_cache_ptrs.as_mut_ptr(),
+                block_mapping.data_ptr() as *const i64,
+                numel_per_block,
+            );
+        },
+        DType::BF16 => unsafe {
+            ffi::copy_blocks_kernel_bf16(
+                key_cache_ptrs.as_mut_ptr(),
+                value_cache_ptrs.as_mut_ptr(),
+                block_mapping.data_ptr() as *const i64,
+                numel_per_block,
+            );
+        },
+        _ => {
+            candle_core::bail!("Only support f16/bf16 dtypes and src and dst must have same dtype")
+        }
+    }
 
     Ok(())
 }

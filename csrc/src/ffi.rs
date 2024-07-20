@@ -57,4 +57,18 @@ extern "C" {
         unpadded_lse: bool,
         force_split_kernel: bool,
     );
+
+    pub(crate) fn copy_blocks_kernel_f16(
+        key_cache_ptrs: *mut i64,
+        value_cache_ptrs: *mut i64,
+        block_mapping: *const i64,
+        numel_per_block: i32,
+    );
+
+    pub(crate) fn copy_blocks_kernel_bf16(
+        key_cache_ptrs: *mut i64,
+        value_cache_ptrs: *mut i64,
+        block_mapping: *const i64,
+        numel_per_block: i32,
+    );
 }
