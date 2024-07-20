@@ -57,8 +57,8 @@ fn swap_blocks_t<
             };
 
             for (src_block, dst_block) in block_mapping.iter() {
-                let src_offset = (src_block as u64) * block_size_in_bytes;
-                let dst_offset = (dst_block as u64) * block_size_in_bytes;
+                let src_offset = (*src_block as u64) * block_size_in_bytes;
+                let dst_offset = (*dst_block as u64) * block_size_in_bytes;
                 let src_slice: CudaSlice<u8> = unsafe {
                     src_device.upgrade_device_ptr(src_ptr + src_offset, block_size_in_bytes)
                 };
@@ -87,8 +87,8 @@ fn swap_blocks_t<
             };
 
             for (src_block, dst_block) in block_mapping.iter() {
-                let src_offset = (src_block as u64) * block_size_in_bytes;
-                let dst_offset = (dst_block as u64) * block_size_in_bytes;
+                let src_offset = (*src_block as usize) * (block_size_in_bytes as usize);
+                let dst_offset = (*dst_block as u64) * block_size_in_bytes;
                 let dst_slice: CudaSlice<u8> = unsafe {
                     dst_device.upgrade_device_ptr(dst_ptr + dst_offset, block_size_in_bytes)
                 };
@@ -117,8 +117,8 @@ fn swap_blocks_t<
             };
 
             for (src_block, dst_block) in block_mapping.iter() {
-                let src_offset = (src_block as u64) * block_size_in_bytes;
-                let dst_offset = (dst_block as u64)* block_size_in_bytes;
+                let src_offset = (*src_block as u64) * block_size_in_bytes;
+                let dst_offset = (*dst_block as usize) * (block_size_in_bytes as usize);
                 let src_slice: CudaSlice<u8> = unsafe {
                     src_device.upgrade_device_ptr(src_ptr + src_offset, block_size_in_bytes)
                 };
@@ -194,7 +194,8 @@ pub unsafe fn copy_blocks_t<
         let value_cache_ptr = match &*value_cache_storage_and_layout.0 {
             candle_core::Storage::Cuda(c) => {
                 let cuda_slice = c.as_cuda_slice::<T>()?;
-                let cuda_slice = cuda_slice.slice(value_cache_storage_and_layout.1.start_offset()..);
+                let cuda_slice =
+                    cuda_slice.slice(value_cache_storage_and_layout.1.start_offset()..);
                 *cuda_slice.device_ptr() as *const core::ffi::c_void
             }
             _ => candle_core::bail!("value_caches must be a cuda tensor"),
