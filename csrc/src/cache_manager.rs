@@ -125,7 +125,7 @@ fn swap_blocks_t<
                 src_device
                     .dtoh_sync_copy_into(
                         &src_slice,
-                        &mut dst_slice[dst_offset..dst_offset + block_size_in_bytes].clone(),
+                        &mut dst_slice.clone()[dst_offset..dst_offset + block_size_in_bytes],
                     )
                     .map_err(|e| candle_core::Error::Cuda(e.into()))?;
             }
