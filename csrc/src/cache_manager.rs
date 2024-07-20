@@ -1,10 +1,10 @@
 use crate::ffi;
-use candle_core::backend::{BackendDevice, BackendStorage};
-use candle_core::cuda::cudarc::driver::{CudaSlice, DevicePtr};
-use candle_core::cuda_backend::cudarc::driver::CudaStream;
-use candle_core::{DType, Device, Result, Tensor};
-use core::num;
-use cuda_runtime_sys::cudaMemcpyKind;
+use candle_core::{
+    backend::{BackendDevice, BackendStorage},
+    cuda_backend::cudarc::driver::CudaStream,
+    cuda_backend::cudarc::driver::CudaStream,
+    DType, Device, IndexOp, Result, Tensor,
+};
 use half::{bf16, f16};
 use std::borrow::BorrowMut;
 use std::collections::HashMap;
@@ -165,6 +165,25 @@ pub unsafe fn copy_blocks(
     value_caches: Vec<&mut Tensor>,
     block_mapping: Tensor,
 ) -> Result<()> {
+    match (key_caches[0].dtype(), value_caches[0].dtype()) {
+        (DType::F16, DType::F16) => copy_blocks_t::<f16>(key_caches, value_caches, block_mapping),
+        (DType::BF16, DType::BF16) => {
+            copy_blocks_t::<bf16>(key_caches, value_caches, block_mapping)
+        }
+        _ => {
+            candle_core::bail!("Only support f16/bf16 dtypes and src and dst must have same dtype")
+        }
+    }
+}
+/// Launches the `copy_blocks_kernel` on the given `key_caches` and `value_caches`,
+/// following the `block_mapping`, to copy the blocks on both `key_cache` and `value_cache`.
+unsafe fn copy_blocks_t<
+    T: candle_core::cuda_backend::CudaDType + candle_core::cuda_backend::cudarc::driver::DeviceRepr,
+>(
+    key_caches: Vec<&mut Tensor>,
+    value_caches: Vec<&mut Tensor>,
+    block_mapping: Tensor,
+) -> Result<()> {
     let num_layers = key_caches.len();
     if num_layers != value_caches.len() {
         candle_core::bail!("key_caches and value_caches must have the same length")
@@ -203,13 +222,7 @@ pub unsafe fn copy_blocks(
         };
         let value_cache_ptr = match &*value_cache_storage_and_layout.0 {
             candle_core::Storage::Cuda(c) => {
-                let cuda_slice = match dtype {
-                    DType::BF16 => c.as_cuda_slice::<bf16>()?,
-                    DType::F16 => c.as_cuda_slice::<f16>()?,
-                    _ => candle_core::bail!(
-                        "Only support f16/bf16 dtypes and src and dst must have same dtype"
-                    ),
-                };
+                let cuda_slice = c.as_cuda_slice::<T>()?;
                 let cuda_slice =
                     cuda_slice.slice(value_cache_storage_and_layout.1.start_offset()..);
                 *cuda_slice.device_ptr()
@@ -228,6 +241,16 @@ pub unsafe fn copy_blocks(
         candle_core::bail!("block_mapping must have shape [num_pairs, 2]")
     }
 
+    let (block_mapping_storage, block_mapping_layout) = block_mapping.storage_and_layout();
+    let block_mapping_ptr = match &*block_mapping_storage {
+        candle_core::Storage::Cuda(c) => {
+            let cuda_slice = c.as_cuda_slice::<i64>()?;
+            let cuda_slice = cuda_slice.slice(block_mapping_layout.start_offset()..);
+            *cuda_slice.device_ptr() as *const i64
+        }
+        _ => candle_core::bail!("block_mapping must be a cuda tensor"),
+    };
+
     let numel_per_block = key_caches[0]
         .i(0)?
         .shape()
@@ -242,7 +265,7 @@ pub unsafe fn copy_blocks(
             ffi::copy_blocks_f16(
                 key_cache_ptrs.as_mut_ptr(),
                 value_cache_ptrs.as_mut_ptr(),
-                block_mapping.data_ptr() as *const i64,
+                block_mapping_ptr,
                 num_layers as i32,
                 num_pairs as i32,
                 numel_per_block,
