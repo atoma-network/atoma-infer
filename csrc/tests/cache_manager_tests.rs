@@ -73,7 +73,7 @@ mod swap_blocks {
         let original_src = src.clone();
         let original_dst = dst.clone();
 
-        swap_blocks(&src, &mut dst, block_mapping.clone())?;
+        csrc::swap_blocks(&src, &mut dst, block_mapping.clone())?;
 
         // verify_swap::<half::f16>(&original_src, &original_dst, &dst, &block_mapping)?;
 
