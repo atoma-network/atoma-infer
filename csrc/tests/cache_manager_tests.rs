@@ -256,7 +256,7 @@ mod swap_blocks {
 
 
 pub fn swap_blocks(
-    src: Tensor,
+    src: &Tensor,
     dst: &mut Tensor,
     block_mapping: HashMap<usize, usize>,
 ) -> Result<(), APIError> {
@@ -312,7 +312,7 @@ pub fn swap_blocks(
             assert!(matches!(&*dst_storage, Storage::Cuda(_)));
             let Storage::Cpu(src_storage) = &*src_storage else { unreachable!() };
             let Storage::Cuda(dst_storage) = &*dst_storage else { unreachable!() };
-            let dst_ptr = dst_storage.as_cuda_slice::<u8>().map_err(APIError::from)?.device_ptr() + TryInto::<u64>::try_into(dst_layout.start_offset()).unwrap();
+            let dst_ptr = dst_storage.as_cuda_slice::<u8>().map_err(|e| candle_core::Error::Cuda(e.to_string().into()))?.device_ptr() + TryInto::<u64>::try_into(dst_layout.start_offset()).unwrap();
             let src_slice = try_api!(src_storage.as_slice());
 
             for (src_block_number, dst_block_number) in block_mapping {
@@ -325,7 +325,7 @@ pub fn swap_blocks(
             }
         }
         (src, dst) => {
-            return Err(APIError::new(format!("Tensors must be on either the GPU or CPU to swap,, got {src:?} (src) and {dst:?} (dst).")))
+            candle_core::bail!("Tensors must be on either the GPU or CPU to swap,, got {src:?} (src) and {dst:?} (dst).")
         }
     }
 
