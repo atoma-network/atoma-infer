@@ -41,85 +41,85 @@ __global__ void copy_blocks_kernel(int64_t* key_cache_ptrs,
 
 }  // namespace vllm
 
-// f16, bf16 are special cases: We use a 16-bit integer to simulate the bit width. 
-// SAFETY: This is technically UB due to aliasing, but it is OK because the width is compatible.
-extern "C" {
-    const char* copy_blocks_f16(
-        int64_t* key_cache_ptrs,
-        int64_t* value_cache_ptrs,
-        const int64_t* block_mapping,
-        int num_layers,
-        int num_pairs,
-        int numel_per_block
-    ) {
-        dim3 grid(num_layers, num_pairs);
-        dim3 block(std::min(1024, numel_per_block));
+// // f16, bf16 are special cases: We use a 16-bit integer to simulate the bit width. 
+// // SAFETY: This is technically UB due to aliasing, but it is OK because the width is compatible.
+// extern "C" {
+//     const char* copy_blocks_f16(
+//         int64_t* key_cache_ptrs,
+//         int64_t* value_cache_ptrs,
+//         const int64_t* block_mapping,
+//         int num_layers,
+//         int num_pairs,
+//         int numel_per_block
+//     ) {
+//         dim3 grid(num_layers, num_pairs);
+//         dim3 block(std::min(1024, numel_per_block));
         
-        cudaStream_t stream;
-        cudaError_t error = cudaStreamGetCurrent(&stream);
-        if (error != cudaSuccess) {
-            return cudaGetErrorString(error);
-        }
+//         cudaStream_t stream;
+//         cudaError_t error = cudaStreamGetCurrent(&stream);
+//         if (error != cudaSuccess) {
+//             return cudaGetErrorString(error);
+//         }
 
-        vllm::copy_blocks_kernel<int16_t><<<grid, block, 0, stream>>>(
-            key_cache_ptrs,
-            value_cache_ptrs,
-            block_mapping,
-            numel_per_block
-        );
+//         vllm::copy_blocks_kernel<int16_t><<<grid, block, 0, stream>>>(
+//             key_cache_ptrs,
+//             value_cache_ptrs,
+//             block_mapping,
+//             numel_per_block
+//         );
 
-        error = cudaGetLastError();
-        if (error != cudaSuccess) {
-            return cudaGetErrorString(error);
-        }
+//         error = cudaGetLastError();
+//         if (error != cudaSuccess) {
+//             return cudaGetErrorString(error);
+//         }
 
-        error = cudaStreamSynchronize(stream);
-        if (error != cudaSuccess) {
-            return cudaGetErrorString(error);
-        }
+//         error = cudaStreamSynchronize(stream);
+//         if (error != cudaSuccess) {
+//             return cudaGetErrorString(error);
+//         }
 
-        return nullptr;  // Indicates success
-    }
-}
+//         return nullptr;  // Indicates success
+//     }
+// }
 
-extern "C" {
-    const char* copy_blocks_bf16(
-        int64_t* key_cache_ptrs,
-        int64_t* value_cache_ptrs,
-        const int64_t* block_mapping,
-        int num_layers,
-        int num_pairs,
-        int numel_per_block
-    ) {
-        dim3 grid(num_layers, num_pairs);
-        dim3 block(std::min(1024, numel_per_block));
+// extern "C" {
+//     const char* copy_blocks_bf16(
+//         int64_t* key_cache_ptrs,
+//         int64_t* value_cache_ptrs,
+//         const int64_t* block_mapping,
+//         int num_layers,
+//         int num_pairs,
+//         int numel_per_block
+//     ) {
+//         dim3 grid(num_layers, num_pairs);
+//         dim3 block(std::min(1024, numel_per_block));
 
-        cudaStream_t stream;
-        cudaError_t error = cudaStreamGetCurrent(&stream);
-        if (error != cudaSuccess) {
-            return cudaGetErrorString(error);
-        }
+//         cudaStream_t stream;
+//         cudaError_t error = cudaStreamGetCurrent(&stream);
+//         if (error != cudaSuccess) {
+//             return cudaGetErrorString(error);
+//         }
 
-        vllm::copy_blocks_kernel<int16_t><<<grid, block, 0, stream>>>(
-            key_cache_ptrs,
-            value_cache_ptrs,
-            block_mapping,
-            numel_per_block
-        );
+//         vllm::copy_blocks_kernel<int16_t><<<grid, block, 0, stream>>>(
+//             key_cache_ptrs,
+//             value_cache_ptrs,
+//             block_mapping,
+//             numel_per_block
+//         );
 
-        error = cudaGetLastError();
-        if (error != cudaSuccess) {
-            return cudaGetErrorString(error);
-        }
+//         error = cudaGetLastError();
+//         if (error != cudaSuccess) {
+//             return cudaGetErrorString(error);
+//         }
 
-        error = cudaStreamSynchronize(stream);
-        if (error != cudaSuccess) {
-            return cudaGetErrorString(error);
-        }
+//         error = cudaStreamSynchronize(stream);
+//         if (error != cudaSuccess) {
+//             return cudaGetErrorString(error);
+//         }
 
-        return nullptr;  // Indicates success
-    }
-}
+//         return nullptr;  // Indicates success
+//     }
+// }
 
 // // Note: the key_caches and value_caches vectors are constant but
 // // not the Tensors they contain. The vectors need to be const refs
@@ -173,108 +173,108 @@ extern "C" {
 //       }));
 // }
 
-namespace vllm {
+// namespace vllm {
 
-template <typename scalar_t, typename cache_t, Fp8KVCacheDataType kv_dt>
-__global__ void reshape_and_cache_kernel(
-    const scalar_t* __restrict__ key,    // [num_tokens, num_heads, head_size]
-    const scalar_t* __restrict__ value,  // [num_tokens, num_heads, head_size]
-    cache_t* __restrict__ key_cache,     // [num_blocks, num_heads, head_size/x,
-                                         // block_size, x]
-    cache_t* __restrict__ value_cache,   // [num_blocks, num_heads, head_size,
-                                         // block_size]
-    const int64_t* __restrict__ slot_mapping,  // [num_tokens]
-    const int key_stride, const int value_stride, const int num_heads,
-    const int head_size, const int block_size, const int x, const float k_scale,
-    const float v_scale) {
-  const int64_t token_idx = blockIdx.x;
-  const int64_t slot_idx = slot_mapping[token_idx];
-  if (slot_idx < 0) {
-    // Padding token that should be ignored.
-    return;
-  }
+// template <typename scalar_t, typename cache_t, Fp8KVCacheDataType kv_dt>
+// __global__ void reshape_and_cache_kernel(
+//     const scalar_t* __restrict__ key,    // [num_tokens, num_heads, head_size]
+//     const scalar_t* __restrict__ value,  // [num_tokens, num_heads, head_size]
+//     cache_t* __restrict__ key_cache,     // [num_blocks, num_heads, head_size/x,
+//                                          // block_size, x]
+//     cache_t* __restrict__ value_cache,   // [num_blocks, num_heads, head_size,
+//                                          // block_size]
+//     const int64_t* __restrict__ slot_mapping,  // [num_tokens]
+//     const int key_stride, const int value_stride, const int num_heads,
+//     const int head_size, const int block_size, const int x, const float k_scale,
+//     const float v_scale) {
+//   const int64_t token_idx = blockIdx.x;
+//   const int64_t slot_idx = slot_mapping[token_idx];
+//   if (slot_idx < 0) {
+//     // Padding token that should be ignored.
+//     return;
+//   }
 
-  const int64_t block_idx = slot_idx / block_size;
-  const int64_t block_offset = slot_idx % block_size;
+//   const int64_t block_idx = slot_idx / block_size;
+//   const int64_t block_offset = slot_idx % block_size;
 
-  const int n = num_heads * head_size;
-  for (int i = threadIdx.x; i < n; i += blockDim.x) {
-    const int64_t src_key_idx = token_idx * key_stride + i;
-    const int64_t src_value_idx = token_idx * value_stride + i;
+//   const int n = num_heads * head_size;
+//   for (int i = threadIdx.x; i < n; i += blockDim.x) {
+//     const int64_t src_key_idx = token_idx * key_stride + i;
+//     const int64_t src_value_idx = token_idx * value_stride + i;
 
-    const int head_idx = i / head_size;
-    const int head_offset = i % head_size;
-    const int x_idx = head_offset / x;
-    const int x_offset = head_offset % x;
+//     const int head_idx = i / head_size;
+//     const int head_offset = i % head_size;
+//     const int x_idx = head_offset / x;
+//     const int x_offset = head_offset % x;
 
-    const int64_t tgt_key_idx =
-        block_idx * num_heads * (head_size / x) * block_size * x +
-        head_idx * (head_size / x) * block_size * x + x_idx * block_size * x +
-        block_offset * x + x_offset;
-    const int64_t tgt_value_idx =
-        block_idx * num_heads * head_size * block_size +
-        head_idx * head_size * block_size + head_offset * block_size +
-        block_offset;
-    scalar_t tgt_key = key[src_key_idx];
-    scalar_t tgt_value = value[src_value_idx];
-    if constexpr (kv_dt == Fp8KVCacheDataType::kAuto) {
-      key_cache[tgt_key_idx] = tgt_key;
-      value_cache[tgt_value_idx] = tgt_value;
-    } else {
-      key_cache[tgt_key_idx] =
-          fp8::scaled_convert<cache_t, scalar_t, kv_dt>(tgt_key, k_scale);
-      value_cache[tgt_value_idx] =
-          fp8::scaled_convert<cache_t, scalar_t, kv_dt>(tgt_value, v_scale);
-    }
-  }
-}
+//     const int64_t tgt_key_idx =
+//         block_idx * num_heads * (head_size / x) * block_size * x +
+//         head_idx * (head_size / x) * block_size * x + x_idx * block_size * x +
+//         block_offset * x + x_offset;
+//     const int64_t tgt_value_idx =
+//         block_idx * num_heads * head_size * block_size +
+//         head_idx * head_size * block_size + head_offset * block_size +
+//         block_offset;
+//     scalar_t tgt_key = key[src_key_idx];
+//     scalar_t tgt_value = value[src_value_idx];
+//     if constexpr (kv_dt == Fp8KVCacheDataType::kAuto) {
+//       key_cache[tgt_key_idx] = tgt_key;
+//       value_cache[tgt_value_idx] = tgt_value;
+//     } else {
+//       key_cache[tgt_key_idx] =
+//           fp8::scaled_convert<cache_t, scalar_t, kv_dt>(tgt_key, k_scale);
+//       value_cache[tgt_value_idx] =
+//           fp8::scaled_convert<cache_t, scalar_t, kv_dt>(tgt_value, v_scale);
+//     }
+//   }
+// }
 
-template <typename scalar_t>
-__global__ void reshape_and_cache_flash_kernel(
-    const scalar_t* __restrict__ key,    // [num_tokens, num_heads, head_size]
-    const scalar_t* __restrict__ value,  // [num_tokens, num_heads, head_size]
-    scalar_t* __restrict__ k_cache,      // [num_blocks, block_size, num_heads,
-                                         // head_size]
-    scalar_t* __restrict__ v_cache,      // [num_blocks, block_size, num_heads,
-                                         // head_size]
-    const int64_t* __restrict__ slot_mapping,  // [num_tokens]
-    const int block_stride, const int key_stride, const int value_stride,
-    const int num_heads, const int head_size, const int block_size) {
-  const int64_t token_idx = blockIdx.x;
-  const int64_t slot_idx = slot_mapping[token_idx];
-  // NOTE: slot_idx can be -1 if the token is padded
-  if (slot_idx < 0) {
-    return;
-  }
-  const int64_t block_idx = slot_idx / block_size;
-  const int64_t block_offset = slot_idx % block_size;
-  const int n = num_heads * head_size;
-  for (int i = threadIdx.x; i < n; i += blockDim.x) {
-    const int64_t src_key_idx = token_idx * key_stride + i;
-    const int64_t src_value_idx = token_idx * value_stride + i;
-    const int head_idx = i / head_size;
-    const int head_offset = i % head_size;
-    const int64_t tgt_value_idx = block_idx * block_stride +
-                                  block_offset * num_heads * head_size +
-                                  head_idx * head_size + head_offset;
-    k_cache[tgt_value_idx] = key[src_key_idx];
-    v_cache[tgt_value_idx] = value[src_value_idx];
-  }
-}
-}  // namespace vllm
+// template <typename scalar_t>
+// __global__ void reshape_and_cache_flash_kernel(
+//     const scalar_t* __restrict__ key,    // [num_tokens, num_heads, head_size]
+//     const scalar_t* __restrict__ value,  // [num_tokens, num_heads, head_size]
+//     scalar_t* __restrict__ k_cache,      // [num_blocks, block_size, num_heads,
+//                                          // head_size]
+//     scalar_t* __restrict__ v_cache,      // [num_blocks, block_size, num_heads,
+//                                          // head_size]
+//     const int64_t* __restrict__ slot_mapping,  // [num_tokens]
+//     const int block_stride, const int key_stride, const int value_stride,
+//     const int num_heads, const int head_size, const int block_size) {
+//   const int64_t token_idx = blockIdx.x;
+//   const int64_t slot_idx = slot_mapping[token_idx];
+//   // NOTE: slot_idx can be -1 if the token is padded
+//   if (slot_idx < 0) {
+//     return;
+//   }
+//   const int64_t block_idx = slot_idx / block_size;
+//   const int64_t block_offset = slot_idx % block_size;
+//   const int n = num_heads * head_size;
+//   for (int i = threadIdx.x; i < n; i += blockDim.x) {
+//     const int64_t src_key_idx = token_idx * key_stride + i;
+//     const int64_t src_value_idx = token_idx * value_stride + i;
+//     const int head_idx = i / head_size;
+//     const int head_offset = i % head_size;
+//     const int64_t tgt_value_idx = block_idx * block_stride +
+//                                   block_offset * num_heads * head_size +
+//                                   head_idx * head_size + head_offset;
+//     k_cache[tgt_value_idx] = key[src_key_idx];
+//     v_cache[tgt_value_idx] = value[src_value_idx];
+//   }
+// }
+// }  // namespace vllm
 
-// KV_T is the stored data type of kv-cache.
-// CACHE_T is the data type of key and value tensors.
-// KV_DTYPE is the real data type of kv-cache.
-#define CALL_RESHAPE_AND_CACHE(KV_T, CACHE_T, KV_DTYPE)               \
-  vllm::reshape_and_cache_kernel<KV_T, CACHE_T, KV_DTYPE>             \
-      <<<grid, block, 0, stream>>>(                                   \
-          reinterpret_cast<KV_T*>(key.data_ptr()),                    \
-          reinterpret_cast<KV_T*>(value.data_ptr()),                  \
-          reinterpret_cast<CACHE_T*>(key_cache.data_ptr()),           \
-          reinterpret_cast<CACHE_T*>(value_cache.data_ptr()),         \
-          slot_mapping.data_ptr<int64_t>(), key_stride, value_stride, \
-          num_heads, head_size, block_size, x, k_scale, v_scale);
+// // KV_T is the stored data type of kv-cache.
+// // CACHE_T is the data type of key and value tensors.
+// // KV_DTYPE is the real data type of kv-cache.
+// #define CALL_RESHAPE_AND_CACHE(KV_T, CACHE_T, KV_DTYPE)               \
+//   vllm::reshape_and_cache_kernel<KV_T, CACHE_T, KV_DTYPE>             \
+//       <<<grid, block, 0, stream>>>(                                   \
+//           reinterpret_cast<KV_T*>(key.data_ptr()),                    \
+//           reinterpret_cast<KV_T*>(value.data_ptr()),                  \
+//           reinterpret_cast<CACHE_T*>(key_cache.data_ptr()),           \
+//           reinterpret_cast<CACHE_T*>(value_cache.data_ptr()),         \
+//           slot_mapping.data_ptr<int64_t>(), key_stride, value_stride, \
+//           num_heads, head_size, block_size, x, k_scale, v_scale);
 
 // void reshape_and_cache(
 //     torch::Tensor& key,    // [num_tokens, num_heads, head_size]
@@ -340,27 +340,27 @@ __global__ void reshape_and_cache_flash_kernel(
 //       });
 // }
 
-namespace vllm {
+// namespace vllm {
 
-template <typename Tout, typename Tin, Fp8KVCacheDataType kv_dt>
-__global__ void convert_fp8_kernel(const Tin* __restrict__ src_cache,
-                                   Tout* __restrict__ dst_cache,
-                                   const float scale,
-                                   const int64_t block_stride) {
-  const int64_t block_idx = blockIdx.x;
-  for (int i = threadIdx.x; i < block_stride; i += blockDim.x) {
-    int64_t idx = block_idx * block_stride + i;
-    dst_cache[idx] =
-        fp8::scaled_convert<Tout, Tin, kv_dt>(src_cache[idx], scale);
-  }
-}
+// template <typename Tout, typename Tin, Fp8KVCacheDataType kv_dt>
+// __global__ void convert_fp8_kernel(const Tin* __restrict__ src_cache,
+//                                    Tout* __restrict__ dst_cache,
+//                                    const float scale,
+//                                    const int64_t block_stride) {
+//   const int64_t block_idx = blockIdx.x;
+//   for (int i = threadIdx.x; i < block_stride; i += blockDim.x) {
+//     int64_t idx = block_idx * block_stride + i;
+//     dst_cache[idx] =
+//         fp8::scaled_convert<Tout, Tin, kv_dt>(src_cache[idx], scale);
+//   }
+// }
 
-}  // namespace vllm
+// }  // namespace vllm
 
-#define CALL_CONVERT_FP8(Tout, Tin, KV_DTYPE)                                \
-  vllm::convert_fp8_kernel<Tout, Tin, KV_DTYPE><<<grid, block, 0, stream>>>( \
-      reinterpret_cast<Tin*>(src_cache.data_ptr()),                          \
-      reinterpret_cast<Tout*>(dst_cache.data_ptr()), scale, block_stride);
+// #define CALL_CONVERT_FP8(Tout, Tin, KV_DTYPE)                                \
+//   vllm::convert_fp8_kernel<Tout, Tin, KV_DTYPE><<<grid, block, 0, stream>>>( \
+//       reinterpret_cast<Tin*>(src_cache.data_ptr()),                          \
+//       reinterpret_cast<Tout*>(dst_cache.data_ptr()), scale, block_stride);
 
 // // Only for testing.
 // void convert_fp8(torch::Tensor& dst_cache, torch::Tensor& src_cache,
