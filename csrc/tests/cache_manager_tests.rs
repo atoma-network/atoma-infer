@@ -307,7 +307,7 @@ pub fn swap_blocks(
                 let src_slice: CudaSlice<u8> = unsafe { src_dev.upgrade_device_ptr(src_ptr+src_offset, block_size_in_bytes) };
                 let mut dst_slice = unsafe { dst_dev.upgrade_device_ptr(dst_ptr+dst_offset, block_size_in_bytes) };
 
-                try_api!(src_dev.dtod_copy(&src_slice, &mut dst_slice));
+                src_dev.dtod_copy(&src_slice, &mut dst_slice).unwrap();
             }
         }
         (Device::Cpu, Device::Cuda(dst_dev)) => {
@@ -318,7 +318,7 @@ pub fn swap_blocks(
             let Storage::Cpu(src_storage) = &*src_storage else { unreachable!() };
             let Storage::Cuda(dst_storage) = &*dst_storage else { unreachable!() };
             let dst_ptr = dst_storage.as_cuda_slice::<u8>().map_err(|e| candle_core::Error::Cuda(e.to_string().into()))?.device_ptr() + TryInto::<u64>::try_into(dst_layout.start_offset()).unwrap();
-            let src_slice = try_api!(src_storage.as_slice());
+            let src_slice = src_storage.as_slice().unwrap();
 
             for (src_block_number, dst_block_number) in block_mapping {
                 let src_offset = src_block_number * block_size_in_bytes;
@@ -326,7 +326,7 @@ pub fn swap_blocks(
                 // u8s because we copy by bytes
                 let mut dst_slice: CudaSlice<u8> = unsafe { dst_dev.upgrade_device_ptr(dst_ptr+dst_offset, block_size_in_bytes) };
 
-                try_api!(dst_dev.htod_sync_copy_into(&src_slice[src_offset..src_offset+block_size_in_bytes], &mut dst_slice));
+                dst_dev.htod_sync_copy_into(&src_slice[src_offset..src_offset+block_size_in_bytes], &mut dst_slice).unwrap();
             }
         }
         (src, dst) => {
