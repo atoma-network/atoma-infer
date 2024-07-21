@@ -7,7 +7,6 @@ use candle_core::{
 };
 use half::{bf16, f16};
 use std::collections::HashMap;
-use std::{any::Any, borrow::BorrowMut};
 
 /// Swaps blocks from `src` to `dst` tensors, through the block_mapping.
 /// Both `src` and `dst` tensors must have the same dtype, and either be on
