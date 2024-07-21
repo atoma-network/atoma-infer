@@ -1,10 +1,11 @@
-use candle_core::{Device, Result, Tensor, IndexOp};
+use candle_core::{DType, Device, IndexOp, Result, Tensor};
 
 use std::collections::HashMap;
 
+const NUM_BLOCKS: usize = 3;
+const BLOCK_SIZE: usize = 16;
+
 fn create_random_tensor(device: &Device, dtype: DType) -> Result<Tensor> {
-    const NUM_BLOCKS: usize = 3;
-    const BLOCK_SIZE: usize = 16;
     let tensor = Tensor::rand(0f32, 1f32, (NUM_BLOCKS, BLOCK_SIZE, 1, 1), device)?;
     Ok(tensor)
 }
@@ -13,18 +14,189 @@ fn create_random_tensor(device: &Device, dtype: DType) -> Result<Tensor> {
 mod swap_blocks {
     use super::*;
 
-    fn verify_swap(src: &Tensor, dst: &Tensor, block_mapping: &HashMap<i64, i64>) -> Result<()> {
+    fn verify_swap(
+        src: &Tensor,
+        original_dst: &Tensor,
+        swapped_dst: &Tensor,
+        block_mapping: &HashMap<i64, i64>,
+    ) -> Result<()> {
         for (src_block, dst_block) in block_mapping {
             let src_slice = src.i(*src_block)?;
-            let dst_slice = dst.i(*dst_block)?;
+            let swapped_dst_slice = swapped_dst.i(*dst_block)?;
             assert!(
-                src_slice.equal(&dst_slice)?,
-                "Block {} was not correctly swapped to block {}",
+                src_slice.equal(&swapped_dst_slice)?,
+                "Block {} from source was not correctly swapped to block {} in destination",
                 src_block,
                 dst_block
             );
+
+            // Check that non-swapped blocks remain unchanged
+            for i in 0..NUM_BLOCKS {
+                if !block_mapping.values().any(|&v| v == i) {
+                    let original_dst_slice = original_dst.i(i)?;
+                    let current_dst_slice = swapped_dst.i(i)?;
+                    assert!(
+                        original_dst_slice.equal(&current_dst_slice)?,
+                        "Block {} in destination should not have changed",
+                        i
+                    );
+                }
+            }
         }
         Ok(())
+    }
+
+    #[test]
+    fn test_swap_blocks_f16_cuda() -> Result<()> {
+        let device = Device::new_cuda(0)?;
+        let src = create_random_tensor(&device, DType::F16)?;
+        let mut dst = create_random_tensor(&device, DType::F16)?;
+        
+        let mut block_mapping = HashMap::new();
+        block_mapping.insert(0, 2);
+        block_mapping.insert(1, 0);
+
+        let original_src = src.clone();
+        let original_dst = dst.clone();
+
+        swap_blocks(&src, &mut dst, block_mapping.clone())?;
+        
+        verify_swap(&original_src, &original_dst, &dst, &block_mapping)?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_swap_blocks_bf16_cuda() -> Result<()> {
+        let device = Device::new_cuda(0)?;
+        let src = create_random_tensor(&device, DType::BF16)?;
+        let mut dst = create_random_tensor(&device, DType::BF16)?;
+
+        let mut block_mapping = HashMap::new();
+        block_mapping.insert(0, 1);
+        block_mapping.insert(2, 0);
+
+        let original_src = src.clone();
+        let original_dst = dst.clone();
+
+        swap_blocks(&src, &mut dst, block_mapping.clone())?;
+
+        verify_swap(&original_src, &original_dst, &dst, &block_mapping)?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_swap_blocks_cpu_to_cuda_f16() -> Result<()> {
+        let cpu_device = Device::Cpu;
+        let cuda_device = Device::new_cuda(0)?;
+        let src = create_random_tensor(&cpu_device, DType::F16)?;
+        let mut dst = create_random_tensor(&cuda_device, DType::F16)?;
+        
+        let mut block_mapping = HashMap::new();
+        block_mapping.insert(0, 2);
+        block_mapping.insert(1, 1);
+
+        let original_src = src.clone();
+        let original_dst = dst.clone();
+
+        swap_blocks(&src, &mut dst, block_mapping.clone())?;
+        
+        verify_swap(&original_src, &original_dst, &dst, &block_mapping)?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_swap_blocks_cuda_to_cpu_f16() -> Result<()> {
+        let cpu_device = Device::Cpu;
+        let cuda_device = Device::new_cuda(0)?;
+        let src = create_random_tensor(&cuda_device, DType::F16)?;
+        let mut dst = create_random_tensor(&cpu_device, DType::F16)?;
+        
+        let mut block_mapping = HashMap::new();
+        block_mapping.insert(1, 0);
+        block_mapping.insert(2, 2);
+
+        let original_src = src.clone();
+        let original_dst = dst.clone();
+
+        swap_blocks(&src, &mut dst, block_mapping.clone())?;
+        
+        verify_swap(&original_src, &original_dst, &dst, &block_mapping)?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_swap_blocks_cpu_to_cuda_bf16() -> Result<()> {
+        let cpu_device = Device::Cpu;
+        let cuda_device = Device::new_cuda(0)?;
+        let src = create_random_tensor(&cpu_device, DType::BF16)?;
+        let mut dst = create_random_tensor(&cuda_device, DType::BF16)?;
+        
+        let mut block_mapping = HashMap::new();
+        block_mapping.insert(0, 2);
+        block_mapping.insert(1, 1);
+
+        let original_src = src.clone();
+        let original_dst = dst.clone();
+
+        swap_blocks(&src, &mut dst, block_mapping.clone())?;
+        
+        verify_swap(&original_src, &original_dst, &dst, &block_mapping)?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_swap_blocks_cuda_to_cpu_bf16() -> Result<()> {
+        let cpu_device = Device::Cpu;
+        let cuda_device = Device::new_cuda(0)?;
+        let src = create_random_tensor(&cuda_device, DType::BF16)?;
+        let mut dst = create_random_tensor(&cpu_device, DType::BF16)?;
+        
+        let mut block_mapping = HashMap::new();
+        block_mapping.insert(1, 0);
+        block_mapping.insert(2, 2);
+
+        let original_src = src.clone();
+        let original_dst = dst.clone();
+
+        swap_blocks(&src, &mut dst, block_mapping.clone())?;
+        
+        verify_swap(&original_src, &original_dst, &dst, &block_mapping)?;
+
+        Ok(())
+    }
+
+    #[test]
+    #[should_panic(expected = "Only support f16/bf16 dtypes and src and dst must have same dtype")]
+    fn test_swap_blocks_invalid_dtype() {
+        let device = Device::Cpu;
+        let src = create_random_tensor(&device, DType::F32).unwrap();
+        let mut dst = create_random_tensor(&device, DType::F32).unwrap();
+
+        let mut block_mapping = HashMap::new();
+        block_mapping.insert(0, 2);
+        block_mapping.insert(1, 0);
+
+        swap_blocks(&src, &mut dst, block_mapping).unwrap();
+    }
+
+    #[test]
+    #[should_panic(expected = "Both src and dst tensors should be on the same device to swap")]
+    fn test_swap_blocks_different_cuda_devices() {
+        let device1 = Device::new_cuda(0).unwrap();
+        let device2 = Device::new_cuda(1).unwrap();
+        let src = create_random_tensor(&device1, DType::F16).unwrap();
+        let mut dst = create_random_tensor(&device2, DType::F16).unwrap();
+
+        let mut block_mapping = HashMap::new();
+        block_mapping.insert(0, 2);
+        block_mapping.insert(1, 0);
+
+        swap_blocks(&src, &mut dst, block_mapping).unwrap();
     }
 }
 
