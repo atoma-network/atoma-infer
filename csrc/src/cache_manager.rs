@@ -50,15 +50,24 @@ fn swap_blocks_t<
                 (candle_core::Storage::Cuda(src_c), candle_core::Storage::Cuda(dst_c)) => {
                     let src_c = src_c.as_cuda_slice::<T>()?;
                     let dst_c = dst_c.as_cuda_slice::<T>()?;
-                    let src_c = unsafe { src_c.transmute::<u8>(src_c.num_bytes())? };
-                    let dst_c = unsafe { dst_c.transmute::<u8>(dst_c.num_bytes())? };
+                    let src_c = unsafe {
+                        src_c.transmute::<u8>(src_c.num_bytes()).ok_or_else(
+                            candle_core::Error::Cuda(
+                                "enable to transmute src_c".to_string().into(),
+                            ),
+                        )?
+                    };
+                    let dst_c = unsafe {
+                        dst_c.transmute::<u8>(dst_c.num_bytes()).ok_or_else(
+                            candle_core::Error::Cuda(
+                                "enable to transmute src_c".to_string().into(),
+                            ),
+                        )?
+                    };
                     let src_c = src_c.slice(src_l.start_offset() * block_size_in_bytes..);
                     let dst_c = dst_c.slice(dst_l.start_offset() * block_size_in_bytes..);
 
-                    (
-                        *src_c.device_ptr(),
-                        *dst_c.device_ptr(),
-                    )
+                    (*src_c.device_ptr(), *dst_c.device_ptr())
                 }
                 _ => {
                     candle_core::bail!(
