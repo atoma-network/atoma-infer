@@ -15,7 +15,10 @@ fn create_random_tensor(device: &Device, dtype: DType) -> Result<Tensor> {
 mod swap_blocks {
     use super::*;
 
-    fn verify_swap(
+    fn verify_swap<
+        T: candle_core::cuda_backend::CudaDType
+            + candle_core::cuda_backend::cudarc::driver::DeviceRepr,
+    >(
         src: &Tensor,
         original_dst: &Tensor,
         swapped_dst: &Tensor,
@@ -25,8 +28,8 @@ mod swap_blocks {
             let src_slice = src.i(*src_block as usize)?;
             let swapped_dst_slice = swapped_dst.i(*dst_block as usize)?;
             assert_eq!(
-                src_slice.flatten_all()?.to_vec1::<f32>()?,
-                swapped_dst_slice.flatten_all()?.to_vec1::<f32>()?,
+                src_slice.flatten_all()?.to_vec1::<T>()?,
+                swapped_dst_slice.flatten_all()?.to_vec1::<T>()?,
                 "Block {} from source was not correctly swapped to block {} in destination",
                 src_block,
                 dst_block
@@ -38,8 +41,8 @@ mod swap_blocks {
                     let original_dst_slice = original_dst.i(i)?;
                     let current_dst_slice = swapped_dst.i(i)?;
                     assert_eq!(
-                        original_dst_slice.flatten_all()?.to_vec1::<f32>()?,
-                        current_dst_slice.flatten_all()?.to_vec1::<f32>()?,
+                        original_dst_slice.flatten_all()?.to_vec1::<T>()?,
+                        current_dst_slice.flatten_all()?.to_vec1::<T>()?,
                         "Block {} in destination should not have changed",
                         i
                     );
@@ -64,7 +67,7 @@ mod swap_blocks {
 
         csrc::swap_blocks(&src, &mut dst, block_mapping.clone())?;
 
-        verify_swap(&original_src, &original_dst, &dst, &block_mapping)?;
+        verify_swap::<half::f16>(&original_src, &original_dst, &dst, &block_mapping)?;
 
         Ok(())
     }
@@ -84,7 +87,7 @@ mod swap_blocks {
 
         csrc::swap_blocks(&src, &mut dst, block_mapping.clone())?;
 
-        verify_swap(&original_src, &original_dst, &dst, &block_mapping)?;
+        verify_swap::<half::bf16>(&original_src, &original_dst, &dst, &block_mapping)?;
 
         Ok(())
     }
@@ -105,7 +108,7 @@ mod swap_blocks {
 
         csrc::swap_blocks(&src, &mut dst, block_mapping.clone())?;
 
-        verify_swap(&original_src, &original_dst, &dst, &block_mapping)?;
+        verify_swap::<half::f16>(&original_src, &original_dst, &dst, &block_mapping)?;
 
         Ok(())
     }
@@ -126,7 +129,7 @@ mod swap_blocks {
 
         csrc::swap_blocks(&src, &mut dst, block_mapping.clone())?;
 
-        verify_swap(&original_src, &original_dst, &dst, &block_mapping)?;
+        verify_swap::<half::f16>(&original_src, &original_dst, &dst, &block_mapping)?;
 
         Ok(())
     }
@@ -147,7 +150,7 @@ mod swap_blocks {
 
         csrc::swap_blocks(&src, &mut dst, block_mapping.clone())?;
 
-        verify_swap(&original_src, &original_dst, &dst, &block_mapping)?;
+        verify_swap::<half::bf16>(&original_src, &original_dst, &dst, &block_mapping)?;
 
         Ok(())
     }
@@ -168,7 +171,7 @@ mod swap_blocks {
 
         csrc::swap_blocks(&src, &mut dst, block_mapping.clone())?;
 
-        verify_swap(&original_src, &original_dst, &dst, &block_mapping)?;
+        verify_swap::<half::bf16>(&original_src, &original_dst, &dst, &block_mapping)?;
 
         Ok(())
     }
