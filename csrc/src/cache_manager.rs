@@ -52,8 +52,7 @@ fn swap_blocks_t<
                     let dst_c = dst_c.as_cuda_slice::<T>()?;
                     let src_c = src_c.slice(src_l.start_offset()..);
                     let dst_c = dst_c.slice(dst_l.start_offset()..);
-
-                    (*src_c.device_ptr(), *dst_c.device_ptr())
+                    (src_c.device_ptr(), dst_c.device_ptr())
                 }
                 _ => {
                     candle_core::bail!(
@@ -65,12 +64,12 @@ fn swap_blocks_t<
             for (src_block, dst_block) in block_mapping {
                 let src_offset = (src_block as u64) * (block_size_in_bytes as u64);
                 let dst_offset = (dst_block as u64) * (block_size_in_bytes as u64);
-                // let src_slice: CudaSlice<u8> = unsafe {
-                //     src_device.upgrade_device_ptr(src_ptr + src_offset, block_size_in_bytes)
-                // };
-                // let mut dst_slice: CudaSlice<u8> = unsafe {
-                //     dst_device.upgrade_device_ptr(dst_ptr + dst_offset, block_size_in_bytes)
-                // };
+                let src_slice: CudaSlice<u8> = unsafe {
+                    src_device.upgrade_device_ptr(*src_ptr + src_offset, block_size_in_bytes)
+                };
+                let mut dst_slice: CudaSlice<u8> = unsafe {
+                    dst_device.upgrade_device_ptr(*dst_ptr + dst_offset, block_size_in_bytes)
+                };
                 // src_device
                 //     .dtod_copy(&src_slice, &mut dst_slice)
                 //     .map_err(|e| candle_core::Error::Cuda(e.to_string().into()))?;
