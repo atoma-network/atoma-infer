@@ -71,7 +71,7 @@ mod swap_blocks {
         csrc::swap_blocks(&src, &mut dst, block_mapping.clone())?;
 
         // verify_swap::<half::f16>(&original_src, &original_dst, &dst, &block_mapping)?;
-        assert_eq!(dst.flatten_all()?.to_vec1::<f16>()?, original_dst.flatten_all()?.to_vec1::<f16>()?);
+        assert_eq!(dst.flatten_all()?.to_vec1::<half::f16>()?, original_dst.flatten_all()?.to_vec1::<half::f16>()?);
 
         Ok(())
     }
