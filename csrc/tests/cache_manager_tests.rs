@@ -262,7 +262,9 @@ pub fn swap_blocks(
 ) -> Result<()> {
     use candle_core::Storage;
     use candle_core::cuda_backend::cudarc::driver::CudaSlice;
-    
+    use candle_core::cuda_backend::cudarc::driver::DevicePtr;
+    use candle_core::cuda_backend::CudaStorageSlice;
+
     let block_size_in_bytes = src.dtype().size_in_bytes() * src.dims()[0];
     match (src.device(), dst.device()) {
         (Device::Cuda(src_dev), Device::Cuda(dst_dev)) => {
