@@ -76,12 +76,12 @@ fn swap_blocks_t<
             for (src_block, dst_block) in block_mapping {
                 let src_offset = (src_block as u64) * (block_size_in_bytes as u64);
                 let dst_offset = (dst_block as u64) * (block_size_in_bytes as u64);
-                let src_slice = src_ptr
+                let src_slice = *src_ptr
                     .slice(src_offset..src_offset + block_size_in_bytes)
-                    .device_ptr() as *const core::ffi::c_void;
+                    .device_ptr();
                 let dst_slice = *dst_ptr
                     .slice(dst_offset..dst_offset + block_size_in_bytes)
-                    .device_ptr() as *mut core::ffi::c_void;
+                    .device_ptr();
                 dst_device
                     .dtod_copy(&src_slice, &mut dst_slice)
                     .map_err(|e| candle_core::Error::Cuda(e.to_string().into()))?;
