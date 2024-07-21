@@ -1,7 +1,7 @@
 use crate::ffi;
 use candle_core::{
     backend::{BackendDevice, BackendStorage},
-    cuda::cudarc::driver::result::stream,
+    cuda::cudarc::driver::{result::stream, DeviceSlice},
     cuda_backend::cudarc::driver::{CudaSlice, CudaStream, DevicePtr, DevicePtrMut},
     DType, Device, IndexOp, Result, Tensor,
 };
@@ -50,12 +50,14 @@ fn swap_blocks_t<
                 (candle_core::Storage::Cuda(src_c), candle_core::Storage::Cuda(dst_c)) => {
                     let src_c = src_c.as_cuda_slice::<T>()?;
                     let dst_c = dst_c.as_cuda_slice::<T>()?;
-                    let src_c = src_c.slice(src_l.start_offset()..);
-                    let dst_c = dst_c.slice(dst_l.start_offset()..);
+                    let src_c = unsafe { src_c.transmute::<u8>(src_c.num_bytes())? };
+                    let dst_c = unsafe { dst_c.transmute::<u8>(dst_c.num_bytes())? };
+                    let src_c = src_c.slice(src_l.start_offset() * block_size_in_bytes..);
+                    let dst_c = dst_c.slice(dst_l.start_offset() * block_size_in_bytes..);
 
                     (
-                        *src_c.device_ptr() as *const core::ffi::c_void,
-                        *dst_c.device_ptr() as *mut core::ffi::c_void,
+                        *src_c.device_ptr(),
+                        *dst_c.device_ptr(),
                     )
                 }
                 _ => {
@@ -72,27 +74,27 @@ fn swap_blocks_t<
             for (src_block, dst_block) in block_mapping {
                 let src_offset = (src_block as u64) * (block_size_in_bytes as u64);
                 let dst_offset = (dst_block as u64) * (block_size_in_bytes as u64);
-                unsafe {
-                    let err = cuda_runtime_sys::cudaMemcpyAsync(
-                        (dst_ptr as u64 + dst_offset) as *mut core::ffi::c_void,
-                        (src_ptr as u64 + src_offset) as *const core::ffi::c_void,
-                        block_size_in_bytes,
-                        cuda_runtime_sys::cudaMemcpyKind::cudaMemcpyDeviceToDevice,
-                        stream,
-                    );
-                    if err != cuda_runtime_sys::cudaError::cudaSuccess {
-                        candle_core::bail!("cudaMemcpyAsync failed with error: {:?}", err);
-                    }
-                }
+                // unsafe {
+                //     let err = cuda_runtime_sys::cudaMemcpyAsync(
+                //         (dst_ptr as u64 + dst_offset) as *mut core::ffi::c_void,
+                //         (src_ptr as u64 + src_offset) as *const core::ffi::c_void,
+                //         block_size_in_bytes,
+                //         cuda_runtime_sys::cudaMemcpyKind::cudaMemcpyDeviceToDevice,
+                //         stream,
+                //     );
+                //     if err != cuda_runtime_sys::cudaError::cudaSuccess {
+                //         candle_core::bail!("cudaMemcpyAsync failed with error: {:?}", err);
+                //     }
+                // }
                 // let src_slice: CudaSlice<u8> = unsafe {
                 //     src_device.upgrade_device_ptr(src_ptr + src_offset, block_size_in_bytes)
                 // };
                 // let mut dst_slice: CudaSlice<u8> = unsafe {
                 //     dst_device.upgrade_device_ptr(dst_ptr + dst_offset, block_size_in_bytes)
                 // };
-                // src_device
-                //     .dtod_copy(&src_slice, &mut dst_slice)
-                //     .map_err(|e| candle_core::Error::Cuda(e.to_string().into()))?;
+                src_device
+                    .dtod_copy(&src_slice, &mut dst_slice)
+                    .map_err(|e| candle_core::Error::Cuda(e.to_string().into()))?;
             }
         }
         (Device::Cpu, Device::Cuda(dst_device)) => {
