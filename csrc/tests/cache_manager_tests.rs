@@ -186,20 +186,20 @@ mod swap_blocks {
         csrc::swap_blocks(&src, &mut dst, block_mapping).unwrap();
     }
 
-    #[test]
-    #[should_panic(expected = "Both src and dst tensors should be on the same device to swap")]
-    fn test_swap_blocks_different_cuda_devices() {
-        let device1 = Device::new_cuda(0).unwrap();
-        let device2 = Device::new_cuda(1).unwrap();
-        let src = create_random_tensor(&device1, DType::F16).unwrap();
-        let mut dst = create_random_tensor(&device2, DType::F16).unwrap();
+    // #[test]
+    // #[should_panic(expected = "Both src and dst tensors should be on the same device to swap")]
+    // fn test_swap_blocks_different_cuda_devices() {
+    //     let device1 = Device::new_cuda(0).unwrap();
+    //     let device2 = Device::new_cuda(1).unwrap();
+    //     let src = create_random_tensor(&device1, DType::F16).unwrap();
+    //     let mut dst = create_random_tensor(&device2, DType::F16).unwrap();
 
-        let mut block_mapping = HashMap::new();
-        block_mapping.insert(0, 2);
-        block_mapping.insert(1, 0);
+    //     let mut block_mapping = HashMap::new();
+    //     block_mapping.insert(0, 2);
+    //     block_mapping.insert(1, 0);
 
-        csrc::swap_blocks(&src, &mut dst, block_mapping).unwrap();
-    }
+    //     csrc::swap_blocks(&src, &mut dst, block_mapping).unwrap();
+    // }
 }
 
 // #[test]

@@ -18,7 +18,11 @@ pub fn swap_blocks(src: &Tensor, dst: &mut Tensor, block_mapping: HashMap<i64, i
         (DType::F16, DType::F16) => swap_blocks_t::<f16>(src, dst, block_mapping),
         (DType::BF16, DType::BF16) => swap_blocks_t::<bf16>(src, dst, block_mapping),
         _ => {
-            candle_core::bail!("Only support f16/bf16 dtypes and src and dst must have same dtype")
+            candle_core::bail!(
+                "Only support f16/bf16 dtypes and src and dst must have same dtype, src_dtype = {:?}, dst_dtype = {:?}",
+                src.dtype(),
+                dst.dtype()
+            )
         }
     }
 }
