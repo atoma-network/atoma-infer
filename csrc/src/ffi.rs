@@ -1,7 +1,4 @@
-use core::{
-    ffi::{c_char, c_int, c_void},
-    num,
-};
+use core::ffi::{c_int, c_void};
 
 extern "C" {
     pub(crate) fn run_mha(

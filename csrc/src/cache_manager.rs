@@ -5,7 +5,6 @@ use candle_core::{
     cuda_backend::cudarc::driver::{CudaSlice, CudaStream, DevicePtr},
     DType, Device, IndexOp, Result, Tensor,
 };
-use cuda_runtime_sys::{cudaError, cudaStreamCreate, cudaStreamSynchronize, cudaStream_t};
 use half::{bf16, f16};
 use std::collections::HashMap;
 use std::{any::Any, borrow::BorrowMut};
