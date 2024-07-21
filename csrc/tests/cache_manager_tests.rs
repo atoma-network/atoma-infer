@@ -259,12 +259,12 @@ pub fn swap_blocks(
     src: &Tensor,
     dst: &mut Tensor,
     block_mapping: HashMap<usize, usize>,
-) -> Result<(), APIError> {
+) -> Result<()> {
     let block_size_in_bytes = src.dtype().size_in_bytes() * src.dims()[0];
     match (src.device(), dst.device()) {
         (Device::Cuda(src_dev), Device::Cuda(dst_dev)) => {
             if src_dev.ordinal() != dst_dev.ordinal() {
-                return Err(APIError::new(format!("Tensors must be on the same device to copy, got ordinals {} (src) and {} (dst).", src_dev.ordinal(), dst_dev.ordinal())))
+                candle_core::bail!("Tensors must be on the same device to copy, got ordinals {} (src) and {} (dst).", src_dev.ordinal(), dst_dev.ordinal())
             }
             let (src_storage, src_layout) = src.storage_and_layout();
             let (dst_storage, dst_layout) = dst.storage_and_layout();
@@ -289,7 +289,7 @@ pub fn swap_blocks(
                     (ptr_src, ptr_dst)
                 }
                 _ => {
-                    return Err(APIError::from("only f32, f16 and bf16 input data type supported!"));
+                    candle_core::bail!("only f32, f16 and bf16 input data type supported!");
                 }
             };
             // let src_ptr = src_storage.as_cuda_slice::<u8>().map_err(APIError::from)?.device_ptr() + TryInto::<u64>::try_into(src_layout.start_offset()).unwrap();
