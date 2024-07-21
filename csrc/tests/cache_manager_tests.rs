@@ -21,7 +21,7 @@ mod swap_blocks {
         block_mapping: &HashMap<i64, i64>,
     ) -> Result<()> {
         for (src_block, dst_block) in block_mapping {
-            let src_slice = src.i(*src_block)?;
+            let src_slice = src.i(*src_block as usize)?;
             let swapped_dst_slice = swapped_dst.i(*dst_block as usize)?;
             assert_eq!(
                 src_slice.flatten_all()?.to_vec1()?,
