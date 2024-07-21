@@ -1,5 +1,3 @@
-#include "cuda_runtime.h"
-
 #include <algorithm>
 #include <cassert>
 #include <map>
@@ -42,22 +40,17 @@ __global__ void copy_blocks_kernel(int64_t* key_cache_ptrs,
 // f16, bf16 are special cases: We use a 16-bit integer to simulate the bit width. 
 // SAFETY: This is technically UB due to aliasing, but it is OK because the width is compatible.
 extern "C" {
-    const char* copy_blocks_f16(
+    void copy_blocks_f16(
         int64_t* key_cache_ptrs,
         int64_t* value_cache_ptrs,
         const int64_t* block_mapping,
         int num_layers,
         int num_pairs,
-        int numel_per_block
+        int numel_per_block,
+        cudaStream_t stream
     ) {
         dim3 grid(num_layers, num_pairs);
         dim3 block(std::min(1024, numel_per_block));
-        
-        cudaStream_t stream;
-        cudaError_t error = cudaStreamGetCurrent(&stream);
-        if (error != cudaSuccess) {
-            return cudaGetErrorString(error);
-        }
 
         vllm::copy_blocks_kernel<int16_t><<<grid, block, 0, stream>>>(
             key_cache_ptrs,
@@ -65,38 +58,21 @@ extern "C" {
             block_mapping,
             numel_per_block
         );
-
-        error = cudaGetLastError();
-        if (error != cudaSuccess) {
-            return cudaGetErrorString(error);
-        }
-
-        error = cudaStreamSynchronize(stream);
-        if (error != cudaSuccess) {
-            return cudaGetErrorString(error);
-        }
-
-        return nullptr; 
     }
 }
 
 extern "C" {
-    const char* copy_blocks_bf16(
+    void copy_blocks_bf16(
         int64_t* key_cache_ptrs,
         int64_t* value_cache_ptrs,
         const int64_t* block_mapping,
         int num_layers,
         int num_pairs,
-        int numel_per_block
+        int numel_per_block,
+        cudaStream_t stream
     ) {
         dim3 grid(num_layers, num_pairs);
         dim3 block(std::min(1024, numel_per_block));
-
-        cudaStream_t stream;
-        cudaError_t error = cudaStreamGetCurrent(&stream);
-        if (error != cudaSuccess) {
-            return cudaGetErrorString(error);
-        }
 
         vllm::copy_blocks_kernel<int16_t><<<grid, block, 0, stream>>>(
             key_cache_ptrs,
@@ -104,18 +80,6 @@ extern "C" {
             block_mapping,
             numel_per_block
         );
-
-        error = cudaGetLastError();
-        if (error != cudaSuccess) {
-            return cudaGetErrorString(error);
-        }
-
-        error = cudaStreamSynchronize(stream);
-        if (error != cudaSuccess) {
-            return cudaGetErrorString(error);
-        }
-
-        return nullptr;  // Indicates success
     }
 }
 

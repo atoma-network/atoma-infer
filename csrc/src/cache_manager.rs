@@ -1,12 +1,14 @@
 use crate::ffi;
 use candle_core::{
     backend::{BackendDevice, BackendStorage},
+    cuda::cudarc::driver::result::stream,
     cuda_backend::cudarc::driver::{CudaSlice, CudaStream, DevicePtr},
     DType, Device, IndexOp, Result, Tensor,
 };
+use cuda_runtime_sys::{cudaError, cudaStreamCreate, cudaStreamSynchronize, cudaStream_t};
 use half::{bf16, f16};
-use std::borrow::BorrowMut;
 use std::collections::HashMap;
+use std::{any::Any, borrow::BorrowMut};
 
 /// Swaps blocks from `src` to `dst` tensors, through the block_mapping.
 /// Both `src` and `dst` tensors must have the same dtype, and either be on
@@ -259,6 +261,14 @@ unsafe fn copy_blocks_t<
         .try_into()
         .unwrap();
 
+    // let mut stream: cudaStream_t = std::ptr::null_mut();
+    // let cuda_result = cudaStreamCreate(&mut stream);
+    // if cuda_result != cudaError::cudaSuccess {
+    //     return Err(APIError::new("Failed to create CUDA stream"));
+    // }
+
+    let stream = device.fork_default_stream().map_err(|e| APIError::new(e.into()))?;
+
     match dtype {
         DType::F16 => unsafe {
             ffi::copy_blocks_f16(
@@ -268,6 +278,7 @@ unsafe fn copy_blocks_t<
                 num_layers as i32,
                 num_pairs as i32,
                 numel_per_block,
+                stream.stream,
             );
         },
         DType::BF16 => unsafe {
@@ -278,6 +289,7 @@ unsafe fn copy_blocks_t<
                 num_layers as i32,
                 num_pairs as i32,
                 numel_per_block,
+                stream.stream,
             );
         },
         _ => {

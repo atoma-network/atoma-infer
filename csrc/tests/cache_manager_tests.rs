@@ -51,7 +51,7 @@ mod swap_blocks {
         let device = Device::new_cuda(0)?;
         let src = create_random_tensor(&device, DType::F16)?;
         let mut dst = create_random_tensor(&device, DType::F16)?;
-        
+
         let mut block_mapping = HashMap::new();
         block_mapping.insert(0, 2);
         block_mapping.insert(1, 0);
@@ -60,7 +60,7 @@ mod swap_blocks {
         let original_dst = dst.clone();
 
         swap_blocks(&src, &mut dst, block_mapping.clone())?;
-        
+
         verify_swap(&original_src, &original_dst, &dst, &block_mapping)?;
 
         Ok(())
@@ -92,7 +92,7 @@ mod swap_blocks {
         let cuda_device = Device::new_cuda(0)?;
         let src = create_random_tensor(&cpu_device, DType::F16)?;
         let mut dst = create_random_tensor(&cuda_device, DType::F16)?;
-        
+
         let mut block_mapping = HashMap::new();
         block_mapping.insert(0, 2);
         block_mapping.insert(1, 1);
@@ -101,7 +101,7 @@ mod swap_blocks {
         let original_dst = dst.clone();
 
         swap_blocks(&src, &mut dst, block_mapping.clone())?;
-        
+
         verify_swap(&original_src, &original_dst, &dst, &block_mapping)?;
 
         Ok(())
@@ -113,7 +113,7 @@ mod swap_blocks {
         let cuda_device = Device::new_cuda(0)?;
         let src = create_random_tensor(&cuda_device, DType::F16)?;
         let mut dst = create_random_tensor(&cpu_device, DType::F16)?;
-        
+
         let mut block_mapping = HashMap::new();
         block_mapping.insert(1, 0);
         block_mapping.insert(2, 2);
@@ -122,7 +122,7 @@ mod swap_blocks {
         let original_dst = dst.clone();
 
         swap_blocks(&src, &mut dst, block_mapping.clone())?;
-        
+
         verify_swap(&original_src, &original_dst, &dst, &block_mapping)?;
 
         Ok(())
@@ -134,7 +134,7 @@ mod swap_blocks {
         let cuda_device = Device::new_cuda(0)?;
         let src = create_random_tensor(&cpu_device, DType::BF16)?;
         let mut dst = create_random_tensor(&cuda_device, DType::BF16)?;
-        
+
         let mut block_mapping = HashMap::new();
         block_mapping.insert(0, 2);
         block_mapping.insert(1, 1);
@@ -143,7 +143,7 @@ mod swap_blocks {
         let original_dst = dst.clone();
 
         swap_blocks(&src, &mut dst, block_mapping.clone())?;
-        
+
         verify_swap(&original_src, &original_dst, &dst, &block_mapping)?;
 
         Ok(())
@@ -155,7 +155,7 @@ mod swap_blocks {
         let cuda_device = Device::new_cuda(0)?;
         let src = create_random_tensor(&cuda_device, DType::BF16)?;
         let mut dst = create_random_tensor(&cpu_device, DType::BF16)?;
-        
+
         let mut block_mapping = HashMap::new();
         block_mapping.insert(1, 0);
         block_mapping.insert(2, 2);
@@ -164,7 +164,7 @@ mod swap_blocks {
         let original_dst = dst.clone();
 
         swap_blocks(&src, &mut dst, block_mapping.clone())?;
-        
+
         verify_swap(&original_src, &original_dst, &dst, &block_mapping)?;
 
         Ok(())

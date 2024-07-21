@@ -3,6 +3,8 @@ use core::{
     num,
 };
 
+use cuda_runtime_sys::cudaStream_t;
+
 extern "C" {
     pub(crate) fn run_mha(
         q_ptr: *const c_void,
@@ -68,6 +70,7 @@ extern "C" {
         num_layers: i32,
         num_pairs: i32,
         numel_per_block: i32,
+        cuda_stream: cudaStream_t,
     ) -> *const c_char;
 
     pub(crate) fn copy_blocks_bf16(
@@ -77,5 +80,6 @@ extern "C" {
         num_layers: i32,
         num_pairs: i32,
         numel_per_block: i32,
+        cuda_stream: cudaStream_t,
     ) -> *const c_char;
 }
