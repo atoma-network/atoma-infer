@@ -59,7 +59,7 @@ mod swap_blocks {
         let original_src = src.clone();
         let original_dst = dst.clone();
 
-        swap_blocks(&src, &mut dst, block_mapping.clone())?;
+        csrc::swap_blocks(&src, &mut dst, block_mapping.clone())?;
 
         verify_swap(&original_src, &original_dst, &dst, &block_mapping)?;
 
@@ -79,7 +79,7 @@ mod swap_blocks {
         let original_src = src.clone();
         let original_dst = dst.clone();
 
-        swap_blocks(&src, &mut dst, block_mapping.clone())?;
+        csrc::swap_blocks(&src, &mut dst, block_mapping.clone())?;
 
         verify_swap(&original_src, &original_dst, &dst, &block_mapping)?;
 
@@ -100,7 +100,7 @@ mod swap_blocks {
         let original_src = src.clone();
         let original_dst = dst.clone();
 
-        swap_blocks(&src, &mut dst, block_mapping.clone())?;
+        csrc::swap_blocks(&src, &mut dst, block_mapping.clone())?;
 
         verify_swap(&original_src, &original_dst, &dst, &block_mapping)?;
 
@@ -121,7 +121,7 @@ mod swap_blocks {
         let original_src = src.clone();
         let original_dst = dst.clone();
 
-        swap_blocks(&src, &mut dst, block_mapping.clone())?;
+        csrc::swap_blocks(&src, &mut dst, block_mapping.clone())?;
 
         verify_swap(&original_src, &original_dst, &dst, &block_mapping)?;
 
@@ -142,7 +142,7 @@ mod swap_blocks {
         let original_src = src.clone();
         let original_dst = dst.clone();
 
-        swap_blocks(&src, &mut dst, block_mapping.clone())?;
+        csrc::swap_blocks(&src, &mut dst, block_mapping.clone())?;
 
         verify_swap(&original_src, &original_dst, &dst, &block_mapping)?;
 
@@ -163,7 +163,7 @@ mod swap_blocks {
         let original_src = src.clone();
         let original_dst = dst.clone();
 
-        swap_blocks(&src, &mut dst, block_mapping.clone())?;
+        csrs::swap_blocks(&src, &mut dst, block_mapping.clone())?;
 
         verify_swap(&original_src, &original_dst, &dst, &block_mapping)?;
 
@@ -181,7 +181,7 @@ mod swap_blocks {
         block_mapping.insert(0, 2);
         block_mapping.insert(1, 0);
 
-        swap_blocks(&src, &mut dst, block_mapping).unwrap();
+        csrc::swap_blocks(&src, &mut dst, block_mapping).unwrap();
     }
 
     #[test]
@@ -196,7 +196,7 @@ mod swap_blocks {
         block_mapping.insert(0, 2);
         block_mapping.insert(1, 0);
 
-        swap_blocks(&src, &mut dst, block_mapping).unwrap();
+        csrc::swap_blocks(&src, &mut dst, block_mapping).unwrap();
     }
 }
 
