@@ -18,7 +18,9 @@ mod swap_blocks {
     fn verify_swap<
         T: candle_core::cuda_backend::CudaDType
             + candle_core::cuda_backend::cudarc::driver::DeviceRepr
-            + std::fmt::Debug,
+            + std::fmt::Debug
+            + PartialEq
+            + candle_core::WithDType,
     >(
         src: &Tensor,
         original_dst: &Tensor,
