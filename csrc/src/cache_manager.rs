@@ -267,7 +267,9 @@ unsafe fn copy_blocks_t<
     //     return Err(APIError::new("Failed to create CUDA stream"));
     // }
 
-    let stream = device.fork_default_stream().map_err(|e| APIError::new(e.into()))?;
+    let stream = device
+        .fork_default_stream()
+        .map_err(|e| candle_core::Error::Cuda(e.into()))?;
 
     match dtype {
         DType::F16 => unsafe {
