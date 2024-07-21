@@ -24,8 +24,8 @@ mod swap_blocks {
             let src_slice = src.i(*src_block)?;
             let swapped_dst_slice = swapped_dst.i(*dst_block as usize)?;
             assert_eq!(
-                src_slice.flatten_all()?.to_vec1(),
-                swapped_dst_slice.flatten_all()?.to_vec1(),
+                src_slice.flatten_all()?.to_vec1()?,
+                swapped_dst_slice.flatten_all()?.to_vec1()?,
                 "Block {} from source was not correctly swapped to block {} in destination",
                 src_block,
                 dst_block
