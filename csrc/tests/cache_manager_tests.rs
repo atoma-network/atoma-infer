@@ -1,4 +1,32 @@
-use candle_core::{Result, Tensor, Device};
+use candle_core::{Device, Result, Tensor, IndexOp};
+
+use std::collections::HashMap;
+
+fn create_random_tensor(device: &Device, dtype: DType) -> Result<Tensor> {
+    const NUM_BLOCKS: usize = 3;
+    const BLOCK_SIZE: usize = 16;
+    let tensor = Tensor::rand(0f32, 1f32, (NUM_BLOCKS, BLOCK_SIZE, 1, 1), device)?;
+    Ok(tensor)
+}
+
+#[cfg(test)]
+mod swap_blocks {
+    use super::*;
+
+    fn verify_swap(src: &Tensor, dst: &Tensor, block_mapping: &HashMap<i64, i64>) -> Result<()> {
+        for (src_block, dst_block) in block_mapping {
+            let src_slice = src.i(*src_block)?;
+            let dst_slice = dst.i(*dst_block)?;
+            assert!(
+                src_slice.equal(&dst_slice)?,
+                "Block {} was not correctly swapped to block {}",
+                src_block,
+                dst_block
+            );
+        }
+        Ok(())
+    }
+}
 
 #[test]
 fn test_copy_blocks() -> Result<()> {

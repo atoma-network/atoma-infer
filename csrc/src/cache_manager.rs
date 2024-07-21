@@ -1,7 +1,7 @@
 use crate::ffi;
 use candle_core::{
     backend::{BackendDevice, BackendStorage},
-    cuda_backend::cudarc::driver::{CudaStream, DevicePtr, CudaSlice},
+    cuda_backend::cudarc::driver::{CudaSlice, CudaStream, DevicePtr},
     DType, Device, IndexOp, Result, Tensor,
 };
 use half::{bf16, f16};
