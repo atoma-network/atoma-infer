@@ -78,10 +78,10 @@ fn swap_blocks_t<
                 let dst_offset = (dst_block as u64) * (block_size_in_bytes as u64);
                 let src_slice = *src_ptr
                     .slice(src_offset..src_offset + block_size_in_bytes)
-                    .device_ptr();
+                    .device_ptr() as *const core::ffi::c_void;
                 let dst_slice = *dst_ptr
                     .slice(dst_offset..dst_offset + block_size_in_bytes)
-                    .device_ptr();
+                    .device_ptr() as *mut core::ffi::c_void;
                 dst_device
                     .dtod_copy(&src_slice, &mut dst_slice)
                     .map_err(|e| candle_core::Error::Cuda(e.to_string().into()))?;
