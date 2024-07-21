@@ -23,8 +23,9 @@ mod swap_blocks {
         for (src_block, dst_block) in block_mapping {
             let src_slice = src.i(*src_block)?;
             let swapped_dst_slice = swapped_dst.i(*dst_block as usize)?;
-            assert!(
-                src_slice.eq(&swapped_dst_slice)?,
+            assert_eq!(
+                src_slice.flatten_all()?.to_vec1(),
+                swapped_dst_slice.flatten_all()?.to_vec1(),
                 "Block {} from source was not correctly swapped to block {} in destination",
                 src_block,
                 dst_block
@@ -32,11 +33,12 @@ mod swap_blocks {
 
             // Check that non-swapped blocks remain unchanged
             for i in 0..NUM_BLOCKS {
-                if !block_mapping.values().any(|&v| *v == i as i64) {
+                if !block_mapping.values().any(|&v| v == i as i64) {
                     let original_dst_slice = original_dst.i(i)?;
                     let current_dst_slice = swapped_dst.i(i)?;
-                    assert!(
-                        original_dst_slice.equal(&current_dst_slice)?,
+                    assert_eq!(
+                        original_dst_slice.flatten_all()?.to_vec1()?,
+                        current_dst_slice.flatten_all()?.to_vec1()?,
                         "Block {} in destination should not have changed",
                         i
                     );
@@ -163,7 +165,7 @@ mod swap_blocks {
         let original_src = src.clone();
         let original_dst = dst.clone();
 
-        csrs::swap_blocks(&src, &mut dst, block_mapping.clone())?;
+        csrc::swap_blocks(&src, &mut dst, block_mapping.clone())?;
 
         verify_swap(&original_src, &original_dst, &dst, &block_mapping)?;
 
