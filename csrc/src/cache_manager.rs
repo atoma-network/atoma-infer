@@ -35,6 +35,7 @@ fn swap_blocks_t<
     dst: &mut Tensor,
     block_mapping: HashMap<i64, i64>,
 ) -> Result<()> {
+    let t_size_in_bytes = src.dtype().size_in_bytes();
     let block_size_in_bytes = src.dtype().size_in_bytes() * src.dims()[0];
     let src_device = src.device();
     let dst_device = dst.device();
@@ -51,23 +52,19 @@ fn swap_blocks_t<
                     let src_c = src_c.as_cuda_slice::<T>()?;
                     let dst_c = dst_c.as_cuda_slice::<T>()?;
                     let src_c = unsafe {
-                        src_c.transmute::<u8>(src_c.num_bytes()).ok_or_else(
-                            candle_core::Error::Cuda(
-                                "enable to transmute src_c".to_string().into(),
-                            ),
-                        )?
+                        src_c.transmute::<u8>(src_c.num_bytes()).ok_or_else(|| {
+                            candle_core::Error::Cuda("enable to transmute src_c".to_string().into())
+                        })?
                     };
                     let dst_c = unsafe {
-                        dst_c.transmute::<u8>(dst_c.num_bytes()).ok_or_else(
-                            candle_core::Error::Cuda(
-                                "enable to transmute src_c".to_string().into(),
-                            ),
-                        )?
-                    };
-                    let src_c = src_c.slice(src_l.start_offset() * block_size_in_bytes..);
-                    let dst_c = dst_c.slice(dst_l.start_offset() * block_size_in_bytes..);
+                        dst_c.transmute::<u8>(dst_c.num_bytes()).ok_or_else(|| {
+                            candle_core::Error::Cuda("enable to transmute src_c".to_string().into())
+                        })?
+                    };  
+                    let src_c = src_c.slice(src_l.start_offset() * t_size_in_bytes..);
+                    let dst_c = dst_c.slice(dst_l.start_offset() * t_size_in_bytes..);
 
-                    (*src_c.device_ptr(), *dst_c.device_ptr())
+                    (src_c, dst_c)
                 }
                 _ => {
                     candle_core::bail!(
@@ -76,13 +73,14 @@ fn swap_blocks_t<
                 }
             };
 
-            let stream = src_device
-                .fork_default_stream()
-                .map_err(|e| candle_core::Error::Cuda(e.into()))?;
-
             for (src_block, dst_block) in block_mapping {
                 let src_offset = (src_block as u64) * (block_size_in_bytes as u64);
                 let dst_offset = (dst_block as u64) * (block_size_in_bytes as u64);
+                let src_slice = src_ptr.slice(src_offset..src_offset + block_size_in_bytes).device_ptr() as *const core::ffi::c_void;
+                let dst_slice = *dst_ptr.slice(dst_offset..dst_offset + block_size_in_bytes).device_ptr() as *mut core::ffi::c_void;
+                dst_device
+                    .htod_sync_copy_into(src_slice, &mut dst_slice)
+                    .map_err(|e| candle_core::Error::Cuda(e.to_string().into()))?;
                 // unsafe {
                 //     let err = cuda_runtime_sys::cudaMemcpyAsync(
                 //         (dst_ptr as u64 + dst_offset) as *mut core::ffi::c_void,
@@ -101,9 +99,9 @@ fn swap_blocks_t<
                 // let mut dst_slice: CudaSlice<u8> = unsafe {
                 //     dst_device.upgrade_device_ptr(dst_ptr + dst_offset, block_size_in_bytes)
                 // };
-                src_device
-                    .dtod_copy(&src_slice, &mut dst_slice)
-                    .map_err(|e| candle_core::Error::Cuda(e.to_string().into()))?;
+                // src_device
+                //     .dtod_copy(&src_slice, &mut dst_slice)
+                //     .map_err(|e| candle_core::Error::Cuda(e.to_string().into()))?;
             }
         }
         (Device::Cpu, Device::Cuda(dst_device)) => {
