@@ -6,8 +6,9 @@ const NUM_BLOCKS: usize = 3;
 const BLOCK_SIZE: usize = 16;
 
 fn create_random_tensor(device: &Device, dtype: DType) -> Result<Tensor> {
-    let tensor =
-        Tensor::rand(0f32, 1f32, (NUM_BLOCKS, BLOCK_SIZE, 1, 1), device)?.to_dtype(dtype)?;
+    let tensor = Tensor::arange(0f32, NUM_BLOCKS * BLOCK_SIZE as f32, &device)?
+        .reshape((NUM_BLOCKS, BLOCK_SIZE, 1, 1))?
+        .to_dtype(dtype)?;
     Ok(tensor)
 }
 
