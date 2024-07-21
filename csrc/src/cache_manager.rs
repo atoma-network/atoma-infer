@@ -72,8 +72,8 @@ fn swap_blocks_t<
                 let dst_offset = (dst_block as u64) * (block_size_in_bytes as u64);
                 unsafe {
                     let err = cuda_runtime_sys::cudaMemcpyAsync(
-                        (dst_ptr as usize + dst_offset) as *mut core::ffi::c_void,
-                        (src_ptr as usize + src_offset) as *const core::ffi::c_void,
+                        (dst_ptr as u64 + dst_offset) as *mut core::ffi::c_void,
+                        (src_ptr as u64 + src_offset) as *const core::ffi::c_void,
                         block_size_in_bytes,
                         cuda_runtime_sys::cudaMemcpyKind::cudaMemcpyDeviceToDevice,
                         stream,
