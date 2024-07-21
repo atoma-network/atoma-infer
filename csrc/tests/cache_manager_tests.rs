@@ -260,6 +260,9 @@ pub fn swap_blocks(
     dst: &mut Tensor,
     block_mapping: HashMap<usize, usize>,
 ) -> Result<()> {
+    use candle_core::Storage;
+    use candle_core::cuda_backend::cudarc::driver::CudaSlice;
+    
     let block_size_in_bytes = src.dtype().size_in_bytes() * src.dims()[0];
     match (src.device(), dst.device()) {
         (Device::Cuda(src_dev), Device::Cuda(dst_dev)) => {
