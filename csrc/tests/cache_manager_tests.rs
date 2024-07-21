@@ -70,7 +70,7 @@ mod swap_blocks {
         let original_src = src.clone();
         let original_dst = dst.clone();
 
-        csrc::swap_blocks(&src, &mut dst, block_mapping.clone())?;
+        swap_blocks(&src, &mut dst, block_mapping.clone())?;
 
         // verify_swap::<half::f16>(&original_src, &original_dst, &dst, &block_mapping)?;
 
@@ -252,3 +252,82 @@ mod swap_blocks {
 
 //     Ok(())
 // }
+
+
+
+pub fn swap_blocks(
+    src: Tensor,
+    dst: &mut Tensor,
+    block_mapping: HashMap<usize, usize>,
+) -> Result<(), APIError> {
+    let block_size_in_bytes = src.dtype().size_in_bytes() * src.dims()[0];
+    match (src.device(), dst.device()) {
+        (Device::Cuda(src_dev), Device::Cuda(dst_dev)) => {
+            if src_dev.ordinal() != dst_dev.ordinal() {
+                return Err(APIError::new(format!("Tensors must be on the same device to copy, got ordinals {} (src) and {} (dst).", src_dev.ordinal(), dst_dev.ordinal())))
+            }
+            let (src_storage, src_layout) = src.storage_and_layout();
+            let (dst_storage, dst_layout) = dst.storage_and_layout();
+            assert!(matches!(&*src_storage, Storage::Cuda(_)));
+            assert!(matches!(&*dst_storage, Storage::Cuda(_)));
+            let Storage::Cuda(src_storage) = &*src_storage else { unreachable!() };
+            let Storage::Cuda(dst_storage) = &*dst_storage else { unreachable!() };
+            let (src_ptr, dst_ptr) = match (&src_storage.slice, &dst_storage.slice) {
+                (CudaStorageSlice::BF16(slice_src), CudaStorageSlice::BF16(slice_dst)) => {
+                    let ptr_src = *slice_src.slice(src_layout.start_offset()..).device_ptr();
+                    let ptr_dst = *slice_dst.slice(dst_layout.start_offset()..).device_ptr();
+                    (ptr_src, ptr_dst)
+                }
+                (CudaStorageSlice::F16(slice_src), CudaStorageSlice::F16(slice_dst)) => {
+                    let ptr_src = *slice_src.slice(src_layout.start_offset()..).device_ptr();
+                    let ptr_dst = *slice_dst.slice(dst_layout.start_offset()..).device_ptr();
+                    (ptr_src, ptr_dst)
+                }
+                (CudaStorageSlice::F32(slice_src), CudaStorageSlice::F32(slice_dst)) => {
+                    let ptr_src = *slice_src.slice(src_layout.start_offset()..).device_ptr();
+                    let ptr_dst = *slice_dst.slice(dst_layout.start_offset()..).device_ptr();
+                    (ptr_src, ptr_dst)
+                }
+                _ => {
+                    return Err(APIError::from("only f32, f16 and bf16 input data type supported!"));
+                }
+            };
+            // let src_ptr = src_storage.as_cuda_slice::<u8>().map_err(APIError::from)?.device_ptr() + TryInto::<u64>::try_into(src_layout.start_offset()).unwrap();
+            // let dst_ptr = dst_storage.as_cuda_slice::<u8>().map_err(APIError::from)?.device_ptr() + TryInto::<u64>::try_into(dst_layout.start_offset()).unwrap();
+
+            for (src_block_number, dst_block_number) in block_mapping {
+                let src_offset: u64 = (src_block_number * block_size_in_bytes).try_into().unwrap();
+                let dst_offset: u64 = (dst_block_number * block_size_in_bytes).try_into().unwrap();
+                // u8s because we copy by bytes
+                let src_slice: CudaSlice<u8> = unsafe { src_dev.upgrade_device_ptr(src_ptr+src_offset, block_size_in_bytes) };
+                let mut dst_slice = unsafe { dst_dev.upgrade_device_ptr(dst_ptr+dst_offset, block_size_in_bytes) };
+
+                try_api!(src_dev.dtod_copy(&src_slice, &mut dst_slice));
+            }
+        }
+        (Device::Cpu, Device::Cuda(dst_dev)) => {
+            let (src_storage, _src_layout) = src.storage_and_layout();
+            let (dst_storage, dst_layout) = dst.storage_and_layout();
+            assert!(matches!(&*src_storage, Storage::Cpu(_)));
+            assert!(matches!(&*dst_storage, Storage::Cuda(_)));
+            let Storage::Cpu(src_storage) = &*src_storage else { unreachable!() };
+            let Storage::Cuda(dst_storage) = &*dst_storage else { unreachable!() };
+            let dst_ptr = dst_storage.as_cuda_slice::<u8>().map_err(APIError::from)?.device_ptr() + TryInto::<u64>::try_into(dst_layout.start_offset()).unwrap();
+            let src_slice = try_api!(src_storage.as_slice());
+
+            for (src_block_number, dst_block_number) in block_mapping {
+                let src_offset = src_block_number * block_size_in_bytes;
+                let dst_offset: u64 = (dst_block_number * block_size_in_bytes).try_into().unwrap();
+                // u8s because we copy by bytes
+                let mut dst_slice: CudaSlice<u8> = unsafe { dst_dev.upgrade_device_ptr(dst_ptr+dst_offset, block_size_in_bytes) };
+
+                try_api!(dst_dev.htod_sync_copy_into(&src_slice[src_offset..src_offset+block_size_in_bytes], &mut dst_slice));
+            }
+        }
+        (src, dst) => {
+            return Err(APIError::new(format!("Tensors must be on either the GPU or CPU to swap,, got {src:?} (src) and {dst:?} (dst).")))
+        }
+    }
+
+    Ok(())
+}
