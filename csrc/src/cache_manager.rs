@@ -55,7 +55,7 @@ fn swap_blocks_t<
 
                     (
                         *src_c.device_ptr() as *const core::ffi::c_void,
-                        *dst_c.device_mut_ptr() as *mut core::ffi::c_void,
+                        *dst_c.device_ptr() as *mut core::ffi::c_void,
                     )
                 }
                 _ => {
@@ -65,7 +65,9 @@ fn swap_blocks_t<
                 }
             };
 
-            let stream = device.fork_default_stream().map_err(|e| candle_core::Error::Cuda(e.into()))?;
+            let stream = src_device
+                .fork_default_stream()
+                .map_err(|e| candle_core::Error::Cuda(e.into()))?;
 
             for (src_block, dst_block) in block_mapping {
                 let src_offset = (src_block as u64) * (block_size_in_bytes as u64);
