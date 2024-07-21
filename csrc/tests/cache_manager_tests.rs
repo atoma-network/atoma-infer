@@ -28,7 +28,7 @@ mod swap_blocks {
         swapped_dst: &Tensor,
         block_mapping: &HashMap<i64, i64>,
     ) -> Result<()> {
-        panic!("{:?}", original_dst.flatten_all()?.to_vec1::<T>()?);
+        panic!("{:?}", original_dst.flatten_all()?.to_vec1::<T>()? == swapped_dst.flatten_all()?.to_vec1::<T>()?);
         for (src_block, dst_block) in block_mapping {
             let src_slice = src.i(*src_block as usize)?;
             let swapped_dst_slice = swapped_dst.i(*dst_block as usize)?;
