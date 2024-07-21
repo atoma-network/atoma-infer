@@ -280,7 +280,7 @@ unsafe fn copy_blocks_t<
                 num_layers as i32,
                 num_pairs as i32,
                 numel_per_block,
-                stream.stream,
+                stream.stream as *mut std::ffi::c_void,
             );
         },
         DType::BF16 => unsafe {
@@ -291,7 +291,7 @@ unsafe fn copy_blocks_t<
                 num_layers as i32,
                 num_pairs as i32,
                 numel_per_block,
-                stream.stream,
+                stream.stream as *mut std::ffi::c_void,
             );
         },
         _ => {
