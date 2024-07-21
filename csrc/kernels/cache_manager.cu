@@ -1,3 +1,5 @@
+#include "cuda_runtime.h"
+
 #include <algorithm>
 #include <cassert>
 #include <map>
