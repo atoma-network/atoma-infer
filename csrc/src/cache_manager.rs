@@ -71,9 +71,9 @@ fn swap_blocks_t<
                 let mut dst_slice: CudaSlice<u8> = unsafe {
                     dst_device.upgrade_device_ptr(dst_ptr + dst_offset, block_size_in_bytes)
                 };
-                src_device
-                    .dtod_copy(&src_slice, &mut dst_slice)
-                    .map_err(|e| candle_core::Error::Cuda(e.to_string().into()))?;
+                // src_device
+                //     .dtod_copy(&src_slice, &mut dst_slice)
+                //     .map_err(|e| candle_core::Error::Cuda(e.to_string().into()))?;
             }
         }
         (Device::Cpu, Device::Cuda(dst_device)) => {
