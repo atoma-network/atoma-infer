@@ -10,7 +10,7 @@ use candle_core::{
     CudaStorage, DType, Device, IndexOp, Layout, Result, Tensor,
 };
 use half::{bf16, f16};
-use std::{collections::HashMap, sync::RwLockWriteGuard};
+use std::collections::HashMap;
 
 /// Swaps blocks from `src` to `dst` tensors, through the block_mapping.
 /// Both `src` and `dst` tensors must have the same dtype, and either be on
@@ -68,20 +68,22 @@ pub fn swap_blocks(src: &Tensor, dst: &mut Tensor, block_mapping: HashMap<i64, i
         (Device::Cuda(src_device), Device::Cpu) => {
             let (src, src_l) = src.storage_and_layout();
             let src_slice = match &*src {
-                candle_core::Storage::Cuda(src_c) => match src_c.slice {
+                candle_core::Storage::Cuda(src_c) => match &src_c.slice {
                     CudaStorageSlice::BF16(src_c) => unsafe {
-                        src_c.transmute::<u8>(src_c.num_bytes()).ok_or_else(|| {
+                        let src_c = src_c.transmute::<u8>(src_c.num_bytes()).ok_or_else(|| {
                             candle_core::Error::Cuda(
                                 "swap_blocks: unable to transmute src_c".to_string().into(),
                             )
-                        })?
+                        })?;
+                        src_c
                     },
                     CudaStorageSlice::F16(src_c) => unsafe {
-                        src_c.transmute::<u8>(src_c.num_bytes()).ok_or_else(|| {
+                        let src_c = src_c.transmute::<u8>(src_c.num_bytes()).ok_or_else(|| {
                             candle_core::Error::Cuda(
                                 "swap_blocks: unable to transmute src_c".to_string().into(),
                             )
-                        })?
+                        })?;
+                        src_c
                     },
                     _ => {
                         candle_core::bail!(

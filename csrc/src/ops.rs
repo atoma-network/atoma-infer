@@ -42,6 +42,7 @@ impl InplaceOp2 for SwapBlockOp {
         src_c: &CudaStorage,
         src_l: &Layout,
     ) -> Result<()> {
+        let t_size_in_bytes = src_c.dtype().size_in_bytes();
         let src_device = src_c.device();
         let dst_device = dst_c.device();
         let (src_c, dst_c) = match (src_c.slice, dst_c.slice) {
@@ -114,6 +115,7 @@ impl<'a> InplaceOp1 for SwapBlockCpuToGpuOp<'a> {
     }
 
     fn cuda_fwd(&self, dst_c: &mut CudaStorage, dst_l: &Layout) -> Result<()> {
+        let t_size_in_bytes = dst_c.dtype().size_in_bytes();
         let dst_device = dst_c.device();
         let dst_c = match dst_c.slice {
             CudaStorageSlice::BF16(dst_c) => {
