@@ -92,26 +92,7 @@ impl InplaceOp2 for SwapBlockOp {
             .dtod_copy(&src_c, &mut dst_c)
             .map_err(|e| candle_core::Error::Cuda(e.to_string().into()))?;
 
-        Ok((()))
-    }
-}
-
-/// Swaps blocks from `src` to `dst` tensors, through the block_mapping.
-/// Both `src` and `dst` tensors must have the same dtype, and either be on
-/// the same cuda device, or one in either cpu and the other in a cuda device.
-/// Moreover, both `src` and `dst` have shape `[num_blocks, block_size, num_kv_heads, head_size]`,
-/// where `num_blocks` is the total number of blocks available for the current device.
-pub fn swap_blocks(src: &Tensor, dst: &mut Tensor, block_mapping: HashMap<i64, i64>) -> Result<()> {
-    match (src.dtype(), dst.dtype()) {
-        (DType::F16, DType::F16) => swap_blocks_t::<f16>(src, dst, block_mapping),
-        (DType::BF16, DType::BF16) => swap_blocks_t::<bf16>(src, dst, block_mapping),
-        _ => {
-            candle_core::bail!(
-                "Only support f16/bf16 dtypes and src and dst must have same dtype, src_dtype = {:?}, dst_dtype = {:?}",
-                src.dtype(),
-                dst.dtype()
-            )
-        }
+        Ok(())
     }
 }
 
