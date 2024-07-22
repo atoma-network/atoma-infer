@@ -7,7 +7,6 @@ use candle_core::{
     cuda_backend::cudarc::driver::DevicePtr,
     DType, Device, IndexOp, Result, Tensor,
 };
-use candle_nn::ops;
 use half::{bf16, f16};
 use std::collections::HashMap;
 
@@ -44,10 +43,10 @@ pub fn swap_blocks(src: &Tensor, dst: &mut Tensor, block_mapping: HashMap<i64, i
         (Device::Cpu, Device::Cuda(_)) => {
             let (src, src_l) = src.storage_and_layout();
             let src_slice = match &*src {
-                candle_core::Storage::Cpu(&CpuStorage::BF16(ref src_c)) => {
+                candle_core::Storage::Cpu(CpuStorage::BF16(ref src_c)) => {
                     crate::ops::utils::cast_slice(src_c.as_slice())
                 }
-                candle_core::Storage::Cpu(&CpuStorage::F16(ref src_c)) => {
+                candle_core::Storage::Cpu(CpuStorage::F16(ref src_c)) => {
                     crate::ops::utils::cast_slice(src_c.as_slice())
                 }
                 _ => {
