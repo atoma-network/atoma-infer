@@ -1,8 +1,10 @@
 use candle_core::{
-    backend::BackendStorage, cpu_backend::CpuDevice, cuda::{
+    backend::BackendStorage,
+    cuda::{
         cudarc::driver::{CudaView, DeviceSlice},
         CudaStorageSlice,
-    }, CudaDevice, CudaStorage, InplaceOp1, InplaceOp2, Layout, Result, Tensor
+    },
+    CudaDevice, CudaStorage, InplaceOp1, InplaceOp2, Layout, Result,
 };
 use half::{bf16, f16};
 
@@ -78,8 +80,10 @@ impl InplaceOp2 for SwapBlockOp {
             let src_bytes = src_bytes.slice(src_l.start_offset() * t_size_in_bytes..);
             let mut dst_bytes = dst_bytes.slice_mut(dst_l.start_offset() * t_size_in_bytes..);
 
-            let src_block = src_bytes.slice(self.src_offset..self.src_offset + self.block_size_in_bytes);
-            let mut dst_block = dst_bytes.slice_mut(self.dst_offset..self.dst_offset + self.block_size_in_bytes);
+            let src_block =
+                src_bytes.slice(self.src_offset..self.src_offset + self.block_size_in_bytes);
+            let mut dst_block =
+                dst_bytes.slice_mut(self.dst_offset..self.dst_offset + self.block_size_in_bytes);
 
             dst_device
                 .dtod_copy(&src_block, &mut dst_block)
@@ -113,26 +117,20 @@ impl<'a> InplaceOp1 for SwapBlockCpuToGpuOp<'a> {
         let t_size_in_bytes = dst_c.dtype().size_in_bytes();
         let dst_device = dst_c.device().clone();
         let mut dst_c = match dst_c.slice {
-            CudaStorageSlice::BF16(ref mut dst_c) => {
-                let mut dst_c = unsafe {
-                    dst_c
-                        .transmute_mut::<u8>(dst_c.num_bytes())
-                        .ok_or_else(|| {
-                            candle_core::Error::Cuda("enable to transmute src_c".to_string().into())
-                        })?
-                };
+            CudaStorageSlice::BF16(ref mut dst_c) => unsafe {
                 dst_c
-            }
-            CudaStorageSlice::F16(ref mut dst_c) => {
-                let mut dst_c = unsafe {
-                    dst_c
-                        .transmute_mut::<u8>(dst_c.num_bytes())
-                        .ok_or_else(|| {
-                            candle_core::Error::Cuda("enable to transmute src_c".to_string().into())
-                        })?
-                };
+                    .transmute_mut::<u8>(dst_c.num_bytes())
+                    .ok_or_else(|| {
+                        candle_core::Error::Cuda("enable to transmute src_c".to_string().into())
+                    })?
+            },
+            CudaStorageSlice::F16(ref mut dst_c) => unsafe {
                 dst_c
-            }
+                    .transmute_mut::<u8>(dst_c.num_bytes())
+                    .ok_or_else(|| {
+                        candle_core::Error::Cuda("enable to transmute src_c".to_string().into())
+                    })?
+            },
             _ => {
                 candle_core::bail!(
                     "Only support f16/bf16 dtypes and src and dst must have same dtype"
@@ -167,7 +165,6 @@ impl<'a> InplaceOp1 for SwapBlockGpuToCpuOp<'a> {
     }
 
     fn cpu_fwd(&self, dst_s: &mut candle_core::CpuStorage, _: &Layout) -> Result<()> {
-        let src_device = dst_s.device();
         let dst_s = match dst_s {
             candle_core::CpuStorage::BF16(dst_s) => {
                 utils::cast_slice_mut::<bf16>(dst_s.as_mut_slice())
