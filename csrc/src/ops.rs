@@ -199,7 +199,7 @@ impl<'a> InplaceOp1 for SwapBlockGpuToCpuOp<'a> {
             memcpy_dtoh_async(
                 &mut dst_s[self.dst_offset..self.dst_offset + self.block_size_in_bytes],
                 *self.src_slice.device_ptr(),
-                stream,
+                stream.stream,
             )
             .map_err(|e| candle_core::Error::Cuda(e.into()))?;
         }
