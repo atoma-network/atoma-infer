@@ -1,16 +1,12 @@
-use crate::ffi;
 use candle_core::{
-    backend::{BackendDevice, BackendStorage},
+    backend::BackendStorage,
     cuda::{
-        cudarc::driver::{result::stream, CudaView, DeviceSlice},
+        cudarc::driver::{CudaView, DeviceSlice},
         CudaStorageSlice,
     },
-    cuda_backend::cudarc::driver::{CudaSlice, CudaStream, DevicePtr, DevicePtrMut},
-    CudaDevice, CudaStorage, DType, Device, IndexOp, InplaceOp1, InplaceOp2, Layout, Result,
-    Tensor,
+    CudaDevice, CudaStorage, InplaceOp1, InplaceOp2, Layout, Result, Tensor,
 };
 use half::{bf16, f16};
-use std::{collections::HashMap, sync::RwLockWriteGuard};
 
 /// Swap block operation
 /// for two tensors
@@ -43,7 +39,6 @@ impl InplaceOp2 for SwapBlockOp {
         src_l: &Layout,
     ) -> Result<()> {
         let t_size_in_bytes = src_c.dtype().size_in_bytes();
-        let src_device = src_c.device();
         let dst_device = dst_c.device().clone();
         let (src_c, mut dst_c) = (src_c.slice, dst_c.slice);
         let (src_c, mut dst_c) = match (src_c, dst_c) {
@@ -90,7 +85,8 @@ impl InplaceOp2 for SwapBlockOp {
         let mut dst_c = dst_c.slice_mut(dst_l.start_offset() * t_size_in_bytes..);
 
         let src_c = src_c.slice(self.src_offset..self.src_offset + self.block_size_in_bytes);
-        let mut dst_c = dst_c.slice_mut(self.dst_offset..self.dst_offset + self.block_size_in_bytes);
+        let mut dst_c =
+            dst_c.slice_mut(self.dst_offset..self.dst_offset + self.block_size_in_bytes);
         dst_device
             .dtod_copy(&src_c, &mut dst_c)
             .map_err(|e| candle_core::Error::Cuda(e.to_string().into()))?;
@@ -149,7 +145,8 @@ impl<'a> InplaceOp1 for SwapBlockCpuToGpuOp<'a> {
         // NOTE: We need to do the conversion here, as we cast the slice to u8,
         // but the layout is still in the original dtype.
         let mut dst_c = dst_c.slice_mut(dst_l.start_offset() * t_size_in_bytes..);
-        let mut dst_c = dst_c.slice_mut(self.dst_offset..self.dst_offset + self.block_size_in_bytes);
+        let mut dst_c =
+            dst_c.slice_mut(self.dst_offset..self.dst_offset + self.block_size_in_bytes);
 
         dst_device
             .htod_sync_copy_into(self.src_slice, &mut dst_c)

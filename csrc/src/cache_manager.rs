@@ -1,13 +1,10 @@
 use crate::ffi;
 use crate::ops::{SwapBlockCpuToGpuOp, SwapBlockGpuToCpuOp, SwapBlockOp};
 use candle_core::{
-    backend::{BackendDevice, BackendStorage},
-    cuda::{
-        cudarc::driver::{result::stream, DeviceSlice},
-        CudaStorageSlice,
-    },
-    cuda_backend::cudarc::driver::{CudaSlice, CudaStream, DevicePtr, DevicePtrMut},
-    CudaStorage, DType, Device, IndexOp, Layout, Result, Tensor,
+    backend::BackendStorage,
+    cuda::{cudarc::driver::DeviceSlice, CudaStorageSlice},
+    cuda_backend::cudarc::driver::DevicePtr,
+    DType, Device, IndexOp, Result, Tensor,
 };
 use half::{bf16, f16};
 use std::collections::HashMap;
@@ -42,7 +39,7 @@ pub fn swap_blocks(src: &Tensor, dst: &mut Tensor, block_mapping: HashMap<i64, i
                 dst.inplace_op2(&src, &swap_op)?;
             }
         }
-        (Device::Cpu, Device::Cuda(dst_device)) => {
+        (Device::Cpu, Device::Cuda(_)) => {
             let (src, src_l) = src.storage_and_layout();
             let src_slice = match &*src {
                 candle_core::Storage::Cpu(src_c) => src_c.as_slice::<u8>()?,
@@ -66,7 +63,7 @@ pub fn swap_blocks(src: &Tensor, dst: &mut Tensor, block_mapping: HashMap<i64, i
             }
         }
         (Device::Cuda(src_device), Device::Cpu) => {
-            let (src, src_l) = src.storage_and_layout();
+            let (src, _src_l) = src.storage_and_layout();
             let src_slice = match &*src {
                 candle_core::Storage::Cuda(src_c) => match &src_c.slice {
                     CudaStorageSlice::BF16(src_c) => unsafe {
