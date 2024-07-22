@@ -1,10 +1,8 @@
-use std::f32::consts::E;
-
 use candle_core::{
     backend::BackendStorage,
     cuda::{
         cudarc::driver::{
-            result::{memcpy_dtoh_async, memcpy_htod_async, memcpy_htod_sync},
+            result::{memcpy_dtoh_async, memcpy_htod_async},
             CudaView, DevicePtr, DeviceSlice,
         },
         CudaStorageSlice,
@@ -146,7 +144,7 @@ impl<'a> InplaceOp1 for SwapBlockCpuToGpuOp<'a> {
         // NOTE: We need to do the conversion here, as we cast the slice to u8,
         // but the layout is still in the original dtype.
         let mut dst_c = dst_c.slice_mut(dst_l.start_offset() * t_size_in_bytes..);
-        let mut dst_c =
+        let dst_c =
             dst_c.slice_mut(self.dst_offset..self.dst_offset + self.block_size_in_bytes);
 
         let stream = dst_device
