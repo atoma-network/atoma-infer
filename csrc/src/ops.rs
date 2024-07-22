@@ -116,7 +116,7 @@ impl<'a> InplaceOp1 for SwapBlockCpuToGpuOp<'a> {
 
     fn cuda_fwd(&self, dst_c: &mut CudaStorage, dst_l: &Layout) -> Result<()> {
         let t_size_in_bytes = dst_c.dtype().size_in_bytes();
-        let dst_device = dst_c.device();
+        let dst_device = dst_c.device().clone();
         let mut dst_c = match dst_c.slice {
             CudaStorageSlice::BF16(ref mut dst_c) => {
                 let mut dst_c = unsafe {
