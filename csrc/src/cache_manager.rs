@@ -86,8 +86,8 @@ fn swap_blocks_t<
                 let dst_slice = dst_ptr.slice_mut(dst_offset..dst_offset + block_size_in_bytes);
                 dst_device
                     .dtod_copy(
-                        src_slice.device_ptr(),
-                        dst_slice.device_ptr_mut(),
+                        &src_slice,
+                        &mut dst_slice,
                     )
                     .map_err(|e| candle_core::Error::Cuda(e.to_string().into()))?;
                 // unsafe {
