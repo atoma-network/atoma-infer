@@ -1,7 +1,10 @@
 use candle_core::{
     backend::BackendStorage,
     cuda::{
-        cudarc::driver::{CudaView, DeviceSlice},
+        cudarc::driver::{
+            result::{memcpy_htod_async, memcpy_htod_sync},
+            CudaView, DevicePtr, DeviceSlice,
+        },
         CudaStorageSlice,
     },
     CudaDevice, CudaStorage, InplaceOp1, InplaceOp2, Layout, Result,
@@ -144,9 +147,16 @@ impl<'a> InplaceOp1 for SwapBlockCpuToGpuOp<'a> {
         let mut dst_c =
             dst_c.slice_mut(self.dst_offset..self.dst_offset + self.block_size_in_bytes);
 
-        dst_device
-            .htod_sync_copy_into(self.src_slice, &mut dst_c)
-            .map_err(|e| candle_core::Error::Cuda(e.to_string().into()))?;
+        let stream = dst_device
+            .fork_default_stream()
+            .map_err(|e| candle_core::Error::Cuda(e.into()))?;
+        unsafe {
+            memcpy_htod_async(dst_c.device_ptr(), self.src_slice, stream.stream)?
+                .map_err(|e| candle_core::Error::Cuda(e.into()))?;
+        }
+        // dst_device
+        //     .htod_sync_copy_into(self.src_slice, &mut dst_c)
+        //     .map_err(|e| candle_core::Error::Cuda(e.to_string().into()))?;
 
         Ok(())
     }

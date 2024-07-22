@@ -3,8 +3,8 @@ use std::collections::HashMap;
 
 const NUM_BLOCKS: usize = 3;
 const BLOCK_SIZE: usize = 16;
-const NUM_HEADS: usize = 4;
-const HEAD_SIZE: usize = 16;
+const NUM_HEADS: usize = 2;
+const HEAD_SIZE: usize = 8;
 
 fn create_random_tensor(device: &Device, dtype: DType) -> Result<Tensor> {
     let tensor = Tensor::rand(
