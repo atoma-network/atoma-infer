@@ -227,6 +227,17 @@ mod copy_blocks {
         .unwrap()
     }
 
+    fn compare_blocks<T: candle_core::WithDType>(
+        tensor: &Tensor,
+        src_block: usize,
+        dst_block: usize,
+        block_size: usize,
+    ) -> Result<bool> {
+        let src_data = tensor.i(src_block)?.flatten(0, 1)?.to_vec1::<T>()?;
+        let dst_data = tensor.i(dst_block)?.flatten(0, 1)?.to_vec1::<T>()?;
+        Ok(src_data[..block_size] == dst_data[..block_size])
+    }
+
     #[test]
     fn test_copy_blocks_f16() {
         let device = Device::new_cuda(0).unwrap();
@@ -246,6 +257,35 @@ mod copy_blocks {
 
         unsafe {
             csrc::copy_blocks(key_caches_refs, value_caches_refs, block_mapping).unwrap();
+        }
+
+        // Check if blocks were correctly copied
+        for layer in 0..num_layers {
+            assert!(compare_blocks::<f16>(&key_caches[layer], 0, 2, block_size).unwrap());
+            assert!(compare_blocks::<f16>(&key_caches[layer], 1, 3, block_size).unwrap());
+            assert!(compare_blocks::<f16>(&key_caches[layer], 2, 0, block_size).unwrap());
+
+            assert!(compare_blocks::<f16>(&value_caches[layer], 0, 2, block_size).unwrap());
+            assert!(compare_blocks::<f16>(&value_caches[layer], 1, 3, block_size).unwrap());
+            assert!(compare_blocks::<f16>(&value_caches[layer], 2, 0, block_size).unwrap());
+
+            // Check that untouched blocks remain the same
+            assert_eq!(
+                key_caches[layer].i(1).unwrap().to_vec2::<f16>().unwrap(),
+                original_key_caches[layer]
+                    .i(1)
+                    .unwrap()
+                    .to_vec2::<f16>()
+                    .unwrap()
+            );
+            assert_eq!(
+                value_caches[layer].i(1).unwrap().to_vec2::<f16>().unwrap(),
+                original_value_caches[layer]
+                    .i(1)
+                    .unwrap()
+                    .to_vec2::<f16>()
+                    .unwrap()
+            );
         }
     }
 
@@ -268,6 +308,35 @@ mod copy_blocks {
 
         unsafe {
             csrc::copy_blocks(key_caches_refs, value_caches_refs, block_mapping).unwrap();
+        }
+
+        // Check if blocks were correctly copied
+        for layer in 0..num_layers {
+            assert!(compare_blocks::<bf16>(&key_caches[layer], 0, 2, block_size).unwrap());
+            assert!(compare_blocks::<bf16>(&key_caches[layer], 1, 3, block_size).unwrap());
+            assert!(compare_blocks::<bf16>(&key_caches[layer], 2, 0, block_size).unwrap());
+
+            assert!(compare_blocks::<bf16>(&value_caches[layer], 0, 2, block_size).unwrap());
+            assert!(compare_blocks::<bf16>(&value_caches[layer], 1, 3, block_size).unwrap());
+            assert!(compare_blocks::<bf16>(&value_caches[layer], 2, 0, block_size).unwrap());
+
+            // Check that untouched blocks remain the same
+            assert_eq!(
+                key_caches[layer].i(1).unwrap().to_vec2::<bf16>().unwrap(),
+                original_key_caches[layer]
+                    .i(1)
+                    .unwrap()
+                    .to_vec2::<bf16>()
+                    .unwrap()
+            );
+            assert_eq!(
+                value_caches[layer].i(1).unwrap().to_vec2::<bf16>().unwrap(),
+                original_value_caches[layer]
+                    .i(1)
+                    .unwrap()
+                    .to_vec2::<bf16>()
+                    .unwrap()
+            );
         }
     }
 

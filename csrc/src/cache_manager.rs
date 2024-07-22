@@ -194,8 +194,7 @@ unsafe fn copy_blocks_t<
         let key_cache_ptr = match &*key_cache_storage_and_layout.0 {
             candle_core::Storage::Cuda(c) => {
                 let cuda_slice = c.as_cuda_slice::<T>()?;
-                let cuda_slice = cuda_slice
-                    .slice(key_cache_storage_and_layout.1.start_offset() * dtype.size_in_bytes()..);
+                let cuda_slice = cuda_slice.slice(key_cache_storage_and_layout.1.start_offset()..);
                 *cuda_slice.device_ptr()
             }
             _ => candle_core::bail!("key_caches must be a cuda tensor"),
@@ -203,9 +202,8 @@ unsafe fn copy_blocks_t<
         let value_cache_ptr = match &*value_cache_storage_and_layout.0 {
             candle_core::Storage::Cuda(c) => {
                 let cuda_slice = c.as_cuda_slice::<T>()?;
-                let cuda_slice = cuda_slice.slice(
-                    value_cache_storage_and_layout.1.start_offset() * dtype.size_in_bytes()..,
-                );
+                let cuda_slice =
+                    cuda_slice.slice(value_cache_storage_and_layout.1.start_offset()..);
                 *cuda_slice.device_ptr()
             }
             _ => candle_core::bail!("value_caches must be a cuda tensor"),
@@ -214,8 +212,30 @@ unsafe fn copy_blocks_t<
         value_cache_ptrs.push(value_cache_ptr);
     }
 
-    let key_cache_ptrs = key_cache_ptrs.as_ptr() as *const i64;
-    let value_cache_ptrs = value_cache_ptrs.as_ptr() as *const i64;
+    let key_cache_ptrs = Tensor::from_vec(key_cache_ptrs, (num_layers,), &cache_device)?;
+    let value_cache_ptrs = Tensor::from_vec(value_cache_ptrs, (num_layers,), &cache_device)?;
+    let key_cache_ptrs = {
+        let (key_cache_ptrs_s, key_cache_ptrs_l) = key_cache_ptrs.storage_and_layout();
+        match &*key_cache_ptrs_s {
+            candle_core::Storage::Cuda(c) => {
+                let cuda_slice = c.as_cuda_slice::<i64>()?;
+                let cuda_slice = cuda_slice.slice(key_cache_ptrs_l.start_offset()..);
+                *cuda_slice.device_ptr() as *const i64
+            }
+            _ => candle_core::bail!("key_caches must be a cuda tensor"),
+        }
+    };
+    let value_cache_ptrs = {
+        let (value_cache_ptrs_s, value_cache_ptrs_l) = value_cache_ptrs.storage_and_layout();
+        match &*value_cache_ptrs {
+            candle_core::Storage::Cuda(c) => {
+                let cuda_slice = c.as_cuda_slice::<i64>()?;
+                let cuda_slice = cuda_slice.slice(value_cache_ptrs.layout().start_offset()..);
+                *cuda_slice.device_ptr() as *const i64
+            }
+            _ => candle_core::bail!("value_caches must be a cuda tensor"),
+        }
+    };
     let num_pairs = block_mapping.dims()[0];
 
     if &[num_pairs, 2] != block_mapping.shape().dims() {
