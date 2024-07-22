@@ -6,7 +6,8 @@ use candle_core::{
         CudaStorageSlice,
     },
     cuda_backend::cudarc::driver::{CudaSlice, CudaStream, DevicePtr, DevicePtrMut},
-    CudaDevice, CudaStorage, DType, Device, IndexOp, InplaceOp2, InplaceOp1, Layout, Result, Tensor,
+    CudaDevice, CudaStorage, DType, Device, IndexOp, InplaceOp1, InplaceOp2, Layout, Result,
+    Tensor,
 };
 use half::{bf16, f16};
 use std::{collections::HashMap, sync::RwLockWriteGuard};
@@ -171,13 +172,11 @@ impl InplaceOp1 for SwapBlockGpuToCpuOp {
     fn cpu_fwd(&self, dst_s: &mut candle_core::CpuStorage, dst_l: &Layout) -> Result<()> {
         let src_device = dst_s.device();
         let dst_s = match dst_s {
-            candle_core::CpuStorage::F16(dst_s) => {
-                bytemuck::try_cast_mut::<[f16], [u8]>(dst_s.as_mut_slice())
-                    .map_err(|e| candle_core::Error::Cuda(e.into()))?
-            }
             candle_core::CpuStorage::BF16(dst_s) => {
-                bytemuck::try_cast_mut::<[bf16], [u8]>(dst_s.as_mut_slice())
-                    .map_err(|e| candle_core::Error::Cuda(e.into()))?
+                utils::cast_slice_mut::<bf16>(dst_s.as_mut_slice())
+            }
+            candle_core::CpuStorage::F16(dst_s) => {
+                utils::cast_slice_mut::<f16>(dst_s.as_mut_slice())
             }
             _ => {
                 candle_core::bail!(
@@ -194,5 +193,13 @@ impl InplaceOp1 for SwapBlockGpuToCpuOp {
             .map_err(|e| candle_core::Error::Cuda(e.into()))?;
 
         Ok(())
+    }
+}
+
+mod utils {
+    pub(crate) fn cast_slice_mut<T>(bf16_slice: &mut [T]) -> &mut [u8] {
+        let ptr = bf16_slice.as_mut_ptr() as *mut u8;
+        let len = bf16_slice.len() * std::mem::size_of::<T>();
+        unsafe { std::slice::from_raw_parts_mut(ptr, len) }
     }
 }

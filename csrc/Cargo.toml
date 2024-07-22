@@ -7,7 +7,6 @@ categories = ["science"]
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-bytemuck = "1.16.1"
 candle-core = { version = "0.6.0", features = ["cuda"] }
 cuda-runtime-sys = "0.3.0-alpha.1"
 cuda-sys = "0.2.0"
