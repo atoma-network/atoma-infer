@@ -36,7 +36,7 @@ impl InplaceOp2 for SwapBlockOp {
     }
 
     fn cuda_fwd(
-        &self,
+        &self,g
         dst_c: &mut CudaStorage,
         dst_l: &Layout,
         src_c: &CudaStorage,
@@ -44,8 +44,9 @@ impl InplaceOp2 for SwapBlockOp {
     ) -> Result<()> {
         let t_size_in_bytes = src_c.dtype().size_in_bytes();
         let src_device = src_c.device();
-        let dst_device = dst_c.device();
-        let (src_c, mut dst_c) = match (src_c.slice, dst_c.slice) {
+        let dst_device = dst_c.device().clone();
+        let (src_c, mut dst_c) = (src_c.slice, dst_c.slice);
+        let (src_c, mut dst_c) = match binding {
             (CudaStorageSlice::BF16(ref src_c), CudaStorageSlice::BF16(ref mut dst_c)) => {
                 let src_c = unsafe {
                     src_c.transmute::<u8>(src_c.num_bytes()).ok_or_else(|| {
