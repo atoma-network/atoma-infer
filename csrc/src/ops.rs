@@ -184,13 +184,13 @@ impl<'a> InplaceOp1 for SwapBlockGpuToCpuOp<'a> {
                 )
             }
         };
-        panic!("FLAG: {:?}", &dst_s[self.src_offset..self.src_offset + self.block_size_in_bytes]);
         self.cuda_device
             .dtoh_sync_copy_into(
                 &self.src_slice,
                 &mut dst_s[self.src_offset..self.src_offset + self.block_size_in_bytes],
             )
             .map_err(|e| candle_core::Error::Cuda(e.into()))?;
+        panic!("FLAG: {:?}", &dst_s[self.src_offset..self.src_offset + self.block_size_in_bytes]);
 
         Ok(())
     }
