@@ -136,9 +136,9 @@ pub fn swap_blocks(src: &Tensor, dst: &mut Tensor, block_mapping: HashMap<i64, i
 ///
 /// # Arguments
 ///
-/// * `key_caches` - A vector of `Tensor`s to copy the blocks to.
-/// * `value_caches` - A vector of `Tensor`s to copy the blocks to.
-/// * `block_mapping` - A `Tensor` of shape `[num_pairs, 2]` that maps the block indices
+///   `key_caches` - A vector of `Tensor`s to copy the blocks to.
+///   `value_caches` - A vector of `Tensor`s to copy the blocks to.
+///   `block_mapping` - A `Tensor` of shape `[num_pairs, 2]` that maps the block indices
 ///    to be copied, where `num_pairs` is the number of block pairs to be copied.
 pub unsafe fn copy_blocks(
     key_caches: Vec<&mut Tensor>,
