@@ -40,58 +40,58 @@ impl InplaceOp2 for SwapBlockOp {
     ) -> Result<()> {
         let t_size_in_bytes = src_c.dtype().size_in_bytes();
         let dst_device = dst_c.device().clone();
-        let (src_c, mut dst_c) = (src_c.slice, dst_c.slice);
-        let (src_c, mut dst_c) = match (src_c, dst_c) {
-            (CudaStorageSlice::BF16(ref src_c), CudaStorageSlice::BF16(ref mut dst_c)) => {
-                let src_c = unsafe {
-                    src_c.transmute::<u8>(src_c.num_bytes()).ok_or_else(|| {
-                        candle_core::Error::Cuda("enable to transmute src_c".to_string().into())
-                    })?
-                };
-                let mut dst_c = unsafe {
-                    dst_c
-                        .transmute_mut::<u8>(dst_c.num_bytes())
-                        .ok_or_else(|| {
-                            candle_core::Error::Cuda("enable to transmute src_c".to_string().into())
+
+        // Use a closure to handle the different slice types
+        let handle_slices = |src: &CudaStorageSlice, dst: &mut CudaStorageSlice| -> Result<()> {
+            let (src_bytes, mut dst_bytes) = match (src, dst) {
+                (CudaStorageSlice::BF16(src), CudaStorageSlice::BF16(dst)) => {
+                    let src_bytes = unsafe {
+                        src.transmute::<u8>(src.num_bytes()).ok_or_else(|| {
+                            candle_core::Error::Cuda("unable to transmute src".to_string().into())
                         })?
-                };
-                (src_c, dst_c)
-            }
-            (CudaStorageSlice::F16(ref src_c), CudaStorageSlice::F16(ref mut dst_c)) => {
-                let src_c = unsafe {
-                    src_c.transmute::<u8>(src_c.num_bytes()).ok_or_else(|| {
-                        candle_core::Error::Cuda("enable to transmute src_c".to_string().into())
-                    })?
-                };
-                let mut dst_c = unsafe {
-                    dst_c
-                        .transmute_mut::<u8>(dst_c.num_bytes())
-                        .ok_or_else(|| {
-                            candle_core::Error::Cuda("enable to transmute src_c".to_string().into())
+                    };
+                    let dst_bytes = unsafe {
+                        dst.transmute_mut::<u8>(dst.num_bytes()).ok_or_else(|| {
+                            candle_core::Error::Cuda("unable to transmute dst".to_string().into())
                         })?
-                };
-                (src_c, dst_c)
-            }
-            _ => {
-                candle_core::bail!(
-                    "Only support f16/bf16 dtypes and src and dst must have same dtype"
-                )
-            }
+                    };
+                    (src_bytes, dst_bytes)
+                }
+                (CudaStorageSlice::F16(src), CudaStorageSlice::F16(dst)) => {
+                    let src_bytes = unsafe {
+                        src.transmute::<u8>(src.num_bytes()).ok_or_else(|| {
+                            candle_core::Error::Cuda("unable to transmute src".to_string().into())
+                        })?
+                    };
+                    let dst_bytes = unsafe {
+                        dst.transmute_mut::<u8>(dst.num_bytes()).ok_or_else(|| {
+                            candle_core::Error::Cuda("unable to transmute dst".to_string().into())
+                        })?
+                    };
+                    (src_bytes, dst_bytes)
+                }
+                _ => {
+                    candle_core::bail!(
+                        "Only support f16/bf16 dtypes and src and dst must have same dtype"
+                    )
+                }
+            };
+
+            let src_bytes = src_bytes.slice(src_l.start_offset() * t_size_in_bytes..);
+            let mut dst_bytes = dst_bytes.slice_mut(dst_l.start_offset() * t_size_in_bytes..);
+
+            let src_block = src_bytes.slice(self.src_offset..self.src_offset + self.block_size_in_bytes);
+            let mut dst_block = dst_bytes.slice_mut(self.dst_offset..self.dst_offset + self.block_size_in_bytes);
+
+            dst_device
+                .dtod_copy(&src_block, &mut dst_block)
+                .map_err(|e| candle_core::Error::Cuda(e.to_string().into()))?;
+
+            Ok(())
         };
 
-        // NOTE: We need to do the conversion here, as we cast the slice to u8,
-        // but the layout is still in the original dtype.
-        let src_c = src_c.slice(src_l.start_offset() * t_size_in_bytes..);
-        let mut dst_c = dst_c.slice_mut(dst_l.start_offset() * t_size_in_bytes..);
-
-        let src_c = src_c.slice(self.src_offset..self.src_offset + self.block_size_in_bytes);
-        let mut dst_c =
-            dst_c.slice_mut(self.dst_offset..self.dst_offset + self.block_size_in_bytes);
-        dst_device
-            .dtod_copy(&src_c, &mut dst_c)
-            .map_err(|e| candle_core::Error::Cuda(e.to_string().into()))?;
-
-        Ok(())
+        // Call the closure with references to the slices
+        handle_slices(&src_c.slice, &mut dst_c.slice)
     }
 }
 
@@ -169,7 +169,7 @@ impl<'a> InplaceOp1 for SwapBlockGpuToCpuOp<'a> {
         "swap_block_gpu_to_cpu_op"
     }
 
-    fn cpu_fwd(&self, dst_s: &mut candle_core::CpuStorage, dst_l: &Layout) -> Result<()> {
+    fn cpu_fwd(&self, dst_s: &mut candle_core::CpuStorage, _: &Layout) -> Result<()> {
         let src_device = dst_s.device();
         let dst_s = match dst_s {
             candle_core::CpuStorage::BF16(dst_s) => {
