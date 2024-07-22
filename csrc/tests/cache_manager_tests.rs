@@ -207,6 +207,9 @@ mod copy_blocks {
     use super::*;
     use candle_core::{DType, Device, Tensor};
 
+    const NUM_LAYERS: usize = 2;
+    const NUM_PAIRS: usize = 3;
+
     fn create_test_tensor(device: &Device, dtype: DType) -> Tensor {
         const NUM_BLOCKS: usize = 4;
         const BLOCK_SIZE: usize = 64;
@@ -226,44 +229,39 @@ mod copy_blocks {
 
     #[test]
     fn test_copy_blocks_f16() {
-        const NUM_LAYERS: usize = 2;
-        const NUM_PAIRS: usize = 3;
         let device = Device::new_cuda(0).unwrap();
 
-        let mut key_caches: Vec<_> = (0..num_layers)
+        let mut key_caches: Vec<_> = (0..NUM_LAYERS)
             .map(|_| create_test_tensor(&device, DType::F16))
             .collect();
-        let mut value_caches: Vec<_> = (0..num_layers)
+        let mut value_caches: Vec<_> = (0..NUM_LAYERS)
             .map(|_| create_test_tensor(&device, DType::F16))
             .collect();
 
         let block_mapping =
-            Tensor::from_slice(&[0i64, 2, 1, 3, 2, 0], (num_pairs, 2), &device).unwrap();
+            Tensor::from_slice(&[0i64, 2, 1, 3, 2, 0], (NUM_PAIRS, 2), &device).unwrap();
 
         let key_caches_refs: Vec<_> = key_caches.iter_mut().collect();
         let value_caches_refs: Vec<_> = value_caches.iter_mut().collect();
 
         unsafe {
-            copy_blocks(key_caches_refs, value_caches_refs, block_mapping).unwrap();
+            csrc::copy_blocks(key_caches_refs, value_caches_refs, block_mapping).unwrap();
         }
     }
 
     #[test]
     fn test_copy_blocks_bf16() {
         let device = Device::new_cuda(0).unwrap();
-        let num_layers = 2;
-        let block_size = 64;
-        let num_pairs = 3;
 
-        let mut key_caches: Vec<_> = (0..num_layers)
+        let mut key_caches: Vec<_> = (0..NUM_LAYERS)
             .map(|_| create_test_tensor(&device, DType::BF16))
             .collect();
-        let mut value_caches: Vec<_> = (0..num_layers)
+        let mut value_caches: Vec<_> = (0..NUM_LAYERS)
             .map(|_| create_test_tensor(&device, DType::BF16))
             .collect();
 
         let block_mapping =
-            Tensor::from_slice(&[0i64, 2, 1, 3, 2, 0], (num_pairs, 2), &device).unwrap();
+            Tensor::from_slice(&[0i64, 2, 1, 3, 2, 0], (NUM_PAIRS, 2), &device).unwrap();
 
         let key_caches_refs: Vec<_> = key_caches.iter_mut().collect();
         let value_caches_refs: Vec<_> = value_caches.iter_mut().collect();
