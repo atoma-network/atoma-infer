@@ -2,7 +2,7 @@ use crate::ffi;
 use candle_core::{
     backend::{BackendDevice, BackendStorage},
     cuda::{
-        cudarc::driver::{result::stream, DeviceSlice},
+        cudarc::driver::{result::stream, CudaView, DeviceSlice},
         CudaStorageSlice,
     },
     cuda_backend::cudarc::driver::{CudaSlice, CudaStream, DevicePtr, DevicePtrMut},
@@ -157,7 +157,7 @@ impl<'a> InplaceOp1 for SwapBlockCpuToGpuOp<'a> {
 }
 
 pub struct SwapBlockGpuToCpuOp {
-    pub src_slice: CudaSlice<u8>,
+    pub src_slice: CudaView<'_, u8>,
     pub cuda_device: CudaDevice,
     pub block_size_in_bytes: usize,
     pub src_offset: usize,
