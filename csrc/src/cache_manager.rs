@@ -99,9 +99,7 @@ pub fn swap_blocks(src: &Tensor, dst: &mut Tensor, block_mapping: HashMap<i64, i
 
             // NOTE: We need to do the conversion here, as we cast the slice to u8,
             // but the layout is still in the original dtype.
-            let src_c = src_c.slice(src_l.start_offset() * t_size_in_bytes..);
-            let src_c = src_c.slice(self.src_offset..self.src_offset + self.block_size_in_bytes);
-
+            let src_slice = src_slice.slice(src_l.start_offset() * t_size_in_bytes..);
             for (src_block, dst_block) in block_mapping.iter() {
                 let src_offset = (*src_block as usize) * block_size_in_bytes;
                 let dst_offset = (*dst_block as usize) * block_size_in_bytes;
@@ -112,7 +110,7 @@ pub fn swap_blocks(src: &Tensor, dst: &mut Tensor, block_mapping: HashMap<i64, i
                     src_offset,
                     dst_offset,
                 };
-                dst.inplace_op1(&swap_block_cpu_to_gpu_op)?;
+                dst.inplace_op1(&swap_block_gpu_to_cpu_op)?;
             }
         }
         _ => {

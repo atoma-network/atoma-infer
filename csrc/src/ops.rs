@@ -88,7 +88,7 @@ impl InplaceOp2 for SwapBlockOp {
         let dst_c = dst_c.slice_mut(dst_l.start_offset() * t_size_in_bytes..);
 
         let src_c = src_c.slice(self.src_offset..self.src_offset + self.block_size_in_bytes);
-        let mut dst_c = dst_c.slice_mut(self.dst_offset..dst_offset + self.block_size_in_bytes);
+        let mut dst_c = dst_c.slice_mut(self.dst_offset..self.dst_offset + self.block_size_in_bytes);
         dst_device
             .dtod_copy(&src_c, &mut dst_c)
             .map_err(|e| candle_core::Error::Cuda(e.to_string().into()))?;
@@ -146,7 +146,7 @@ impl<'a> InplaceOp1 for SwapBlockCpuToGpuOp<'a> {
         // NOTE: We need to do the conversion here, as we cast the slice to u8,
         // but the layout is still in the original dtype.
         let dst_c = dst_c.slice_mut(dst_l.start_offset() * t_size_in_bytes..);
-        let mut dst_c = dst_c.slice_mut(self.dst_offset..dst_offset + self.block_size_in_bytes);
+        let mut dst_c = dst_c.slice_mut(self.dst_offset..self.dst_offset + self.block_size_in_bytes);
 
         dst_device
             .htod_sync_copy_into(self.src_slice, &mut dst_c)
@@ -156,15 +156,15 @@ impl<'a> InplaceOp1 for SwapBlockCpuToGpuOp<'a> {
     }
 }
 
-pub struct SwapBlockGpuToCpuOp {
-    pub src_slice: CudaView<'_, u8>,
+pub struct SwapBlockGpuToCpuOp<'a> {
+    pub src_slice: CudaView<'a, u8>,
     pub cuda_device: CudaDevice,
     pub block_size_in_bytes: usize,
     pub src_offset: usize,
     pub dst_offset: usize,
 }
 
-impl InplaceOp1 for SwapBlockGpuToCpuOp {
+impl<'a> InplaceOp1 for SwapBlockGpuToCpuOp<'a> {
     fn name(&self) -> &'static str {
         "swap_block_gpu_to_cpu_op"
     }
