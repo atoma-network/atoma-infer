@@ -323,7 +323,9 @@ mod copy_blocks {
     }
 
     #[test]
-    #[should_panic(expected = "called `Result::unwrap()` on an `Err` value: ShapeMismatch { buffer_size: 3, shape: [1, 2] }")]
+    #[should_panic(
+        expected = "called `Result::unwrap()` on an `Err` value: ShapeMismatch { buffer_size: 3, shape: [1, 2] }"
+    )]
     fn test_copy_blocks_invalid_block_mapping_shape() {
         let device = Device::new_cuda(0).unwrap();
         let mut key_caches = vec![create_test_tensor(&device, DType::F16)];

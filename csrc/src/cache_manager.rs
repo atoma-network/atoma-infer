@@ -194,7 +194,8 @@ unsafe fn copy_blocks_t<
         let key_cache_ptr = match &*key_cache_storage_and_layout.0 {
             candle_core::Storage::Cuda(c) => {
                 let cuda_slice = c.as_cuda_slice::<T>()?;
-                let cuda_slice = cuda_slice.slice(key_cache_storage_and_layout.1.start_offset()..);
+                let cuda_slice = cuda_slice
+                    .slice(key_cache_storage_and_layout.1.start_offset() * dtype.size_in_bytes()..);
                 *cuda_slice.device_ptr()
             }
             _ => candle_core::bail!("key_caches must be a cuda tensor"),
@@ -202,8 +203,9 @@ unsafe fn copy_blocks_t<
         let value_cache_ptr = match &*value_cache_storage_and_layout.0 {
             candle_core::Storage::Cuda(c) => {
                 let cuda_slice = c.as_cuda_slice::<T>()?;
-                let cuda_slice =
-                    cuda_slice.slice(value_cache_storage_and_layout.1.start_offset()..);
+                let cuda_slice = cuda_slice.slice(
+                    value_cache_storage_and_layout.1.start_offset() * dtype.size_in_bytes()..,
+                );
                 *cuda_slice.device_ptr()
             }
             _ => candle_core::bail!("value_caches must be a cuda tensor"),
