@@ -196,10 +196,16 @@ impl<'a> InplaceOp1 for SwapBlockGpuToCpuOp<'a> {
     }
 }
 
-mod utils {
-    pub(crate) fn cast_slice_mut<T>(bf16_slice: &mut [T]) -> &mut [u8] {
-        let ptr = bf16_slice.as_mut_ptr() as *mut u8;
-        let len = bf16_slice.len() * std::mem::size_of::<T>();
+pub(crate) mod utils {
+    pub(crate) fn cast_slice_mut<T>(slice: &mut [T]) -> &mut [u8] {
+        let ptr = slice.as_mut_ptr() as *mut u8;
+        let len = slice.len() * std::mem::size_of::<T>();
         unsafe { std::slice::from_raw_parts_mut(ptr, len) }
+    }
+
+    pub(crate) fn cast_slice<T>(slice: &[T]) -> &[u8] {
+        let ptr = slice.as_ptr() as *const u8;
+        let len = slice.len() * std::mem::size_of::<T>();
+        unsafe { std::slice::from_raw_parts(ptr, len) }
     }
 }
