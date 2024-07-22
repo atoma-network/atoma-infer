@@ -151,7 +151,7 @@ impl<'a> InplaceOp1 for SwapBlockCpuToGpuOp<'a> {
             .fork_default_stream()
             .map_err(|e| candle_core::Error::Cuda(e.into()))?;
         unsafe {
-            memcpy_htod_async(dst_c.device_ptr(), self.src_slice, stream.stream)?
+            memcpy_htod_async(*dst_c.device_ptr(), self.src_slice, stream.stream)
                 .map_err(|e| candle_core::Error::Cuda(e.into()))?;
         }
         // dst_device
