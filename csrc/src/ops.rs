@@ -1,8 +1,10 @@
+use std::f32::consts::E;
+
 use candle_core::{
     backend::BackendStorage,
     cuda::{
         cudarc::driver::{
-            result::{memcpy_htod_async, memcpy_htod_sync},
+            result::{memcpy_dtoh_async, memcpy_htod_async, memcpy_htod_sync},
             CudaView, DevicePtr, DeviceSlice,
         },
         CudaStorageSlice,
@@ -188,12 +190,25 @@ impl<'a> InplaceOp1 for SwapBlockGpuToCpuOp<'a> {
                 )
             }
         };
-        self.cuda_device
-            .dtoh_sync_copy_into(
-                &self.src_slice,
+
+        let stream = self
+            .cuda_device
+            .fork_default_stream()
+            .map_err(|e| candle_core::Error::Cuda(e.into()))?;
+        unsafe {
+            memcpy_dtoh_async(
                 &mut dst_s[self.dst_offset..self.dst_offset + self.block_size_in_bytes],
+                *self.src_slice.device_ptr(),
+                stream,
             )
             .map_err(|e| candle_core::Error::Cuda(e.into()))?;
+        }
+        // self.cuda_device
+        //     .dtoh_sync_copy_into(
+        //         &self.src_slice,
+        //         &mut dst_s[self.dst_offset..self.dst_offset + self.block_size_in_bytes],
+        //     )
+        //     .map_err(|e| candle_core::Error::Cuda(e.into()))?;
 
         Ok(())
     }
