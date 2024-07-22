@@ -57,12 +57,14 @@ fn swap_blocks_t<
                         })?
                     };
                     let dst_c = unsafe {
-                        dst_c.transmute::<u8>(dst_c.num_bytes()).ok_or_else(|| {
+                        dst_c.transmute_mut::<u8>(dst_c.num_bytes()).ok_or_else(|| {
                             candle_core::Error::Cuda("enable to transmute src_c".to_string().into())
                         })?
                     };
+                    // NOTE: We need to do the conversion here, as we cast the slice to u8,
+                    // but the layout is still in the original dtype.
                     let src_c = src_c.slice(src_l.start_offset() * t_size_in_bytes..);
-                    let dst_c = dst_c.slice(dst_l.start_offset() * t_size_in_bytes..);
+                    let dst_c = dst_c.slice_mut(dst_l.start_offset() * t_size_in_bytes..);
 
                     (src_c, dst_c)
                 }
@@ -79,9 +81,9 @@ fn swap_blocks_t<
                 let src_slice = src_ptr
                     .slice(src_offset..src_offset + block_size_in_bytes);
                 let dst_slice = dst_ptr
-                    .slice(dst_offset..dst_offset + block_size_in_bytes);
+                    .slice_mut(dst_offset..dst_offset + block_size_in_bytes);
                 dst_device
-                    .dtod_copy(&src_slice, &mut dst_slice)
+                    .dtod_copy(&src_slice.device_ptr(), &mut dst_slice.device_ptr_mut())
                     .map_err(|e| candle_core::Error::Cuda(e.to_string().into()))?;
                 // unsafe {
                 //     let err = cuda_runtime_sys::cudaMemcpyAsync(
