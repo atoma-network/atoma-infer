@@ -80,8 +80,8 @@ fn swap_blocks_t<
             };
 
             for (src_block, dst_block) in block_mapping {
-                let src_offset = src_block * block_size_in_bytes;
-                let dst_offset = dst_block * block_size_in_bytes;
+                let src_offset = (src_block as usize) * block_size_in_bytes;
+                let dst_offset = (dst_block as usize) * block_size_in_bytes;
                 let src_slice = src_ptr.slice(src_offset..src_offset + block_size_in_bytes);
                 let mut dst_slice = dst_ptr.slice_mut(dst_offset..dst_offset + block_size_in_bytes);
                 dst_device
