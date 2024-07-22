@@ -57,9 +57,13 @@ fn swap_blocks_t<
                         })?
                     };
                     let dst_c = unsafe {
-                        dst_c.transmute_mut::<u8>(dst_c.num_bytes()).ok_or_else(|| {
-                            candle_core::Error::Cuda("enable to transmute src_c".to_string().into())
-                        })?
+                        dst_c
+                            .transmute_mut::<u8>(dst_c.num_bytes())
+                            .ok_or_else(|| {
+                                candle_core::Error::Cuda(
+                                    "enable to transmute src_c".to_string().into(),
+                                )
+                            })?
                     };
                     // NOTE: We need to do the conversion here, as we cast the slice to u8,
                     // but the layout is still in the original dtype.
@@ -78,12 +82,13 @@ fn swap_blocks_t<
             for (src_block, dst_block) in block_mapping {
                 let src_offset = (src_block as u64) * (block_size_in_bytes as u64);
                 let dst_offset = (dst_block as u64) * (block_size_in_bytes as u64);
-                let src_slice = src_ptr
-                    .slice(src_offset..src_offset + block_size_in_bytes);
-                let dst_slice = dst_ptr
-                    .slice_mut(dst_offset..dst_offset + block_size_in_bytes);
+                let src_slice = src_ptr.slice(src_offset..src_offset + block_size_in_bytes);
+                let dst_slice = dst_ptr.slice_mut(dst_offset..dst_offset + block_size_in_bytes);
                 dst_device
-                    .dtod_copy(&src_slice.device_ptr(), &mut dst_slice.device_ptr_mut())
+                    .dtod_copy(
+                        &(src_slice.device_ptr() as *const core::ffi::c_void),
+                        &mut (dst_slice.device_ptr_mut() as *mut core::ffi::c_void),
+                    )
                     .map_err(|e| candle_core::Error::Cuda(e.to_string().into()))?;
                 // unsafe {
                 //     let err = cuda_runtime_sys::cudaMemcpyAsync(
