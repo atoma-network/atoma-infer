@@ -180,7 +180,7 @@ mod swap_blocks {
     }
 
     #[test]
-    #[should_panic(expected = "Only support f16/bf16 dtypes and src and dst must have same dtype")]
+    #[should_panic(expected = "swap_blocks: Either src and dst are on the same cuda device, or src and dst are on cpu and cuda devices, alternately")]
     fn test_swap_blocks_invalid_dtype() {
         let device = Device::Cpu;
         let src = create_random_tensor(&device, DType::F32).unwrap();
