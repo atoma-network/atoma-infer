@@ -158,7 +158,7 @@ impl<'a> InplaceOp1 for SwapBlockCpuToGpuOp<'a> {
 
 pub struct SwapBlockGpuToCpuOp<'a> {
     pub src_slice: CudaView<'a, u8>,
-    pub cuda_device: CudaDevice,
+    pub cuda_device: &'a CudaDevice,
     pub block_size_in_bytes: usize,
     pub src_offset: usize,
     pub dst_offset: usize,
