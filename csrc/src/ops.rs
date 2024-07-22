@@ -6,7 +6,7 @@ use candle_core::{
         CudaStorageSlice,
     },
     cuda_backend::cudarc::driver::{CudaSlice, CudaStream, DevicePtr, DevicePtrMut},
-    CudaDevice, CudaStorage, DType, Device, IndexOp, InplaceOp2, Layout, Result, Tensor,
+    CudaDevice, CudaStorage, DType, Device, IndexOp, InplaceOp2, InplaceOp1, Layout, Result, Tensor,
 };
 use half::{bf16, f16};
 use std::{collections::HashMap, sync::RwLockWriteGuard};
