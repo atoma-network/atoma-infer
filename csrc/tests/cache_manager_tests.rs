@@ -1,25 +1,25 @@
 use candle_core::{DType, Device, IndexOp, Result, Tensor};
 use std::collections::HashMap;
 
-const NUM_BLOCKS: usize = 3;
-const BLOCK_SIZE: usize = 16;
-const NUM_HEADS: usize = 2;
-const HEAD_SIZE: usize = 8;
-
-fn create_random_tensor(device: &Device, dtype: DType) -> Result<Tensor> {
-    let tensor = Tensor::rand(
-        0f32,
-        10f32,
-        (NUM_BLOCKS, BLOCK_SIZE, NUM_HEADS, HEAD_SIZE),
-        &device,
-    )?
-    .to_dtype(dtype)?;
-    Ok(tensor)
-}
-
 #[cfg(test)]
 mod swap_blocks {
     use super::*;
+
+    const NUM_BLOCKS: usize = 3;
+    const BLOCK_SIZE: usize = 16;
+    const NUM_HEADS: usize = 2;
+    const HEAD_SIZE: usize = 8;
+
+    fn create_random_tensor(device: &Device, dtype: DType) -> Result<Tensor> {
+        let tensor = Tensor::rand(
+            0f32,
+            10f32,
+            (NUM_BLOCKS, BLOCK_SIZE, NUM_HEADS, HEAD_SIZE),
+            &device,
+        )?
+        .to_dtype(dtype)?;
+        Ok(tensor)
+    }
 
     fn verify_swap<
         T: candle_core::cuda_backend::CudaDType
@@ -199,6 +199,145 @@ mod swap_blocks {
         block_mapping.insert(1, 0);
 
         csrc::swap_blocks(&src, &mut dst, block_mapping).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod copy_blocks {
+    use super::*;
+    use candle_core::{DType, Device, Tensor};
+
+    fn create_test_tensor(device: &Device, dtype: DType) -> Tensor {
+        const NUM_BLOCKS: usize = 4;
+        const BLOCK_SIZE: usize = 64;
+        const NUM_HEADS: usize = 2;
+        const HEAD_SIZE: usize = 8;
+
+        Tensor::rand(
+            0f32,
+            1f32,
+            &[NUM_BLOCKS, BLOCK_SIZE, NUM_HEADS, HEAD_SIZE],
+            device,
+        )
+        .unwrap()
+        .to_dtype(dtype)
+        .unwrap()
+    }
+
+    #[test]
+    fn test_copy_blocks_f16() {
+        const NUM_LAYERS: usize = 2;
+        const NUM_PAIRS: usize = 3;
+        let device = Device::new_cuda(0).unwrap();
+
+        let mut key_caches: Vec<_> = (0..num_layers)
+            .map(|_| create_test_tensor(&device, DType::F16))
+            .collect();
+        let mut value_caches: Vec<_> = (0..num_layers)
+            .map(|_| create_test_tensor(&device, DType::F16))
+            .collect();
+
+        let block_mapping =
+            Tensor::from_slice(&[0, 2, 1, 3, 2, 0], (num_pairs, 2), &device).unwrap();
+
+        let key_caches_refs: Vec<_> = key_caches.iter_mut().collect();
+        let value_caches_refs: Vec<_> = value_caches.iter_mut().collect();
+
+        unsafe {
+            copy_blocks(key_caches_refs, value_caches_refs, block_mapping).unwrap();
+        }
+    }
+
+    #[test]
+    fn test_copy_blocks_bf16() {
+        let device = Device::new_cuda(0).unwrap();
+        let num_layers = 2;
+        let block_size = 64;
+        let num_pairs = 3;
+
+        let mut key_caches: Vec<_> = (0..num_layers)
+            .map(|_| create_test_tensor(&device, DType::BF16))
+            .collect();
+        let mut value_caches: Vec<_> = (0..num_layers)
+            .map(|_| create_test_tensor(&device, DType::BF16))
+            .collect();
+
+        let block_mapping =
+            Tensor::from_slice(&[0, 2, 1, 3, 2, 0], (num_pairs, 2), &device).unwrap();
+
+        let key_caches_refs: Vec<_> = key_caches.iter_mut().collect();
+        let value_caches_refs: Vec<_> = value_caches.iter_mut().collect();
+
+        unsafe {
+            csrc::copy_blocks(key_caches_refs, value_caches_refs, block_mapping).unwrap();
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "key_caches and value_caches must have the same length")]
+    fn test_copy_blocks_unequal_lengths() {
+        let device = Device::new_cuda(0).unwrap();
+        let mut key_caches = vec![create_test_tensor(&device, DType::F16)];
+        let mut value_caches = vec![
+            create_test_tensor(&device, DType::F16),
+            create_test_tensor(&device, DType::F16),
+        ];
+        let block_mapping = Tensor::from_slice(&[0, 1], (1, 2), &device).unwrap();
+
+        let key_caches_refs: Vec<_> = key_caches.iter_mut().collect();
+        let value_caches_refs: Vec<_> = value_caches.iter_mut().collect();
+
+        unsafe {
+            csrc::copy_blocks(key_caches_refs, value_caches_refs, block_mapping).unwrap();
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "device must be a cuda device")]
+    fn test_copy_blocks_non_cuda_device() {
+        let device = Device::Cpu;
+        let mut key_caches = vec![create_test_tensor(&device, DType::F16)];
+        let mut value_caches = vec![create_test_tensor(&device, DType::F16)];
+        let block_mapping = Tensor::from_slice(&[0, 1], (1, 2), &device).unwrap();
+
+        let key_caches_refs: Vec<_> = key_caches.iter_mut().collect();
+        let value_caches_refs: Vec<_> = value_caches.iter_mut().collect();
+
+        unsafe {
+            csrc::copy_blocks(key_caches_refs, value_caches_refs, block_mapping).unwrap();
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "key_caches and value_caches must have the same dtype")]
+    fn test_copy_blocks_different_dtypes() {
+        let device = Device::new_cuda(0).unwrap();
+        let mut key_caches = vec![create_test_tensor(&device, DType::F16)];
+        let mut value_caches = vec![create_test_tensor(&device, DType::BF16)];
+        let block_mapping = Tensor::from_slice(&[0, 1], (1, 2), &device).unwrap();
+
+        let key_caches_refs: Vec<_> = key_caches.iter_mut().collect();
+        let value_caches_refs: Vec<_> = value_caches.iter_mut().collect();
+
+        unsafe {
+            csrc::copy_blocks(key_caches_refs, value_caches_refs, block_mapping).unwrap();
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "block_mapping must have shape [num_pairs, 2]")]
+    fn test_copy_blocks_invalid_block_mapping_shape() {
+        let device = Device::new_cuda(0).unwrap();
+        let mut key_caches = vec![create_test_tensor(&device, DType::F16)];
+        let mut value_caches = vec![create_test_tensor(&device, DType::F16)];
+        let block_mapping = Tensor::from_slice(&[0, 1, 2], (1, 2), &device).unwrap(); // Invalid shape
+
+        let key_caches_refs: Vec<_> = key_caches.iter_mut().collect();
+        let value_caches_refs: Vec<_> = value_caches.iter_mut().collect();
+
+        unsafe {
+            csrc::copy_blocks(key_caches_refs, value_caches_refs, block_mapping).unwrap();
+        }
     }
 }
 

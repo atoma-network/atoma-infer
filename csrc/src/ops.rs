@@ -144,8 +144,7 @@ impl<'a> InplaceOp1 for SwapBlockCpuToGpuOp<'a> {
         // NOTE: We need to do the conversion here, as we cast the slice to u8,
         // but the layout is still in the original dtype.
         let mut dst_c = dst_c.slice_mut(dst_l.start_offset() * t_size_in_bytes..);
-        let dst_c =
-            dst_c.slice_mut(self.dst_offset..self.dst_offset + self.block_size_in_bytes);
+        let dst_c = dst_c.slice_mut(self.dst_offset..self.dst_offset + self.block_size_in_bytes);
 
         let stream = dst_device
             .fork_default_stream()
@@ -154,9 +153,6 @@ impl<'a> InplaceOp1 for SwapBlockCpuToGpuOp<'a> {
             memcpy_htod_async(*dst_c.device_ptr(), self.src_slice, stream.stream)
                 .map_err(|e| candle_core::Error::Cuda(e.into()))?;
         }
-        // dst_device
-        //     .htod_sync_copy_into(self.src_slice, &mut dst_c)
-        //     .map_err(|e| candle_core::Error::Cuda(e.to_string().into()))?;
 
         Ok(())
     }
@@ -201,12 +197,6 @@ impl<'a> InplaceOp1 for SwapBlockGpuToCpuOp<'a> {
             )
             .map_err(|e| candle_core::Error::Cuda(e.into()))?;
         }
-        // self.cuda_device
-        //     .dtoh_sync_copy_into(
-        //         &self.src_slice,
-        //         &mut dst_s[self.dst_offset..self.dst_offset + self.block_size_in_bytes],
-        //     )
-        //     .map_err(|e| candle_core::Error::Cuda(e.into()))?;
 
         Ok(())
     }
