@@ -63,7 +63,7 @@ pub fn swap_blocks(src: &Tensor, dst: &mut Tensor, block_mapping: HashMap<i64, i
             }
         }
         (Device::Cuda(src_device), Device::Cpu) => {
-            let (src, _src_l) = src.storage_and_layout();
+            let (src, src_l) = src.storage_and_layout();
             let src_slice = match &*src {
                 candle_core::Storage::Cuda(src_c) => match &src_c.slice {
                     CudaStorageSlice::BF16(src_c) => unsafe {
