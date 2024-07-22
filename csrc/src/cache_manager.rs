@@ -128,18 +128,16 @@ pub fn swap_blocks(src: &Tensor, dst: &mut Tensor, block_mapping: HashMap<i64, i
 /// Launches the `copy_blocks_kernel` on the given `key_caches` and `value_caches`,
 /// following the `block_mapping`, to copy the blocks on both `key_cache` and `value_cache`.
 ///
-/// # Note:
-///
-///     For for each block_pair in `block_mapping`, `[src_block_index, dst_block_index]`,
-///     both `src_block_index` blocks in the `key_cache` and `value_cache` are copied to the
-///     `dst_block_index` blocks in the `key_cache` and `value_cache`.
+/// # Note: For each block_pair in `block_mapping`, `[src_block_index, dst_block_index]`,
+/// both `src_block_index` blocks in the `key_cache` and `value_cache` are copied to the
+/// `dst_block_index` blocks in the `key_cache` and `value_cache`.
 ///
 /// # Arguments
 ///
-///   `key_caches` - A vector of `Tensor`s to copy the blocks to.
-///   `value_caches` - A vector of `Tensor`s to copy the blocks to.
-///   `block_mapping` - A `Tensor` of shape `[num_pairs, 2]` that maps the block indices
-///    to be copied, where `num_pairs` is the number of block pairs to be copied.
+///  * `key_caches` - A vector of `Tensor`s to copy the blocks to.
+///  * `value_caches` - A vector of `Tensor`s to copy the blocks to.
+///  * `block_mapping` - A `Tensor` of shape `[num_pairs, 2]` that maps the block indices
+///  *  to be copied, where `num_pairs` is the number of block pairs to be copied.
 pub unsafe fn copy_blocks(
     key_caches: Vec<&mut Tensor>,
     value_caches: Vec<&mut Tensor>,
