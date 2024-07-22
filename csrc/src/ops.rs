@@ -1,10 +1,8 @@
 use candle_core::{
-    backend::BackendStorage,
-    cuda::{
+    backend::BackendStorage, cpu_backend::CpuDevice, cuda::{
         cudarc::driver::{CudaView, DeviceSlice},
         CudaStorageSlice,
-    },
-    CudaDevice, CudaStorage, InplaceOp1, InplaceOp2, Layout, Result, Tensor,
+    }, CudaDevice, CudaStorage, InplaceOp1, InplaceOp2, Layout, Result, Tensor
 };
 use half::{bf16, f16};
 
@@ -160,7 +158,6 @@ pub struct SwapBlockGpuToCpuOp<'a> {
     pub src_slice: CudaView<'a, u8>,
     pub cuda_device: &'a CudaDevice,
     pub block_size_in_bytes: usize,
-    pub src_offset: usize,
     pub dst_offset: usize,
 }
 
@@ -187,10 +184,9 @@ impl<'a> InplaceOp1 for SwapBlockGpuToCpuOp<'a> {
         self.cuda_device
             .dtoh_sync_copy_into(
                 &self.src_slice,
-                &mut dst_s[self.src_offset..self.src_offset + self.block_size_in_bytes],
+                &mut dst_s[self.dst_offset..self.dst_offset + self.block_size_in_bytes],
             )
             .map_err(|e| candle_core::Error::Cuda(e.into()))?;
-        panic!("FLAG: {:?}", &dst_s[self.src_offset..self.src_offset + self.block_size_in_bytes]);
 
         Ok(())
     }
