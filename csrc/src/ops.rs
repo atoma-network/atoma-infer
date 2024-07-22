@@ -45,8 +45,8 @@ impl InplaceOp2 for SwapBlockOp {
         let t_size_in_bytes = src_c.dtype().size_in_bytes();
         let src_device = src_c.device();
         let dst_device = dst_c.device();
-        let (src_c, dst_c) = match (src_c.slice, dst_c.slice) {
-            (CudaStorageSlice::BF16(src_c), CudaStorageSlice::BF16(dst_c)) => {
+        let (src_c, mut dst_c) = match (src_c.slice, dst_c.slice) {
+            (CudaStorageSlice::BF16(ref src_c), CudaStorageSlice::BF16(ref mut dst_c)) => {
                 let src_c = unsafe {
                     src_c.transmute::<u8>(src_c.num_bytes()).ok_or_else(|| {
                         candle_core::Error::Cuda("enable to transmute src_c".to_string().into())
@@ -61,7 +61,7 @@ impl InplaceOp2 for SwapBlockOp {
                 };
                 (src_c, dst_c)
             }
-            (CudaStorageSlice::F16(src_c), CudaStorageSlice::F16(dst_c)) => {
+            (CudaStorageSlice::F16(ref src_c), CudaStorageSlice::F16(ref mut dst_c)) => {
                 let src_c = unsafe {
                     src_c.transmute::<u8>(src_c.num_bytes()).ok_or_else(|| {
                         candle_core::Error::Cuda("enable to transmute src_c".to_string().into())
@@ -86,7 +86,7 @@ impl InplaceOp2 for SwapBlockOp {
         // NOTE: We need to do the conversion here, as we cast the slice to u8,
         // but the layout is still in the original dtype.
         let src_c = src_c.slice(src_l.start_offset() * t_size_in_bytes..);
-        let dst_c = dst_c.slice_mut(dst_l.start_offset() * t_size_in_bytes..);
+        let mut dst_c = dst_c.slice_mut(dst_l.start_offset() * t_size_in_bytes..);
 
         let src_c = src_c.slice(self.src_offset..self.src_offset + self.block_size_in_bytes);
         let mut dst_c = dst_c.slice_mut(self.dst_offset..self.dst_offset + self.block_size_in_bytes);
@@ -117,8 +117,8 @@ impl<'a> InplaceOp1 for SwapBlockCpuToGpuOp<'a> {
     fn cuda_fwd(&self, dst_c: &mut CudaStorage, dst_l: &Layout) -> Result<()> {
         let t_size_in_bytes = dst_c.dtype().size_in_bytes();
         let dst_device = dst_c.device();
-        let dst_c = match dst_c.slice {
-            CudaStorageSlice::BF16(dst_c) => {
+        let mut dst_c = match dst_c.slice {
+            CudaStorageSlice::BF16(ref mut dst_c) => {
                 let mut dst_c = unsafe {
                     dst_c
                         .transmute_mut::<u8>(dst_c.num_bytes())
@@ -128,7 +128,7 @@ impl<'a> InplaceOp1 for SwapBlockCpuToGpuOp<'a> {
                 };
                 dst_c
             }
-            CudaStorageSlice::F16(dst_c) => {
+            CudaStorageSlice::F16(ref mut dst_c) => {
                 let mut dst_c = unsafe {
                     dst_c
                         .transmute_mut::<u8>(dst_c.num_bytes())
@@ -147,7 +147,7 @@ impl<'a> InplaceOp1 for SwapBlockCpuToGpuOp<'a> {
 
         // NOTE: We need to do the conversion here, as we cast the slice to u8,
         // but the layout is still in the original dtype.
-        let dst_c = dst_c.slice_mut(dst_l.start_offset() * t_size_in_bytes..);
+        let mut dst_c = dst_c.slice_mut(dst_l.start_offset() * t_size_in_bytes..);
         let mut dst_c = dst_c.slice_mut(self.dst_offset..self.dst_offset + self.block_size_in_bytes);
 
         dst_device
