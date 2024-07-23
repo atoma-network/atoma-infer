@@ -220,13 +220,13 @@ extern "C" void reshape_and_cache_flash(
     void* value_cache,      // [num_blocks, num_heads, head_size, block_size]
     int64_t* slot_mapping,  // [num_tokens]
 
+    int64_t block_stride,
     int64_t num_tokens,
     int64_t num_heads,
     int64_t head_size,
     int64_t block_size,
     int64_t key_stride,
     int64_t value_stride,
-    int64_t block_stride,
 
     uint32_t dtype  // 0 => f16; 1 => bf16
 ) {
