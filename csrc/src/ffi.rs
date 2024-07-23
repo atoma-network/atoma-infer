@@ -59,4 +59,24 @@ extern "C" {
         unpadded_lse: bool,
         force_split_kernel: bool,
     );
+
+    pub(crate) fn copy_blocks_f16(
+        key_cache_ptrs: *const c_void,
+        value_cache_ptrs: *const c_void,
+        block_mapping: *const c_void,
+        num_layers: i64,
+        num_pairs: i64,
+        numel_per_block: i64,
+        stream: *mut c_void,
+    );
+
+    pub(crate) fn copy_blocks_bf16(
+        key_cache_ptrs: *const c_void,
+        value_cache_ptrs: *const c_void,
+        block_mapping: *const c_void,
+        num_layers: i64,
+        num_pairs: i64,
+        numel_per_block: i64,
+        stream: *mut c_void,
+    );
 }

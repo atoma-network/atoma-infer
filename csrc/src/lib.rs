@@ -1,4 +1,7 @@
+pub mod cache_manager;
 mod ffi;
+pub mod ops;
+pub use cache_manager::{copy_blocks, swap_blocks};
 
 use std::mem::MaybeUninit;
 
