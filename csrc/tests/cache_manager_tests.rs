@@ -263,7 +263,7 @@ mod copy_blocks {
         }
 
         // Check if blocks were correctly copied
-        for layer in 0..num_layers {
+        for layer in 0..NUM_LAYERS {
             assert!(compare_blocks::<half::f16>(&key_caches[layer], 0, 2, BLOCK_SIZE).unwrap());
             assert!(compare_blocks::<half::f16>(&key_caches[layer], 1, 3, BLOCK_SIZE).unwrap());
             assert!(compare_blocks::<half::f16>(&key_caches[layer], 2, 0, BLOCK_SIZE).unwrap());
@@ -317,7 +317,7 @@ mod copy_blocks {
         }
 
         // Check if blocks were correctly copied
-        for layer in 0..num_layers {
+        for layer in 0..NUM_LAYERS {
             assert!(compare_blocks::<half::bf16>(&key_caches[layer], 0, 2, BLOCK_SIZE).unwrap());
             assert!(compare_blocks::<half::bf16>(&key_caches[layer], 1, 3, BLOCK_SIZE).unwrap());
             assert!(compare_blocks::<half::bf16>(&key_caches[layer], 2, 0, BLOCK_SIZE).unwrap());
