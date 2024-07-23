@@ -50,15 +50,29 @@ impl InplaceOp2 for SwapBlockOp {
         // Use a closure to handle the different slice types
         let handle_slices = |src: &CudaStorageSlice, dst: &mut CudaStorageSlice| -> Result<()> {
             let (src_bytes, mut dst_bytes) = match (src, dst) {
-                (CudaStorageSlice::BF16(src), CudaStorageSlice::BF16(dst))
-                | (CudaStorageSlice::F16(src), CudaStorageSlice::F16(dst)) => {
+                (CudaStorageSlice::BF16(src), CudaStorageSlice::BF16(dst)) => {
                     let src_bytes = unsafe {
-                        src.transmute::<u8>(src.num_bytes())
-                            .ok_or_else(|| SwapBlockError::TransmuteError("src".to_string()))?
+                        src.transmute::<u8>(src.num_bytes()).ok_or_else(|| {
+                            candle_core::Error::Cuda("unable to transmute src".to_string().into())
+                        })?
                     };
                     let dst_bytes = unsafe {
-                        dst.transmute_mut::<u8>(dst.num_bytes())
-                            .ok_or_else(|| SwapBlockError::TransmuteError("dst".to_string()))?
+                        dst.transmute_mut::<u8>(dst.num_bytes()).ok_or_else(|| {
+                            candle_core::Error::Cuda("unable to transmute dst".to_string().into())
+                        })?
+                    };
+                    (src_bytes, dst_bytes)
+                }
+                (CudaStorageSlice::F16(src), CudaStorageSlice::F16(dst)) => {
+                    let src_bytes = unsafe {
+                        src.transmute::<u8>(src.num_bytes()).ok_or_else(|| {
+                            candle_core::Error::Cuda("unable to transmute src".to_string().into())
+                        })?
+                    };
+                    let dst_bytes = unsafe {
+                        dst.transmute_mut::<u8>(dst.num_bytes()).ok_or_else(|| {
+                            candle_core::Error::Cuda("unable to transmute dst".to_string().into())
+                        })?
                     };
                     (src_bytes, dst_bytes)
                 }
@@ -115,10 +129,19 @@ impl<'a> InplaceOp1 for SwapBlockCpuToGpuOp<'a> {
         let t_size_in_bytes = dst_c.dtype().size_in_bytes();
         let dst_device = dst_c.device().clone();
         let mut dst_c = match dst_c.slice {
-            CudaStorageSlice::BF16(ref mut dst_c) | CudaStorageSlice::F16(ref mut dst_c) => unsafe {
+            CudaStorageSlice::BF16(ref mut dst_c) => unsafe {
                 dst_c
                     .transmute_mut::<u8>(dst_c.num_bytes())
-                    .ok_or_else(|| SwapBlockError::TransmuteError("dst".to_string()))?
+                    .ok_or_else(|| {
+                        candle_core::Error::Cuda("enable to transmute src_c".to_string().into())
+                    })?
+            },
+            CudaStorageSlice::F16(ref mut dst_c) => unsafe {
+                dst_c
+                    .transmute_mut::<u8>(dst_c.num_bytes())
+                    .ok_or_else(|| {
+                        candle_core::Error::Cuda("enable to transmute src_c".to_string().into())
+                    })?
             },
             _ => {
                 candle_core::bail!(
@@ -145,7 +168,7 @@ impl<'a> InplaceOp1 for SwapBlockCpuToGpuOp<'a> {
 }
 
 /// Swap block operation for two
-/// tensors stored on a source cuda
+/// tensors stored on a source cuda 
 /// device and on a destination cpu
 /// device, respectively
 pub struct SwapBlockGpuToCpuOp<'a> {
@@ -166,7 +189,10 @@ impl<'a> InplaceOp1 for SwapBlockGpuToCpuOp<'a> {
 
     fn cpu_fwd(&self, dst_s: &mut candle_core::CpuStorage, _: &Layout) -> Result<()> {
         let dst_s = match dst_s {
-            candle_core::CpuStorage::BF16(dst_s) | candle_core::CpuStorage::F16(dst_s) => {
+            candle_core::CpuStorage::BF16(dst_s) => {
+                utils::cast_slice_mut::<bf16>(dst_s.as_mut_slice())
+            }
+            candle_core::CpuStorage::F16(dst_s) => {
                 utils::cast_slice_mut::<f16>(dst_s.as_mut_slice())
             }
             _ => {
