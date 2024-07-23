@@ -11,11 +11,14 @@ use candle_core::{
 };
 use half::{bf16, f16};
 
-/// Swap block operation
-/// for two tensors
+/// Swap block operation for two
+/// tensors stored on a single cuda device
 pub struct SwapBlockOp {
+    /// The size of a block in bytes
     pub block_size_in_bytes: usize,
+    /// The offset of the source block in bytes
     pub src_offset: usize,
+    /// The offset of the destination block in bytes
     pub dst_offset: usize,
 }
 
@@ -100,10 +103,16 @@ impl InplaceOp2 for SwapBlockOp {
     }
 }
 
+/// Swap block operation for two
+/// tensors stored on the cpu and a cuda device
 pub struct SwapBlockCpuToGpuOp<'a> {
+    /// The slice of the source block on the cpu
     pub src_slice: &'a [u8],
+    /// The size of a block in bytes
     pub block_size_in_bytes: usize,
+    /// The offset of the source block in bytes
     pub src_offset: usize,
+    /// The offset of the destination block in bytes
     pub dst_offset: usize,
 }
 
@@ -158,10 +167,18 @@ impl<'a> InplaceOp1 for SwapBlockCpuToGpuOp<'a> {
     }
 }
 
+/// Swap block operation for two
+/// tensors stored on a source cuda 
+/// device and on a destination cpu
+/// device, respectively
 pub struct SwapBlockGpuToCpuOp<'a> {
+    /// The slice of the source block on the cuda device
     pub src_slice: CudaView<'a, u8>,
+    /// The cuda device
     pub cuda_device: &'a CudaDevice,
+    /// The size of a block in bytes
     pub block_size_in_bytes: usize,
+    /// The offset of the destination block in bytes
     pub dst_offset: usize,
 }
 
@@ -203,12 +220,14 @@ impl<'a> InplaceOp1 for SwapBlockGpuToCpuOp<'a> {
 }
 
 pub(crate) mod utils {
+    /// Cast a mutable slice of type T to a mutable slice of u8
     pub(crate) fn cast_slice_mut<T>(slice: &mut [T]) -> &mut [u8] {
         let ptr = slice.as_mut_ptr() as *mut u8;
         let len = slice.len() * std::mem::size_of::<T>();
         unsafe { std::slice::from_raw_parts_mut(ptr, len) }
     }
 
+    /// Cast a slice of type T to a slice of u8
     pub(crate) fn cast_slice<T>(slice: &[T]) -> &[u8] {
         let ptr = slice.as_ptr() as *const u8;
         let len = slice.len() * std::mem::size_of::<T>();
