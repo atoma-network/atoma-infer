@@ -361,7 +361,7 @@ pub fn reshape_and_cache_flash_t<
             vc_rank
         )
     }
-    if [num_blocks, num_heads, head_size, block_size] != key_cache.dims() {
+    if [num_blocks, block_size, num_heads, head_size] != key_cache.dims() {
         candle_core::bail!(
             "Only support key_cache with shape [num_blocks, num_heads, head_size, block_size] (got {:?})",
             key_cache.dims()
