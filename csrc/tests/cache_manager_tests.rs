@@ -536,3 +536,167 @@ mod copy_blocks {
         }
     }
 }
+
+#[cfg(test)]
+mod reshape_and_cache {
+    use super::*;
+    use candle_core::{DType, Device, Tensor};
+
+    fn create_random_tensor(shape: &[usize], device: &Device, dtype: DType) -> Tensor {
+        Tensor::rand(0f32, 1f32, shape, device)
+            .unwrap()
+            .to_dtype(dtype)
+            .unwrap()
+    }
+
+    #[test]
+    fn test_reshape_and_cache_flash_f16() {
+        let device = Device::new_cuda(0).unwrap();
+        let num_tokens = 10;
+        let num_heads = 4;
+        let head_size = 64;
+        let num_blocks = 2;
+        let block_size = 8;
+
+        let key = create_random_tensor(&[num_tokens, num_heads, head_size], &device, DType::F16);
+        let value = create_random_tensor(&[num_tokens, num_heads, head_size], &device, DType::F16);
+        let key_cache = create_random_tensor(
+            &[num_blocks, num_heads, head_size, block_size],
+            &device,
+            DType::F16,
+        );
+        let value_cache = create_random_tensor(
+            &[num_blocks, num_heads, head_size, block_size],
+            &device,
+            DType::F16,
+        );
+        let slot_mapping =
+            Tensor::from_slice(&[0i64, 1, 2, 3, 4, 5, 6, 7, 8, 9], (num_tokens,), &device).unwrap();
+
+        let result =
+            reshape_and_cache_flash_t::<f16>(&key, &value, &key_cache, &value_cache, &slot_mapping);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_reshape_and_cache_flash_bf16() {
+        let device = Device::new_cuda(0).unwrap();
+        let num_tokens = 10;
+        let num_heads = 4;
+        let head_size = 64;
+        let num_blocks = 2;
+        let block_size = 8;
+
+        let key = create_random_tensor(&[num_tokens, num_heads, head_size], &device, DType::BF16);
+        let value = create_random_tensor(&[num_tokens, num_heads, head_size], &device, DType::BF16);
+        let key_cache = create_random_tensor(
+            &[num_blocks, num_heads, head_size, block_size],
+            &device,
+            DType::BF16,
+        );
+        let value_cache = create_random_tensor(
+            &[num_blocks, num_heads, head_size, block_size],
+            &device,
+            DType::BF16,
+        );
+        let slot_mapping =
+            Tensor::from_slice(&[0i64, 1, 2, 3, 4, 5, 6, 7, 8, 9], (num_tokens,), &device).unwrap();
+
+        let result = reshape_and_cache_flash_t::<bf16>(
+            &key,
+            &value,
+            &key_cache,
+            &value_cache,
+            &slot_mapping,
+        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_reshape_and_cache_flash_invalid_dtype() {
+        let device = Device::new_cuda(0).unwrap();
+        let num_tokens = 10;
+        let num_heads = 4;
+        let head_size = 64;
+        let num_blocks = 2;
+        let block_size = 8;
+
+        let key = create_random_tensor(&[num_tokens, num_heads, head_size], &device, DType::F32);
+        let value = create_random_tensor(&[num_tokens, num_heads, head_size], &device, DType::F32);
+        let key_cache = create_random_tensor(
+            &[num_blocks, num_heads, head_size, block_size],
+            &device,
+            DType::F32,
+        );
+        let value_cache = create_random_tensor(
+            &[num_blocks, num_heads, head_size, block_size],
+            &device,
+            DType::F32,
+        );
+        let slot_mapping =
+            Tensor::from_slice(&[0i64, 1, 2, 3, 4, 5, 6, 7, 8, 9], (num_tokens,), &device).unwrap();
+
+        let result =
+            reshape_and_cache_flash_t::<f32>(&key, &value, &key_cache, &value_cache, &slot_mapping);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_reshape_and_cache_flash_mismatched_shapes() {
+        let device = Device::new_cuda(0).unwrap();
+        let num_tokens = 10;
+        let num_heads = 4;
+        let head_size = 64;
+        let num_blocks = 2;
+        let block_size = 8;
+
+        let key = create_random_tensor(&[num_tokens, num_heads, head_size], &device, DType::F16);
+        let value = create_random_tensor(&[num_tokens, num_heads, head_size], &device, DType::F16);
+        let key_cache = create_random_tensor(
+            &[num_blocks, num_heads, head_size, block_size],
+            &device,
+            DType::F16,
+        );
+        let value_cache = create_random_tensor(
+            &[num_blocks, num_heads, head_size, block_size - 1],
+            &device,
+            DType::F16,
+        );
+        let slot_mapping =
+            Tensor::from_slice(&[0i64, 1, 2, 3, 4, 5, 6, 7, 8, 9], (num_tokens,), &device).unwrap();
+
+        let result =
+            reshape_and_cache_flash_t::<f16>(&key, &value, &key_cache, &value_cache, &slot_mapping);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_reshape_and_cache_flash_invalid_slot_mapping() {
+        let device = Device::new_cuda(0).unwrap();
+        let num_tokens = 10;
+        let num_heads = 4;
+        let head_size = 64;
+        let num_blocks = 2;
+        let block_size = 8;
+
+        let key = create_random_tensor(&[num_tokens, num_heads, head_size], &device, DType::F16);
+        let value = create_random_tensor(&[num_tokens, num_heads, head_size], &device, DType::F16);
+        let key_cache = create_random_tensor(
+            &[num_blocks, num_heads, head_size, block_size],
+            &device,
+            DType::F16,
+        );
+        let value_cache = create_random_tensor(
+            &[num_blocks, num_heads, head_size, block_size],
+            &device,
+            DType::F16,
+        );
+        let slot_mapping =
+            Tensor::from_slice(&[0i64, 1, 2, 3, 4, 5, 6, 7, 8], (num_tokens - 1,), &device)
+                .unwrap();
+
+        let result =
+            reshape_and_cache_flash_t::<f16>(&key, &value, &key_cache, &value_cache, &slot_mapping);
+        assert!(result.is_err());
+    }
+}
