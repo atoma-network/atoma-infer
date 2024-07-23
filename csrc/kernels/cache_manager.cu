@@ -63,9 +63,9 @@ extern "C" {
 
 extern "C" {
     void copy_blocks_bf16(
-        int64_t* key_cache_ptrs,
-        int64_t* value_cache_ptrs,
-        const int64_t* block_mapping,
+        void* key_cache_ptrs,
+        void* value_cache_ptrs,
+        const void* block_mapping,
         int num_layers,
         int num_pairs,
         int numel_per_block,
