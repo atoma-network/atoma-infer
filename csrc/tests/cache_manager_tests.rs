@@ -262,7 +262,7 @@ mod copy_blocks {
             csrc::copy_blocks(&key_caches_refs, &value_caches_refs, block_mapping).unwrap();
         }
 
-        compare_blocks::<half::f16>(&key_caches_refs[0], 0, 2, BLOCK_SIZE).unwrap()
+        compare_blocks::<half::f16>(&key_caches_refs[0], 0, 2, BLOCK_SIZE).unwrap();
         // // Check if blocks were correctly copied
         // for layer in 0..NUM_LAYERS {
         //     assert!(
