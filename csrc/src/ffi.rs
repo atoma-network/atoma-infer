@@ -62,9 +62,9 @@ extern "C" {
         key_cache_ptrs: *const c_void,
         value_cache_ptrs: *const c_void,
         block_mapping: *const c_void,
-        num_layers: i32,
-        num_pairs: i32,
-        numel_per_block: i32,
+        num_layers: i64,
+        num_pairs: i64,
+        numel_per_block: i64,
         stream: *mut c_void,
     );
 
@@ -72,9 +72,9 @@ extern "C" {
         key_cache_ptrs: *const c_void,
         value_cache_ptrs: *const c_void,
         block_mapping: *const c_void,
-        num_layers: i32,
-        num_pairs: i32,
-        numel_per_block: i32,
+        num_layers: i64,
+        num_pairs: i64,
+        numel_per_block: i64,
         stream: *mut c_void,
     );
 }

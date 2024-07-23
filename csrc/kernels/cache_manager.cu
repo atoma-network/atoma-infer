@@ -11,7 +11,7 @@ template <typename scalar_t>
 __global__ void copy_blocks_kernel(int64_t* key_cache_ptrs,
                                    int64_t* value_cache_ptrs,
                                    const int64_t* __restrict__ block_mapping,
-                                   const int numel_per_block) {
+                                   const int64_t numel_per_block) {
   const int layer_idx = blockIdx.x;
   const int pair_idx = blockIdx.y;
 
@@ -44,9 +44,9 @@ extern "C" {
         void* key_cache_ptrs,
         void* value_cache_ptrs,
         const void* block_mapping,
-        int num_layers,
-        int num_pairs,
-        int numel_per_block,
+        int64_t num_layers,
+        int64_t num_pairs,
+        int64_t numel_per_block,
         cudaStream_t stream
     ) {
         dim3 grid(num_layers, num_pairs);
@@ -66,9 +66,9 @@ extern "C" {
         void* key_cache_ptrs,
         void* value_cache_ptrs,
         const void* block_mapping,
-        int num_layers,
-        int num_pairs,
-        int numel_per_block,
+        int64_t num_layers,
+        int64_t num_pairs,
+        int64_t numel_per_block,
         cudaStream_t stream
     ) {
         dim3 grid(num_layers, num_pairs);
