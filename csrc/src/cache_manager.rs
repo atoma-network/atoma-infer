@@ -195,7 +195,7 @@ unsafe fn copy_blocks_t<
             candle_core::Storage::Cuda(c) => {
                 let cuda_slice = c.as_cuda_slice::<T>()?;
                 let cuda_slice = cuda_slice.slice(key_cache_storage_and_layout.1.start_offset()..);
-                *cuda_slice.device_ptr() as *const core::ffi::c_int
+                *cuda_slice.device_ptr() as *const i64
             }
             _ => candle_core::bail!("key_caches must be a cuda tensor"),
         };
@@ -204,7 +204,7 @@ unsafe fn copy_blocks_t<
                 let cuda_slice = c.as_cuda_slice::<T>()?;
                 let cuda_slice =
                     cuda_slice.slice(value_cache_storage_and_layout.1.start_offset()..);
-                *cuda_slice.device_ptr() as *const core::ffi::c_int
+                *cuda_slice.device_ptr() as *const i64
             }
             _ => candle_core::bail!("value_caches must be a cuda tensor"),
         };
