@@ -233,8 +233,8 @@ mod copy_blocks {
         dst_block: usize,
         block_size: usize,
     ) -> Result<bool> {
-        let src_data = tensor.i(src_block)?.flatten(0, 1)?.to_vec1::<T>()?;
-        let dst_data = tensor.i(dst_block)?.flatten(0, 1)?.to_vec1::<T>()?;
+        let src_data = tensor.i(src_block)?.flatten_all()?.to_vec1::<T>()?;
+        let dst_data = tensor.i(dst_block)?.flatten_all()?.to_vec1::<T>()?;
         Ok(src_data[..block_size] == dst_data[..block_size])
     }
 
