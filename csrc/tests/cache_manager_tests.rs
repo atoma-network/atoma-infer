@@ -242,49 +242,61 @@ mod copy_blocks {
     fn test_copy_blocks_f16() {
         let device = Device::new_cuda(0).unwrap();
 
-        let mut key_caches: Vec<_> = (0..NUM_LAYERS)
+        let mut key_caches: Vec<Tensor> = (0..NUM_LAYERS)
             .map(|_| create_test_tensor(&device, DType::F16))
             .collect();
-        let mut value_caches: Vec<_> = (0..NUM_LAYERS)
+        let mut value_caches: Vec<Tensor> = (0..NUM_LAYERS)
             .map(|_| create_test_tensor(&device, DType::F16))
             .collect();
 
         let block_mapping =
             Tensor::from_slice(&[0i64, 2, 1, 3, 2, 0], (NUM_PAIRS, 2), &device).unwrap();
 
-        let key_caches_refs: Vec<_> = key_caches.iter_mut().collect();
-        let value_caches_refs: Vec<_> = value_caches.iter_mut().collect();
+        // Store original values of the untouched blocks
+        let original_key_blocks: Vec<Vec<half::f16>> = key_caches
+            .iter()
+            .map(|t| t.i(1).unwrap().to_vec2::<half::f16>().unwrap())
+            .collect();
+        let original_value_blocks: Vec<Vec<half::f16>> = value_caches
+            .iter()
+            .map(|t| t.i(1).unwrap().to_vec2::<half::f16>().unwrap())
+            .collect();
 
+        // Create vectors of mutable references
+        let mut key_cache_refs: Vec<&mut Tensor> = key_caches.iter_mut().collect();
+        let mut value_cache_refs: Vec<&mut Tensor> = value_caches.iter_mut().collect();
+
+        // Perform the copy_blocks operation
         unsafe {
-            csrc::copy_blocks(&key_caches_refs, &value_caches_refs, block_mapping).unwrap();
+            csrc::copy_blocks(&key_cache_refs, &value_cache_refs, block_mapping).unwrap();
         }
 
         // Check if blocks were correctly copied
         for layer in 0..NUM_LAYERS {
-            assert!(compare_blocks::<half::f16>(&key_caches_refs[layer], 0, 2, BLOCK_SIZE).unwrap());
-            assert!(compare_blocks::<half::f16>(&key_caches_refs[layer], 1, 3, BLOCK_SIZE).unwrap());
-            assert!(compare_blocks::<half::f16>(&key_caches_refs[layer], 2, 0, BLOCK_SIZE).unwrap());
+            assert!(compare_blocks::<half::f16>(&key_caches[layer], 0, 2, BLOCK_SIZE).unwrap());
+            assert!(compare_blocks::<half::f16>(&key_caches[layer], 1, 3, BLOCK_SIZE).unwrap());
+            assert!(compare_blocks::<half::f16>(&key_caches[layer], 2, 0, BLOCK_SIZE).unwrap());
 
-            assert!(compare_blocks::<half::f16>(&value_caches_refs[layer], 0, 2, BLOCK_SIZE).unwrap());
-            assert!(compare_blocks::<half::f16>(&value_caches_refs[layer], 1, 3, BLOCK_SIZE).unwrap());
-            assert!(compare_blocks::<half::f16>(&value_caches_refs[layer], 2, 0, BLOCK_SIZE).unwrap());
+            assert!(compare_blocks::<half::f16>(&value_caches[layer], 0, 2, BLOCK_SIZE).unwrap());
+            assert!(compare_blocks::<half::f16>(&value_caches[layer], 1, 3, BLOCK_SIZE).unwrap());
+            assert!(compare_blocks::<half::f16>(&value_caches[layer], 2, 0, BLOCK_SIZE).unwrap());
 
             // Check that untouched blocks remain the same
             assert_eq!(
-                key_caches_refs[layer].i(1).unwrap().to_vec2::<half::f16>().unwrap(),
                 key_caches[layer]
                     .i(1)
                     .unwrap()
                     .to_vec2::<half::f16>()
-                    .unwrap()
+                    .unwrap(),
+                original_key_blocks[layer]
             );
             assert_eq!(
-                value_caches_refs[layer].i(1).unwrap().to_vec2::<half::f16>().unwrap(),
                 value_caches[layer]
                     .i(1)
                     .unwrap()
                     .to_vec2::<half::f16>()
-                    .unwrap()
+                    .unwrap(),
+                original_value_blocks[layer]
             );
         }
     }
@@ -293,49 +305,61 @@ mod copy_blocks {
     fn test_copy_blocks_bf16() {
         let device = Device::new_cuda(0).unwrap();
 
-        let mut key_caches: Vec<_> = (0..NUM_LAYERS)
-            .map(|_| create_test_tensor(&device, DType::BF16))
+        let mut key_caches: Vec<Tensor> = (0..NUM_LAYERS)
+            .map(|_| create_test_tensor(&device, DType::F16))
             .collect();
-        let mut value_caches: Vec<_> = (0..NUM_LAYERS)
-            .map(|_| create_test_tensor(&device, DType::BF16))
+        let mut value_caches: Vec<Tensor> = (0..NUM_LAYERS)
+            .map(|_| create_test_tensor(&device, DType::F16))
             .collect();
 
         let block_mapping =
             Tensor::from_slice(&[0i64, 2, 1, 3, 2, 0], (NUM_PAIRS, 2), &device).unwrap();
 
-        let key_caches_refs: Vec<_> = key_caches.iter_mut().collect();
-        let value_caches_refs: Vec<_> = value_caches.iter_mut().collect();
+        // Store original values of the untouched blocks
+        let original_key_blocks: Vec<Vec<half::bf16>> = key_caches
+            .iter()
+            .map(|t| t.i(1).unwrap().to_vec2::<half::bf16>().unwrap())
+            .collect();
+        let original_value_blocks: Vec<Vec<half::bf16>> = value_caches
+            .iter()
+            .map(|t| t.i(1).unwrap().to_vec2::<half::bf16>().unwrap())
+            .collect();
 
+        // Create vectors of mutable references
+        let mut key_cache_refs: Vec<&mut Tensor> = key_caches.iter_mut().collect();
+        let mut value_cache_refs: Vec<&mut Tensor> = value_caches.iter_mut().collect();
+
+        // Perform the copy_blocks operation
         unsafe {
-            csrc::copy_blocks(&key_caches_refs, &value_caches_refs, block_mapping).unwrap();
+            csrc::copy_blocks(&key_cache_refs, &value_cache_refs, block_mapping).unwrap();
         }
 
         // Check if blocks were correctly copied
         for layer in 0..NUM_LAYERS {
-            assert!(compare_blocks::<half::bf16>(&key_caches_refs[layer], 0, 2, BLOCK_SIZE).unwrap());
-            assert!(compare_blocks::<half::bf16>(&key_caches_refs[layer], 1, 3, BLOCK_SIZE).unwrap());
-            assert!(compare_blocks::<half::bf16>(&key_caches_refs[layer], 2, 0, BLOCK_SIZE).unwrap());
+            assert!(compare_blocks::<half::bf16>(&key_caches[layer], 0, 2, BLOCK_SIZE).unwrap());
+            assert!(compare_blocks::<half::bf16>(&key_caches[layer], 1, 3, BLOCK_SIZE).unwrap());
+            assert!(compare_blocks::<half::bf16>(&key_caches[layer], 2, 0, BLOCK_SIZE).unwrap());
 
-            assert!(compare_blocks::<half::bf16>(&value_caches_refs[layer], 0, 2, BLOCK_SIZE).unwrap());
-            assert!(compare_blocks::<half::bf16>(&value_caches_refs[layer], 1, 3, BLOCK_SIZE).unwrap());
-            assert!(compare_blocks::<half::bf16>(&value_caches_refs[layer], 2, 0, BLOCK_SIZE).unwrap());
+            assert!(compare_blocks::<half::bf16>(&value_caches[layer], 0, 2, BLOCK_SIZE).unwrap());
+            assert!(compare_blocks::<half::bf16>(&value_caches[layer], 1, 3, BLOCK_SIZE).unwrap());
+            assert!(compare_blocks::<half::bf16>(&value_caches[layer], 2, 0, BLOCK_SIZE).unwrap());
 
             // Check that untouched blocks remain the same
             assert_eq!(
-                key_caches_refs[layer].i(1).unwrap().to_vec2::<half::bf16>().unwrap(),
                 key_caches[layer]
                     .i(1)
                     .unwrap()
                     .to_vec2::<half::bf16>()
-                    .unwrap()
+                    .unwrap(),
+                original_key_blocks[layer]
             );
             assert_eq!(
-                value_caches_refs[layer].i(1).unwrap().to_vec2::<half::bf16>().unwrap(),
                 value_caches[layer]
                     .i(1)
                     .unwrap()
                     .to_vec2::<half::bf16>()
-                    .unwrap()
+                    .unwrap(),
+                original_value_blocks[layer]
             );
         }
     }
