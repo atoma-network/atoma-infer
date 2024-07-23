@@ -261,13 +261,13 @@ mod copy_blocks {
 
         // Check if blocks were correctly copied
         for layer in 0..num_layers {
-            assert!(compare_blocks::<f16>(&key_caches[layer], 0, 2, block_size).unwrap());
-            assert!(compare_blocks::<f16>(&key_caches[layer], 1, 3, block_size).unwrap());
-            assert!(compare_blocks::<f16>(&key_caches[layer], 2, 0, block_size).unwrap());
+            assert!(compare_blocks::<half::f16>(&key_caches[layer], 0, 2, block_size).unwrap());
+            assert!(compare_blocks::<half::f16>(&key_caches[layer], 1, 3, block_size).unwrap());
+            assert!(compare_blocks::<half::f16>(&key_caches[layer], 2, 0, block_size).unwrap());
 
-            assert!(compare_blocks::<f16>(&value_caches[layer], 0, 2, block_size).unwrap());
-            assert!(compare_blocks::<f16>(&value_caches[layer], 1, 3, block_size).unwrap());
-            assert!(compare_blocks::<f16>(&value_caches[layer], 2, 0, block_size).unwrap());
+            assert!(compare_blocks::<half::f16>(&value_caches[layer], 0, 2, block_size).unwrap());
+            assert!(compare_blocks::<half::f16>(&value_caches[layer], 1, 3, block_size).unwrap());
+            assert!(compare_blocks::<half::f16>(&value_caches[layer], 2, 0, block_size).unwrap());
 
             // Check that untouched blocks remain the same
             assert_eq!(
@@ -275,7 +275,7 @@ mod copy_blocks {
                 original_key_caches[layer]
                     .i(1)
                     .unwrap()
-                    .to_vec2::<f16>()
+                    .to_vec2::<half::f16>()
                     .unwrap()
             );
             assert_eq!(
@@ -312,13 +312,13 @@ mod copy_blocks {
 
         // Check if blocks were correctly copied
         for layer in 0..num_layers {
-            assert!(compare_blocks::<bf16>(&key_caches[layer], 0, 2, block_size).unwrap());
-            assert!(compare_blocks::<bf16>(&key_caches[layer], 1, 3, block_size).unwrap());
-            assert!(compare_blocks::<bf16>(&key_caches[layer], 2, 0, block_size).unwrap());
+            assert!(compare_blocks::<half::bf16>(&key_caches[layer], 0, 2, block_size).unwrap());
+            assert!(compare_blocks::<half::bf16>(&key_caches[layer], 1, 3, block_size).unwrap());
+            assert!(compare_blocks::<half::bf16>(&key_caches[layer], 2, 0, block_size).unwrap());
 
-            assert!(compare_blocks::<bf16>(&value_caches[layer], 0, 2, block_size).unwrap());
-            assert!(compare_blocks::<bf16>(&value_caches[layer], 1, 3, block_size).unwrap());
-            assert!(compare_blocks::<bf16>(&value_caches[layer], 2, 0, block_size).unwrap());
+            assert!(compare_blocks::<half::bf16>(&value_caches[layer], 0, 2, block_size).unwrap());
+            assert!(compare_blocks::<half::bf16>(&value_caches[layer], 1, 3, block_size).unwrap());
+            assert!(compare_blocks::<half::bf16>(&value_caches[layer], 2, 0, block_size).unwrap());
 
             // Check that untouched blocks remain the same
             assert_eq!(
