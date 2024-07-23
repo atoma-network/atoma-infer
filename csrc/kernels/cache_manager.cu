@@ -183,7 +183,7 @@ __global__ void reshape_and_cache_flash_kernel(
 }
 
 #define CALL_RESHAPE_AND_CACHE_FLASH(T)                                     \
-  vllm::reshape_and_cache_kernel<T><<<grid, block, 0, stream>>>(      \
+  vllm::reshape_and_cache_flash_kernel<T><<<grid, block, 0, stream>>>(      \
     reinterpret_cast<T*>(key),                                        \
     reinterpret_cast<T*>(value),                                      \
     reinterpret_cast<T*>(key_cache),                                  \
