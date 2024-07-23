@@ -528,7 +528,7 @@ mod copy_blocks {
         let device = Device::new_cuda(0).unwrap();
         let mut key_caches = vec![create_test_tensor(&device, DType::F16)];
         let mut value_caches = vec![create_test_tensor(&device, DType::F16)];
-        let block_mapping = Tensor::from_slice(&[0i64, 1, 2], (1, 2), &device).unwrap(); // Invalid shape
+        let block_mapping = Tensor::from_slice(&[0i64, 1, 2], (1, 3), &device).unwrap(); // Invalid shape
 
         let key_caches_refs: Vec<_> = key_caches.iter_mut().collect();
         let value_caches_refs: Vec<_> = value_caches.iter_mut().collect();
