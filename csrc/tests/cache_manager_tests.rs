@@ -263,8 +263,8 @@ mod copy_blocks {
         }
 
         panic!(
-            "vec1 = {:?} \n vec2 = {:?}",
-            key_caches_refs[0].flatten_all().unwrap().to_vec1::<half::f16>().unwrap(),
+            "{}",
+            key_caches_refs[0].flatten_all().unwrap().to_vec1::<half::f16>().unwrap() ==
             original_key_caches[0]
                 .flatten_all()
                 .unwrap()
