@@ -256,7 +256,7 @@ mod copy_blocks {
         let value_caches_refs: Vec<_> = value_caches.iter_mut().collect();
 
         unsafe {
-            csrc::copy_blocks(key_caches_refs, value_caches_refs, block_mapping).unwrap();
+            csrc::copy_blocks(&key_caches_refs, &value_caches_refs, block_mapping).unwrap();
         }
 
         // Check if blocks were correctly copied
@@ -307,7 +307,7 @@ mod copy_blocks {
         let value_caches_refs: Vec<_> = value_caches.iter_mut().collect();
 
         unsafe {
-            csrc::copy_blocks(key_caches_refs, value_caches_refs, block_mapping).unwrap();
+            csrc::copy_blocks(&key_caches_refs, &value_caches_refs, block_mapping).unwrap();
         }
 
         // Check if blocks were correctly copied
@@ -355,7 +355,7 @@ mod copy_blocks {
         let value_caches_refs: Vec<_> = value_caches.iter_mut().collect();
 
         unsafe {
-            csrc::copy_blocks(key_caches_refs, value_caches_refs, block_mapping).unwrap();
+            csrc::copy_blocks(&key_caches_refs, &value_caches_refs, block_mapping).unwrap();
         }
     }
 
@@ -371,7 +371,7 @@ mod copy_blocks {
         let value_caches_refs: Vec<_> = value_caches.iter_mut().collect();
 
         unsafe {
-            csrc::copy_blocks(key_caches_refs, value_caches_refs, block_mapping).unwrap();
+            csrc::copy_blocks(&key_caches_refs, &value_caches_refs, block_mapping).unwrap();
         }
     }
 
@@ -387,7 +387,7 @@ mod copy_blocks {
         let value_caches_refs: Vec<_> = value_caches.iter_mut().collect();
 
         unsafe {
-            csrc::copy_blocks(key_caches_refs, value_caches_refs, block_mapping).unwrap();
+            csrc::copy_blocks(&key_caches_refs, &value_caches_refs, block_mapping).unwrap();
         }
     }
 
@@ -405,7 +405,7 @@ mod copy_blocks {
         let value_caches_refs: Vec<_> = value_caches.iter_mut().collect();
 
         unsafe {
-            csrc::copy_blocks(key_caches_refs, value_caches_refs, block_mapping).unwrap();
+            csrc::copy_blocks(&key_caches_refs, &value_caches_refs, block_mapping).unwrap();
         }
     }
 }
