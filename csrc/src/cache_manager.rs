@@ -159,8 +159,8 @@ pub unsafe fn copy_blocks(
 unsafe fn copy_blocks_t<
     T: candle_core::cuda_backend::CudaDType + candle_core::cuda_backend::cudarc::driver::DeviceRepr,
 >(
-    key_caches: Vec<&mut Tensor>,
-    value_caches: Vec<&mut Tensor>,
+    key_caches: &Vec<&mut Tensor>,
+    value_caches: &Vec<&mut Tensor>,
     block_mapping: Tensor,
 ) -> Result<()> {
     let num_layers = key_caches.len();
