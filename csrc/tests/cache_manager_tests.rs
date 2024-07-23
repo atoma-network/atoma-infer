@@ -262,6 +262,16 @@ mod copy_blocks {
             csrc::copy_blocks(&key_caches_refs, &value_caches_refs, block_mapping).unwrap();
         }
 
+        panic!(
+            "vec1 = {:?} \n vec2 = {:?}",
+            key_caches_refs[0].flatten_all().unwrap().to_vec1().unwrap(),
+            original_key_caches[0]
+                .flatten_all()
+                .unwrap()
+                .to_vec1()
+                .unwrap()
+        );
+
         // Check if blocks were correctly copied
         for layer in 0..NUM_LAYERS {
             // assert!(
