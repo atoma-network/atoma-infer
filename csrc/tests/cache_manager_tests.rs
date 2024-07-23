@@ -271,7 +271,7 @@ mod copy_blocks {
 
             // Check that untouched blocks remain the same
             assert_eq!(
-                key_caches[layer].i(1).unwrap().to_vec2::<f16>().unwrap(),
+                key_caches[layer].i(1).unwrap().to_vec2::<half::f16>().unwrap(),
                 original_key_caches[layer]
                     .i(1)
                     .unwrap()
@@ -322,7 +322,7 @@ mod copy_blocks {
 
             // Check that untouched blocks remain the same
             assert_eq!(
-                key_caches[layer].i(1).unwrap().to_vec2::<bf16>().unwrap(),
+                key_caches[layer].i(1).unwrap().to_vec2::<half::bf16>().unwrap(),
                 original_key_caches[layer]
                     .i(1)
                     .unwrap()
@@ -330,7 +330,7 @@ mod copy_blocks {
                     .unwrap()
             );
             assert_eq!(
-                value_caches[layer].i(1).unwrap().to_vec2::<bf16>().unwrap(),
+                value_caches[layer].i(1).unwrap().to_vec2::<half::bf16>().unwrap(),
                 original_value_caches[layer]
                     .i(1)
                     .unwrap()
