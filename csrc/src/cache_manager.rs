@@ -306,7 +306,7 @@ unsafe fn copy_blocks_t<
 ///  * `value_cache` - A `Tensor` of shape `[num_blocks, num_heads, head_size, block_size]`.
 ///  * `slot_mapping` - A `Tensor` of shape `[num_tokens]`.
 pub fn reshape_and_cache_flash_t<
-    T: candle_core::cuda_backend::CudaDType + candle_core::cuda_backend::cudarc::driver::DevicePtr,
+    T: candle_core::cuda_backend::CudaDType + candle_core::cuda_backend::cudarc::driver::DeviceRepr,
 >(
     key: &Tensor,
     value: &Tensor,
@@ -379,7 +379,7 @@ pub fn reshape_and_cache_flash_t<
             value.dims()
         )
     }
-    if (num_tokens) != slot_mapping.dims1() {
+    if (num_tokens) != slot_mapping.dims1()? {
         candle_core::bail!(
             "Only support slot_mapping with shape [num_tokens] (got {:?})",
             slot_mapping.dims1()
@@ -439,13 +439,14 @@ pub fn reshape_and_cache_flash_t<
             v_ptr,
             kc_ptr,
             vc_ptr,
-            slot_mapping,
+            slot_mapping_ptr,
             num_tokens as i64,
             num_heads as i64,
             head_size as i64,
             block_size as i64,
             key_stride as i64,
             value_stride as i64,
+            block_stride as i64,
             dtype,
         )
     }
