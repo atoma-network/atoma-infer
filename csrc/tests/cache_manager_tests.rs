@@ -255,8 +255,8 @@ mod copy_blocks {
         let key_caches_refs: Vec<_> = key_caches.iter_mut().collect();
         let value_caches_refs: Vec<_> = value_caches.iter_mut().collect();
 
-        let original_key_caches = key_caches.clone();
-        let original_value_caches = value_caches.clone();
+        let original_key_caches = key_caches.iter().collect();
+        let original_value_caches = value_caches.iter().collect();
 
         unsafe {
             csrc::copy_blocks(key_caches_refs, value_caches_refs, block_mapping).unwrap();
@@ -309,8 +309,8 @@ mod copy_blocks {
         let key_caches_refs: Vec<_> = key_caches.iter_mut().collect();
         let value_caches_refs: Vec<_> = value_caches.iter_mut().collect();
 
-        let original_key_caches = key_caches.clone();
-        let original_value_caches = value_caches.clone();
+        let original_key_caches = key_caches.iter().collect();
+        let original_value_caches = value_caches.iter().collect();
 
         unsafe {
             csrc::copy_blocks(key_caches_refs, value_caches_refs, block_mapping).unwrap();
