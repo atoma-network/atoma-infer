@@ -172,7 +172,7 @@ unsafe fn copy_blocks_t<
     }
 
     let device = key_caches[0].device();
-    let device = if let Device::Cuda(device) = device {
+    let cuda_device = if let Device::Cuda(device) = device {
         device
     } else {
         candle_core::bail!("device must be a cuda device")
@@ -267,7 +267,7 @@ unsafe fn copy_blocks_t<
     //     return Err(APIError::new("Failed to create CUDA stream"));
     // }
 
-    let stream = device
+    let stream = cuda_device
         .fork_default_stream()
         .map_err(|e| candle_core::Error::Cuda(e.into()))?;
 
