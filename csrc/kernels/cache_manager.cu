@@ -41,9 +41,9 @@ __global__ void copy_blocks_kernel(int64_t* key_cache_ptrs,
 // SAFETY: This is technically UB due to aliasing, but it is OK because the width is compatible.
 extern "C" {
     void copy_blocks_f16(
-        int64_t* key_cache_ptrs,
-        int64_t* value_cache_ptrs,
-        const int64_t* block_mapping,
+        void* key_cache_ptrs,
+        void* value_cache_ptrs,
+        const void* block_mapping,
         int num_layers,
         int num_pairs,
         int numel_per_block,

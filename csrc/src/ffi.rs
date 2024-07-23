@@ -59,9 +59,9 @@ extern "C" {
     );
 
     pub(crate) fn copy_blocks_f16(
-        key_cache_ptrs: *const i64,
-        value_cache_ptrs: *const i64,
-        block_mapping: *const i64,
+        key_cache_ptrs: *const c_void,
+        value_cache_ptrs: *const c_void,
+        block_mapping: *const c_void,
         num_layers: i32,
         num_pairs: i32,
         numel_per_block: i32,
@@ -69,9 +69,9 @@ extern "C" {
     );
 
     pub(crate) fn copy_blocks_bf16(
-        key_cache_ptrs: *const i64,
-        value_cache_ptrs: *const i64,
-        block_mapping: *const i64,
+        key_cache_ptrs: *const c_void,
+        value_cache_ptrs: *const c_void,
+        block_mapping: *const c_void,
         num_layers: i32,
         num_pairs: i32,
         numel_per_block: i32,

@@ -220,7 +220,7 @@ unsafe fn copy_blocks_t<
             candle_core::Storage::Cuda(c) => {
                 let cuda_slice = c.as_cuda_slice::<i64>()?;
                 let cuda_slice = cuda_slice.slice(key_cache_ptrs_l.start_offset()..);
-                *cuda_slice.device_ptr() as *const i64
+                *cuda_slice.device_ptr() as *const core::ffi::c_void
             }
             _ => candle_core::bail!("key_caches must be a cuda tensor"),
         }
@@ -231,7 +231,7 @@ unsafe fn copy_blocks_t<
             candle_core::Storage::Cuda(c) => {
                 let cuda_slice = c.as_cuda_slice::<i64>()?;
                 let cuda_slice = cuda_slice.slice(value_cache_ptrs.layout().start_offset()..);
-                *cuda_slice.device_ptr() as *const i64
+                *cuda_slice.device_ptr() as *const core::ffi::c_void
             }
             _ => candle_core::bail!("value_caches must be a cuda tensor"),
         }
@@ -247,7 +247,7 @@ unsafe fn copy_blocks_t<
         candle_core::Storage::Cuda(c) => {
             let cuda_slice = c.as_cuda_slice::<i64>()?;
             let cuda_slice = cuda_slice.slice(block_mapping_layout.start_offset()..);
-            *cuda_slice.device_ptr() as *const i64
+            *cuda_slice.device_ptr() as *const core::ffi::c_void
         }
         _ => candle_core::bail!("block_mapping must be a cuda tensor"),
     };
@@ -260,12 +260,6 @@ unsafe fn copy_blocks_t<
         .product::<usize>()
         .try_into()
         .unwrap();
-
-    // let mut stream: cudaStream_t = std::ptr::null_mut();
-    // let cuda_result = cudaStreamCreate(&mut stream);
-    // if cuda_result != cudaError::cudaSuccess {
-    //     return Err(APIError::new("Failed to create CUDA stream"));
-    // }
 
     let stream = cuda_device
         .fork_default_stream()
