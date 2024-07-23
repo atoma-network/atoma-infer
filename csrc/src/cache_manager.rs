@@ -189,21 +189,21 @@ unsafe fn copy_blocks_t<
     let mut key_cache_ptrs = Vec::with_capacity(num_layers);
     let mut value_cache_ptrs = Vec::with_capacity(num_layers);
     for (key_cache, value_cache) in key_caches.iter().zip(value_caches.iter()) {
-        let key_cache_storage_and_layout = key_cache.storage_and_layout();
-        let value_cache_storage_and_layout = value_cache.storage_and_layout();
-        let key_cache_ptr = match &*(key_cache_storage_and_layout.0) {
+        let (key_cache_storage, key_cache_layout) = key_cache.storage_and_layout();
+        let (value_cache_storage, value_cache_layout) = value_cache.storage_and_layout();
+        let key_cache_ptr = match &*key_cache_storage {
             candle_core::Storage::Cuda(c) => {
                 let cuda_slice = c.as_cuda_slice::<T>()?;
-                let cuda_slice = cuda_slice.slice(key_cache_storage_and_layout.1.start_offset()..);
+                let cuda_slice = cuda_slice.slice(key_cache_layout.start_offset()..);
                 *cuda_slice.device_ptr() as i64
             }
             _ => candle_core::bail!("key_caches must be a cuda tensor"),
         };
-        let value_cache_ptr = match &*(value_cache_storage_and_layout.0) {
+        let value_cache_ptr = match &*value_cache_storage {
             candle_core::Storage::Cuda(c) => {
                 let cuda_slice = c.as_cuda_slice::<T>()?;
                 let cuda_slice =
-                    cuda_slice.slice(value_cache_storage_and_layout.1.start_offset()..);
+                    cuda_slice.slice(value_cache_layout.start_offset()..);
                 *cuda_slice.device_ptr() as i64
             }
             _ => candle_core::bail!("value_caches must be a cuda tensor"),
@@ -271,8 +271,8 @@ unsafe fn copy_blocks_t<
                 key_cache_ptrs,
                 value_cache_ptrs,
                 block_mapping_ptr,
-                num_layers as i32,
-                num_pairs as i32,
+                num_layers as i64,
+                num_pairs as i64,
                 numel_per_block,
                 stream.stream as *mut std::ffi::c_void,
             );
@@ -282,8 +282,8 @@ unsafe fn copy_blocks_t<
                 key_cache_ptrs,
                 value_cache_ptrs,
                 block_mapping_ptr,
-                num_layers as i32,
-                num_pairs as i32,
+                num_layers as i64,
+                num_pairs as i64,
                 numel_per_block,
                 stream.stream as *mut std::ffi::c_void,
             );

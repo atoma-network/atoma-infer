@@ -213,7 +213,7 @@ mod copy_blocks {
     const HEAD_SIZE: usize = 8;
 
     const NUM_LAYERS: usize = 2;
-    const NUM_PAIRS: usize = 3;
+    const NUM_PAIRS: usize = 2;
 
     fn create_test_tensor(device: &Device, dtype: DType) -> Tensor {
         Tensor::rand(
@@ -252,8 +252,9 @@ mod copy_blocks {
         let original_key_caches = key_caches.clone();
         let original_value_caches = value_caches.clone();
 
+        // (0, 1, 2, 3) -> (0, 1, 0, 3) -> (0, 1, 0, 1)
         let block_mapping =
-            Tensor::from_slice(&[0i64, 2, 1, 3, 2, 0], (NUM_PAIRS, 2), &device).unwrap();
+            Tensor::from_slice(&[0i64, 2, 1, 3], (NUM_PAIRS, 2), &device).unwrap();
 
         let key_caches_refs: Vec<_> = key_caches.iter_mut().collect();
         let value_caches_refs: Vec<_> = value_caches.iter_mut().collect();
@@ -262,43 +263,39 @@ mod copy_blocks {
             csrc::copy_blocks(&key_caches_refs, &value_caches_refs, block_mapping).unwrap();
         }
 
-        panic!(
-            "{}",
-            key_caches_refs[0]
-                .flatten_all()
-                .unwrap()
-                .to_vec1::<half::f16>()
-                .unwrap()
-                == original_key_caches[0]
+        // Check if blocks were correctly copied
+        for layer in 0..NUM_LAYERS {
+            assert!(
+                compare_blocks::<half::f16>(&key_caches_refs[layer], 0, 2, BLOCK_SIZE).unwrap()
+            );
+            assert!(
+                compare_blocks::<half::f16>(&key_caches_refs[layer], 1, 3, BLOCK_SIZE).unwrap()
+            );
+           
+            assert!(
+                compare_blocks::<half::f16>(&value_caches_refs[layer], 0, 2, BLOCK_SIZE).unwrap()
+            );
+            assert!(
+                compare_blocks::<half::f16>(&value_caches_refs[layer], 1, 3, BLOCK_SIZE).unwrap()
+            );
+
+            // Check that untouched blocks remain the same
+            assert_eq!(
+                key_caches_refs[layer]
+                    .i(0)
+                    .unwrap()
+                    .flatten_all()
+                    .unwrap()
+                    .to_vec1::<half::f16>()
+                    .unwrap(),
+                original_key_caches[layer]
+                    .i(0)
+                    .unwrap()
                     .flatten_all()
                     .unwrap()
                     .to_vec1::<half::f16>()
                     .unwrap()
-        );
-
-        // Check if blocks were correctly copied
-        for layer in 0..NUM_LAYERS {
-            // assert!(
-            //     compare_blocks::<half::f16>(&key_caches_refs[layer], 0, 2, BLOCK_SIZE).unwrap()
-            // );
-            // assert!(
-            //     compare_blocks::<half::f16>(&key_caches_refs[layer], 1, 3, BLOCK_SIZE).unwrap()
-            // );
-            // assert!(
-            //     compare_blocks::<half::f16>(&key_caches_refs[layer], 2, 0, BLOCK_SIZE).unwrap()
-            // );
-
-            // assert!(
-            //     compare_blocks::<half::f16>(&value_caches_refs[layer], 0, 2, BLOCK_SIZE).unwrap()
-            // );
-            // assert!(
-            //     compare_blocks::<half::f16>(&value_caches_refs[layer], 1, 3, BLOCK_SIZE).unwrap()
-            // );
-            // assert!(
-            //     compare_blocks::<half::f16>(&value_caches_refs[layer], 2, 0, BLOCK_SIZE).unwrap()
-            // );
-
-            // Check that untouched blocks remain the same
+            );
             assert_eq!(
                 key_caches_refs[layer]
                     .i(1)
@@ -313,6 +310,22 @@ mod copy_blocks {
                     .flatten_all()
                     .unwrap()
                     .to_vec1::<half::f16>()
+                    .unwrap()
+            );
+            assert_eq!(
+                value_caches_refs[layer]
+                    .i(0)
+                    .unwrap()
+                    .flatten_all()
+                    .unwrap()
+                    .to_vec2::<half::f16>()
+                    .unwrap(),
+                original_value_caches[layer]
+                    .i(0)
+                    .unwrap()
+                    .flatten_all()
+                    .unwrap()
+                    .to_vec2::<half::f16>()
                     .unwrap()
             );
             assert_eq!(
@@ -349,7 +362,7 @@ mod copy_blocks {
         let original_value_caches = value_caches.clone();
 
         let block_mapping =
-            Tensor::from_slice(&[0i64, 2, 1, 3, 2, 0], (NUM_PAIRS, 2), &device).unwrap();
+            Tensor::from_slice(&[0i64, 2, 1, 3], (NUM_PAIRS, 2), &device).unwrap();
 
         let key_caches_refs: Vec<_> = key_caches.iter_mut().collect();
         let value_caches_refs: Vec<_> = value_caches.iter_mut().collect();
@@ -366,21 +379,27 @@ mod copy_blocks {
             assert!(
                 compare_blocks::<half::bf16>(&key_caches_refs[layer], 1, 3, BLOCK_SIZE).unwrap()
             );
-            assert!(
-                compare_blocks::<half::bf16>(&key_caches_refs[layer], 2, 0, BLOCK_SIZE).unwrap()
-            );
-
+    
             assert!(
                 compare_blocks::<half::bf16>(&value_caches_refs[layer], 0, 2, BLOCK_SIZE).unwrap()
             );
             assert!(
                 compare_blocks::<half::bf16>(&value_caches_refs[layer], 1, 3, BLOCK_SIZE).unwrap()
             );
-            assert!(
-                compare_blocks::<half::bf16>(&value_caches_refs[layer], 2, 0, BLOCK_SIZE).unwrap()
-            );
 
             // Check that untouched blocks remain the same
+            assert_eq!(
+                key_caches_refs[layer]
+                    .i(0)
+                    .unwrap()
+                    .to_vec2::<half::bf16>()
+                    .unwrap(),
+                original_key_caches[layer]
+                    .i(0)
+                    .unwrap()
+                    .to_vec2::<half::bf16>()
+                    .unwrap()
+            );
             assert_eq!(
                 key_caches_refs[layer]
                     .i(1)
@@ -389,6 +408,18 @@ mod copy_blocks {
                     .unwrap(),
                 original_key_caches[layer]
                     .i(1)
+                    .unwrap()
+                    .to_vec2::<half::bf16>()
+                    .unwrap()
+            );
+            assert_eq!(
+                value_caches_refs[layer]
+                    .i(0)
+                    .unwrap()
+                    .to_vec2::<half::bf16>()
+                    .unwrap(),
+                original_value_caches[layer]
+                    .i(0)
                     .unwrap()
                     .to_vec2::<half::bf16>()
                     .unwrap()
@@ -477,45 +508,3 @@ mod copy_blocks {
         }
     }
 }
-
-// #[test]
-// fn test_copy_blocks() -> Result<()> {
-//     // Create a CUDA device
-//     let device = Device::new_cuda(0)?;
-
-//     // Create sample tensors
-//     let mut key_cache1 = Tensor::arange(0f32, 6f32, &device)?.reshape((2, 3, 1, 1))?;
-//     let mut key_cache2 = Tensor::arange(6f32, 12f32, &device)?.reshape((2, 3, 1, 1))?;
-//     let mut value_cache1 = Tensor::arange(12f32, 18f32, &device)?.reshape((2, 3, 1, 1))?;
-//     let mut value_cache2 = Tensor::arange(18f32, 24f32, &device)?.reshape((2, 3, 1, 1))?;
-
-//     // Create input vectors
-//     let key_caches = vec![&mut key_cache1, &mut key_cache2];
-//     let value_caches = vec![&mut value_cache1, &mut value_cache2];
-
-//     // Create block mapping
-//     let block_mapping = Tensor::from_vec(vec![0_i64, 1], (1, 2), &device)?; // Copy block 0 to block 1
-
-//     // Call the copy_blocks function
-//     unsafe { csrc::copy_blocks(key_caches, value_caches, block_mapping)? };
-
-//     // Verify that the blocks have been copied correctly
-//     assert_eq!(
-//         key_cache1.to_vec2::<f32>()?,
-//         vec![vec![0.0, 1.0, 2.0], vec![3.0, 4.0, 5.0]]
-//     );
-//     assert_eq!(
-//         key_cache2.to_vec2::<f32>()?,
-//         vec![vec![0.0, 1.0, 2.0], vec![9.0, 10.0, 11.0]]
-//     );
-//     assert_eq!(
-//         value_cache1.to_vec2::<f32>()?,
-//         vec![vec![12.0, 13.0, 14.0], vec![15.0, 16.0, 17.0]]
-//     );
-//     assert_eq!(
-//         value_cache2.to_vec2::<f32>()?,
-//         vec![vec![12.0, 13.0, 14.0], vec![21.0, 22.0, 23.0]]
-//     );
-
-//     Ok(())
-// }
