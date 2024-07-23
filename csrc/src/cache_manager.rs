@@ -227,7 +227,7 @@ unsafe fn copy_blocks_t<
     };
     let value_cache_ptrs = {
         let (value_cache_ptrs_s, value_cache_ptrs_l) = value_cache_ptrs.storage_and_layout();
-        match &*value_cache_ptrs {
+        match &*value_cache_ptrs_s {
             candle_core::Storage::Cuda(c) => {
                 let cuda_slice = c.as_cuda_slice::<i64>()?;
                 let cuda_slice = cuda_slice.slice(value_cache_ptrs.layout().start_offset()..);
