@@ -50,12 +50,12 @@ extern "C" {
         cudaStream_t stream
     ) {
         dim3 grid(num_layers, num_pairs);
-        dim3 block(std::min(1024, numel_per_block));
+        dim3 block(std::min(int64_t(1024), numel_per_block));
 
         vllm::copy_blocks_kernel<int16_t><<<grid, block, 0, stream>>>(
-            key_cache_ptrs,
-            value_cache_ptrs,
-            block_mapping,
+            (int64_t*)key_cache_ptrs,
+            (int64_t*)value_cache_ptrs,
+            (const int64_t*)block_mapping,
             numel_per_block
         );
     }
@@ -72,12 +72,12 @@ extern "C" {
         cudaStream_t stream
     ) {
         dim3 grid(num_layers, num_pairs);
-        dim3 block(std::min(1024, numel_per_block));
+        dim3 block(std::min(int64_t(1024), numel_per_block));
 
         vllm::copy_blocks_kernel<int16_t><<<grid, block, 0, stream>>>(
-            key_cache_ptrs,
-            value_cache_ptrs,
-            block_mapping,
+            (int64_t*)key_cache_ptrs,
+            (int64_t*)value_cache_ptrs,
+            (const int64_t*)block_mapping,
             numel_per_block
         );
     }
