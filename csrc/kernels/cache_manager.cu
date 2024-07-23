@@ -181,6 +181,19 @@ __global__ void reshape_and_cache_flash_kernel(
     v_cache[tgt_value_idx] = value[src_value_idx];
   }
 }
+
+#define CALL_RESHAPE_AND_CACHE_FLASH(T)                                     \
+  vllm::reshape_and_cache_kernel<T><<<grid, block, 0, stream>>>(      \
+    reinterpret_cast<T*>(key),                                        \
+    reinterpret_cast<T*>(value),                                      \
+    reinterpret_cast<T*>(key_cache),                                  \
+    reinterpret_cast<T*>(value_cache),                                \
+    slot_mapping,                                                     \
+    key_stride,                                                       \
+    value_stride,                                                     \
+    num_heads,                                                        \
+    head_size,                                                        \
+    block_size);
 } // namespace vllm
 
 extern "C" void reshape_and_cache(
