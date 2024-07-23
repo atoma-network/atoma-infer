@@ -306,7 +306,7 @@ unsafe fn copy_blocks_t<
 ///  * `value_cache` - A `Tensor` of shape `[num_blocks, num_heads, head_size, block_size]`.
 ///  * `slot_mapping` - A `Tensor` of shape `[num_tokens]`.
 pub fn reshape_and_cache_flash_t<
-T: candle_core::cuda_backend::CudaDType + candle_core::cuda_backend::cudarc::driver::DevicePtr
+    T: candle_core::cuda_backend::CudaDType + candle_core::cuda_backend::cudarc::driver::DevicePtr,
 >(
     key: &Tensor,
     value: &Tensor,
@@ -397,7 +397,7 @@ T: candle_core::cuda_backend::CudaDType + candle_core::cuda_backend::cudarc::dri
             let k = c.as_cuda_slice::<T>()?;
             let k = k.slice(k_l.start_offset()..);
             *k.device_ptr() as *const core::ffi::c_void
-        },
+        }
         _ => candle_core::bail!("key must be a cuda tensor"),
     };
     let v_ptr = match &*v {
@@ -405,7 +405,7 @@ T: candle_core::cuda_backend::CudaDType + candle_core::cuda_backend::cudarc::dri
             let v = c.as_cuda_slice::<T>()?;
             let v = v.slice(v_l.start_offset()..);
             *v.device_ptr() as *const core::ffi::c_void
-        },
+        }
         _ => candle_core::bail!("value must be a cuda tensor"),
     };
     let kc_ptr = match &*kc {
@@ -433,19 +433,21 @@ T: candle_core::cuda_backend::CudaDType + candle_core::cuda_backend::cudarc::dri
         _ => candle_core::bail!("slot_mapping must be a cuda tensor"),
     };
 
-    unsafe { ffi::reshape_and_cache_flash(
-        k_ptr,
-        v_ptr,
-        kc_ptr,
-        vc_ptr,
-        slot_mapping,
-        num_tokens as i64,
-        num_heads as i64,
-        head_size as i64,
-        block_size as i64,
-        key_stride as i64,
-        value_stride as i64,
-        dtype
-    ) }
+    unsafe {
+        ffi::reshape_and_cache_flash(
+            k_ptr,
+            v_ptr,
+            kc_ptr,
+            vc_ptr,
+            slot_mapping,
+            num_tokens as i64,
+            num_heads as i64,
+            head_size as i64,
+            block_size as i64,
+            key_stride as i64,
+            value_stride as i64,
+            dtype,
+        )
+    }
     Ok(())
 }
