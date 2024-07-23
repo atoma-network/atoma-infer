@@ -252,11 +252,11 @@ mod copy_blocks {
         let block_mapping =
             Tensor::from_slice(&[0i64, 2, 1, 3, 2, 0], (NUM_PAIRS, 2), &device).unwrap();
 
-        let key_caches_refs: Vec<_> = key_caches.iter_mut().collect();
-        let value_caches_refs: Vec<_> = value_caches.iter_mut().collect();
-
         let original_key_caches: Vec<_> = key_caches.iter().collect();
         let original_value_caches: Vec<_> = value_caches.iter().collect();
+        
+        let key_caches_refs: Vec<_> = key_caches.iter_mut().collect();
+        let value_caches_refs: Vec<_> = value_caches.iter_mut().collect();
 
         unsafe {
             csrc::copy_blocks(key_caches_refs, value_caches_refs, block_mapping).unwrap();
@@ -306,11 +306,11 @@ mod copy_blocks {
         let block_mapping =
             Tensor::from_slice(&[0i64, 2, 1, 3, 2, 0], (NUM_PAIRS, 2), &device).unwrap();
 
-        let key_caches_refs: Vec<_> = key_caches.iter_mut().collect();
-        let value_caches_refs: Vec<_> = value_caches.iter_mut().collect();
-
         let original_key_caches: Vec<_> = key_caches.iter().collect();
         let original_value_caches: Vec<_> = value_caches.iter().collect();
+
+        let key_caches_refs: Vec<_> = key_caches.iter_mut().collect();
+        let value_caches_refs: Vec<_> = value_caches.iter_mut().collect();
 
         unsafe {
             csrc::copy_blocks(key_caches_refs, value_caches_refs, block_mapping).unwrap();
