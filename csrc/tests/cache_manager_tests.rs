@@ -249,6 +249,9 @@ mod copy_blocks {
             .map(|_| create_test_tensor(&device, DType::F16))
             .collect();
 
+        let original_key_caches = key_caches.clone();
+        let original_value_caches = value_caches.clone();
+
         let block_mapping =
             Tensor::from_slice(&[0i64, 2, 1, 3, 2, 0], (NUM_PAIRS, 2), &device).unwrap();
 
@@ -272,7 +275,7 @@ mod copy_blocks {
             // Check that untouched blocks remain the same
             assert_eq!(
                 key_caches_refs[layer].i(1).unwrap().to_vec2::<half::f16>().unwrap(),
-                key_caches[layer]
+                original_key_caches[layer]
                     .i(1)
                     .unwrap()
                     .to_vec2::<half::f16>()
@@ -280,7 +283,7 @@ mod copy_blocks {
             );
             assert_eq!(
                 value_caches_refs[layer].i(1).unwrap().to_vec2::<half::f16>().unwrap(),
-                value_caches[layer]
+                original_value_caches[layer]
                     .i(1)
                     .unwrap()
                     .to_vec2::<half::f16>()
@@ -299,6 +302,9 @@ mod copy_blocks {
         let mut value_caches: Vec<_> = (0..NUM_LAYERS)
             .map(|_| create_test_tensor(&device, DType::BF16))
             .collect();
+
+        let original_key_caches = key_caches.clone();
+        let original_value_caches = value_caches.clone();
 
         let block_mapping =
             Tensor::from_slice(&[0i64, 2, 1, 3, 2, 0], (NUM_PAIRS, 2), &device).unwrap();
@@ -323,7 +329,7 @@ mod copy_blocks {
             // Check that untouched blocks remain the same
             assert_eq!(
                 key_caches_refs[layer].i(1).unwrap().to_vec2::<half::bf16>().unwrap(),
-                key_caches[layer]
+                original_key_caches[layer]
                     .i(1)
                     .unwrap()
                     .to_vec2::<half::bf16>()
@@ -331,7 +337,7 @@ mod copy_blocks {
             );
             assert_eq!(
                 value_caches_refs[layer].i(1).unwrap().to_vec2::<half::bf16>().unwrap(),
-                value_caches[layer]
+                original_value_caches[layer]
                     .i(1)
                     .unwrap()
                     .to_vec2::<half::bf16>()
