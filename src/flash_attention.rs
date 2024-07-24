@@ -1,8 +1,9 @@
-use candle_core::{quantized, DType, Device, INdexOp, IndexOp, Result, Tensor};
+use candle_core::{quantized, DType, Device, IndexOp, Result, Tensor};
 use csrc::{
-    copy_blocks, flash_attn_kv_cache_full, flash_attn_varlen_full,
-    flash_attn_varlen_with_block_table, reshape_and_cache_flash, swap_blocks,
+    copy_blocks, flash_attn_kv_cache_full, flash_attn_varlen_with_block_table,
+    reshape_and_cache_flash, swap_blocks,
 };
+use std::collections::HashMap;
 
 /// `FlashAttentionDecodingMetadata` - Structure wrapping the metadata
 /// required for running flash and paged attention kernels for decoding
@@ -39,7 +40,7 @@ pub struct FlashAttentionPrefillMetadata {
     /// in the KV cache. Each block can contain up to `block_size` tokens.
     ///
     /// It is of shape `[batch_size, max_blocks_per_sequence]`
-    pub block_tables: Tensor,
+    pub block_tables: Option<Tensor>,
     /// The maximum query length for the current batch
     /// sequences. It is `None` if it is a decoding
     pub max_query_length: Option<usize>,
@@ -148,7 +149,7 @@ impl FlashAttention {
                 "number of heads {num_heads} must divide number of kv heads {num_kv_heads}"
             )
         }
-        if !Self::supported_head_sizes().contains(&head_dim) {
+        if !Self::supported_head_sizes().contains(&(head_dim as u32)) {
             candle_core::bail!("head_dim {head_dim} is not supported")
         }
         Ok(Self {
@@ -188,10 +189,13 @@ impl FlashAttention {
         head_size: usize,
     ) -> Result<(Tensor, Tensor)> {
         if kv_cache.dims().len() != 5 {
-            candle_core::bail!("KV cache must have rank 5 (got {})", kv_cache.shape().len())
+            candle_core::bail!(
+                "KV cache must have rank 5 (got {})",
+                kv_cache.shape().dims().len()
+            )
         }
 
-        let [cache_size, num_blocks, block_size, num_kv_heads, head_size] = kv_cache.dims()?;
+        let [cache_size, num_blocks, block_size, num_kv_heads, head_size] = kv_cache.dims();
         if cache_size != 2 {
             candle_core::bail!("KV cache must have cache_size 2 (got {cache_size})")
         }
@@ -228,10 +232,7 @@ impl FlashAttention {
     }
 
     /// Initiates a copy blocks operation on the current CUDA device
-    pub fn copy_blocks(
-        kv_caches: &mut Vec<Tensor>,
-        block_mapping: Tensor,
-    ) -> Result<(), CandleError> {
+    pub fn copy_blocks(kv_caches: &mut Vec<Tensor>, block_mapping: Tensor) -> Result<()> {
         let key_caches = kv_caches
             .iter_mut()
             .map(|kv_cache| kv_cache.i(0)?.unsqueeze(0))
@@ -244,7 +245,7 @@ impl FlashAttention {
             .collect::<Result<Vec<_>>>()?
             .iter_mut()
             .collect();
-        unsafe { copy_blocks(key_caches, value_caches, block_mapping) }
+        unsafe { copy_blocks(&key_caches, &value_caches, block_mapping) }
     }
 
     /// Flash attention forward pass
@@ -301,7 +302,7 @@ impl FlashAttention {
 
         // Reshape the input keys and values and store them in the cache.
         let (k_cache, v_cache) = self.split_kv_cache(kv_cache, self.num_kv_heads, self.head_dim)?;
-        reshape_and_cache_flash(&q, &v, &k_cache, &v_cache, slot_mapping);
+        reshape_and_cache_flash(&q, &v, &k_cache, &v_cache, &attention_metadata.slot_mapping);
 
         let num_prefill_tokens = attention_metadata.num_prefill_tokens;
         let num_decoding_tokens = attention_metadata.num_decoding_tokens;
@@ -325,16 +326,18 @@ impl FlashAttention {
         let mut output = Tensor::zeros(q.shape(), q.dtype(), &self.device)?;
 
         if let Some(prefill_metadata) = &attention_metadata.prefill_metadata {
-            if prefill_metadata.block_tables.is_none()
-                || prefill_metadata.block_tables.num_elements() == 0
+            if prefill_metadata
+                .block_tables
+                .map(|bt| bt.elem_count() == 0)
+                .unwrap_or(true)
             {
                 // This is the case in which we have new incoming prompts,
                 // to which there is no previous query, key and cache to reuse.
                 let sequence_start_locations = prefill_metadata
                     .sequence_start_locations
                     .as_ref()
-                    .ok_or(candle_core::Error::msg(
-                    "Missing sequence start locations tensor for prefill inference",
+                    .ok_or(candle_core::Error::Msg(
+                    "Missing sequence start locations tensor for prefill inference".into(),
                 ))?;
                 let out = flash_attn_varlen_with_block_table(
                     &q,
@@ -353,24 +356,42 @@ impl FlashAttention {
                 output.slice_assign(&[..num_prefill_tokens], &out)?;
             } else {
                 // We support prefix enabled attention, in which a block table is provided.
-                if prefill_metadata.sequence_lengths.is_none() {
+                let sequence_lengths = if let Some(sequence_lengths) =
+                    prefill_metadata.sequence_lengths
+                {
+                    sequence_lengths
+                } else {
                     candle_core::bail!("Missing sequence lengths tensor for prefill inference, with prefix enabled attention")
-                }
+                };
                 let max_sequence_length_k = prefill_metadata
                     .sequence_lengths
                     .map(|t| t.max(0))
                     .transpose()?
-                    .unwrap_or(0)
-                    .to_vec0::<i64>()?;
+                    .map(|t| t.to_scalar::<i64>()? as usize)
+                    .unwrap_or(0);
+                let query_start_locations = if let Some(query_start_locations) =
+                    prefill_metadata.query_start_locations
+                {
+                    query_start_locations
+                } else {
+                    candle_core::bail!("Missing query start locations tensor for prefill inference, with prefix enabled attention")
+                };
+                let sequence_start_locations = if let Some(sequence_start_locations) =
+                    prefill_metadata.sequence_start_locations
+                {
+                    sequence_start_locations
+                } else {
+                    candle_core::bail!("Missing sequence start locations tensor for prefill inference, with prefix enabled attention")
+                };
                 let out = flash_attn_varlen_with_block_table(
                     &q,
                     &k_cache,
                     &v_cache,
                     self.alibi_slopes,
-                    prefill_metadata.query_start_locations,
-                    prefill_metadata.sequence_start_locations,
+                    &query_start_locations,
+                    &sequence_start_locations,
                     prefill_metadata.max_prefill_sequence_length,
-                    max_sequence_length_k as usize,
+                    max_sequence_length_k,
                     self.softmax_scale,
                     self.sliding_window,
                     None,
@@ -530,7 +551,7 @@ mod tests {
             context_lengths: None,
             slot_mapping: Tensor::zeros((15,), DType::I64, &device).unwrap(),
             prefill_metadata: Some(FlashAttentionPrefillMetadata {
-                block_tables: Tensor::zeros((1, 10), DType::I64, &device).unwrap(),
+                block_tables: Some(Tensor::zeros((1, 10), DType::I64, &device).unwrap()),
                 max_query_length: Some(10),
                 max_prefill_sequence_length: 10,
                 query_start_locations: Some(Tensor::zeros((2,), DType::I64, &device).unwrap()),

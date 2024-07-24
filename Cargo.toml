@@ -8,4 +8,8 @@ edition = "2021"
 
 [dependencies]
 candle-core = "0.6.0"
+candle-nn = "0.6.0"
+candle-transformers = "0.6.0"
 csrc = { path = "csrc" }
+serde = { version = "1.0.204", features = ["derive"] }
+tracing = "0.1.40"
