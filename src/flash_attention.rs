@@ -1,5 +1,8 @@
-use candle_core::{DType, Device, INdexOp, IndexOp, Result, Tensor};
-use csrc::{copy_blocks, swap_blocks};
+use candle_core::{quantized, DType, Device, INdexOp, IndexOp, Result, Tensor};
+use csrc::{
+    copy_blocks, flash_attn_kv_cache_full, flash_attn_varlen_full,
+    flash_attn_varlen_with_block_table, reshape_and_cache_flash, swap_blocks,
+};
 
 /// `FlashAttentionDecodingMetadata` - Structure wrapping the metadata
 /// required for running flash and paged attention kernels for decoding
@@ -13,7 +16,7 @@ pub struct FlashAttentionDecodingMetadata {
     /// in the KV cache. Each block can contain up to `block_size` tokens.
     ///
     /// It is of shape `[batch_size, max_blocks_per_sequence]`
-    pub block_tables: Tensor,
+    pub block_tables: Option<Tensor>,
     /// The maximum decoding sequence length for the current batch.
     /// It is `0` if there are only prefill sequences.
     pub max_decoding_sequence_length: usize,
@@ -51,7 +54,7 @@ pub struct FlashAttentionPrefillMetadata {
     /// the batch, used to index into sequence. E.g., if the sequence length is
     /// [4, 6], it is [0, 4, 10]. It is of shape `[batch_size + 1,]`
     pub sequence_start_locations: Option<Tensor>,
-        /// The sequence length per sequence, as a tensor.
+    /// The sequence length per sequence, as a tensor.
     /// Sequence length means the computed
     /// tokens + new tokens `None` if it is a decoding,
     /// of shape `[batch_size,]`
@@ -72,6 +75,10 @@ pub struct FlashAttentionMetadata {
     pub decoding_metadata: Option<FlashAttentionDecodingMetadata>,
     /// Flash attention prefill metadata
     pub prefill_metadata: Option<FlashAttentionPrefillMetadata>,
+    /// Number of prefill tokens
+    pub num_prefill_tokens: usize,
+    /// Number of decoding tokens
+    pub num_decoding_tokens: usize,
 }
 
 /// Flash attention
@@ -114,10 +121,9 @@ pub struct FlashAttention {
     pub softmax_scale: f32,
     /// Alibi slopes,
     pub alibi_slopes: Option<Tensor>,
-    /// Sliding window, for local attention
-    /// with both left and right sliding
-    /// local window size
-    pub sliding_window: (i64, i64),
+    /// Sliding window, for local attention,
+    /// only supports causal sliding window
+    pub sliding_window: Option<usize>,
     /// Key and value cache dtype
     pub kv_cache_dtype: DType,
     /// Device, in most cases it should be
@@ -202,8 +208,8 @@ impl FlashAttention {
             )
         }
 
-        let key_cache = kv_cache.i(0)?.unsqueeze(0)?;
-        let value_cache = kv_cache.i(1)?.unsqueeze(0)?;
+        let key_cache = kv_cache.i(0)?.squeeze(0)?;
+        let value_cache = kv_cache.i(1)?.squeeze(0)?;
 
         Ok((key_cache, value_cache))
     }
@@ -241,6 +247,19 @@ impl FlashAttention {
         unsafe { copy_blocks(key_caches, value_caches, block_mapping) }
     }
 
+    /// Flash attention forward pass
+    ///
+    /// # Arguments
+    ///
+    /// * `q` - Query tensor with shape `[num_tokens, num_heads * head_size]`
+    /// * `k` - Key tensor with shape `[num_tokens, num_kv_heads * head_size]`
+    /// * `v` - Value tensor with shape `[num_tokens, num_kv_heads * head_size]`
+    /// * `kv_cache` - KV cache tensor with shape `[2, num_blocks, block_size, num_kv_heads, head_size]`
+    /// * `attention_metadata` - Metadata for flash attention
+    ///
+    /// # Returns
+    ///
+    /// * `shape` - [num_tokens, num_heads * head_size]
     fn forward(
         &mut self,
         q: &Tensor,
@@ -249,5 +268,135 @@ impl FlashAttention {
         kv_cache: &Tensor,
         attention_metadata: FlashAttentionMetadata,
     ) -> Result<Tensor> {
+        let (q_num_tokens, q_hidden_size) = q.dims2()?;
+        let (k_num_tokens, k_hidden_size) = k.dims2()?;
+        let (v_num_tokens, v_hidden_size) = v.dims2()?;
+
+        if q_num_tokens != k_num_tokens || q_num_tokens != v_num_tokens {
+            candle_core::bail!(
+                "query, key, and value must have the same number of tokens (got {q_num_tokens}, {k_num_tokens}, {v_num_tokens})"
+            )
+        }
+        if k_hidden_size != v_hidden_size {
+            candle_core::bail!(
+                "key and value must have the same hidden size (got {k_hidden_size}, {v_hidden_size})"
+            )
+        }
+        if q_hidden_size != self.num_heads * self.head_dim {
+            candle_core::bail!(
+                "query must have hidden size {} (got {q_hidden_size})",
+                self.num_heads * self.head_dim
+            )
+        }
+        if k_hidden_size != self.num_kv_heads * self.head_dim {
+            candle_core::bail!(
+                "key must have hidden size {} (got {k_hidden_size})",
+                self.num_kv_heads * self.head_dim
+            )
+        }
+
+        let q = q.reshape(&[q_num_tokens, self.num_heads, self.head_dim])?;
+        let k = k.reshape(&[k_num_tokens, self.num_kv_heads, self.head_dim])?;
+        let v = v.reshape(&[v_num_tokens, self.num_kv_heads, self.head_dim])?;
+
+        // Reshape the input keys and values and store them in the cache.
+        let (k_cache, v_cache) = self.split_kv_cache(kv_cache, self.num_kv_heads, self.head_dim)?;
+        reshape_and_cache_flash(&q, &v, &k_cache, &v_cache, slot_mapping);
+
+        let num_prefill_tokens = attention_metadata.num_prefill_tokens;
+        let num_decoding_tokens = attention_metadata.num_decoding_tokens;
+
+        if k_num_tokens != num_prefill_tokens + num_decoding_tokens {
+            candle_core::bail!(
+                "query must have number of tokens {} (got {})",
+                num_prefill_tokens + num_decoding_tokens,
+                q_num_tokens
+            )
+        }
+
+        // Query for decode
+        // KV is not needed because it is already cached
+        let q = q.i(num_prefill_tokens..)?;
+        // QKV for prefill
+        let q = q.i(..num_prefill_tokens)?;
+        let k = k.i(..num_prefill_tokens)?;
+        let v = v.i(..num_prefill_tokens)?;
+
+        let mut output = Tensor::zeros(q.shape(), q.dtype(), &self.device)?;
+
+        if let Some(prefill_metadata) = &attention_metadata.prefill_metadata {
+            if prefill_metadata.block_tables.is_none()
+                || prefill_metadata.block_tables.num_elements() == 0
+            {
+                // This is the case in which we have new incoming prompts,
+                // to which there is no previous query, key and cache to reuse.
+                let sequence_start_locations = prefill_metadata
+                    .sequence_start_locations
+                    .as_ref()
+                    .ok_or(candle_core::Error::msg(
+                    "Missing sequence start locations tensor for prefill inference",
+                ))?;
+                let out = flash_attn_varlen_with_block_table(
+                    &q,
+                    &k,
+                    &v,
+                    self.alibi_slopes,
+                    sequence_start_locations,
+                    sequence_start_locations,
+                    prefill_metadata.max_prefill_sequence_length,
+                    prefill_metadata.max_prefill_sequence_length,
+                    self.softmax_scale,
+                    self.sliding_window,
+                    None,
+                    None,
+                )?;
+                output.slice_assign(&[..num_prefill_tokens], &out)?;
+            } else {
+                // We support prefix enabled attention, in which a block table is provided.
+                if prefill_metadata.sequence_lengths.is_none() {
+                    candle_core::bail!("Missing sequence lengths tensor for prefill inference, with prefix enabled attention")
+                }
+                let max_sequence_length_k = prefill_metadata
+                    .sequence_lengths
+                    .map(|t| t.max(0))
+                    .transpose()?
+                    .unwrap_or(0)
+                    .to_vec0::<i64>()?;
+                let out = flash_attn_varlen_with_block_table(
+                    &q,
+                    &k_cache,
+                    &v_cache,
+                    self.alibi_slopes,
+                    prefill_metadata.query_start_locations,
+                    prefill_metadata.sequence_start_locations,
+                    prefill_metadata.max_prefill_sequence_length,
+                    max_sequence_length_k as usize,
+                    self.softmax_scale,
+                    self.sliding_window,
+                    None,
+                    Some(prefill_metadata.block_tables),
+                )?;
+                output.slice_assign(&[..num_prefill_tokens], &out)?;
+            }
+        }
+
+        if let Some(decoding_metadata) = &attention_metadata.decoding_metadata {
+            // Decoding inference forward pass
+            let out = flash_attn_kv_cache_full(
+                &q,
+                &k_cache,
+                &v_cache,
+                self.alibi_slopes,
+                self.softmax_scale,
+                self.sliding_window,
+                None,
+                decoding_metadata.block_tables,
+                decoding_metadata.sequence_lengths,
+                None,
+            )?;
+            output.slice_assign(&[num_prefill_tokens..], &out)?;
+        }
+
+        Ok(output)
     }
 }

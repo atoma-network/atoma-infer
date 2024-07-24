@@ -305,7 +305,37 @@ unsafe fn copy_blocks_t<
 ///  * `key_cache` - A `Tensor` of shape `[num_blocks, block_size, num_heads, head_size]`.
 ///  * `value_cache` - A `Tensor` of shape `[num_blocks, block_size, num_heads, head_size]`.
 ///  * `slot_mapping` - A `Tensor` of shape `[num_tokens]`.
-pub fn reshape_and_cache_flash_t<
+pub fn reshape_and_cache_flash(
+    key: &Tensor,
+    value: &Tensor,
+    key_cache: &Tensor,
+    value_cache: &Tensor,
+    slot_mapping: &Tensor,
+) -> Result<()> {
+    if key.dtype() != value.dtype()
+        || key.dtype() != key_cache.dtype()
+        || key.dtype() != value_cache.dtype()
+    {
+        candle_core::bail!("Only support f16/bf16 dtypes and key, value, key_cache and value_cache must have same dtype")
+    }
+
+    match key.dtype() {
+        DType::F16 => {
+            reshape_and_cache_flash_t::<f16>(key, value, key_cache, value_cache, slot_mapping)?
+        }
+        DType::BF16 => {
+            reshape_and_cache_flash_t::<bf16>(key, value, key_cache, value_cache, slot_mapping)?
+        }
+        _ => {
+            candle_core::bail!("Only support f16/bf16 dtypes must have same dtype")
+        }
+    }
+    Ok(())
+}
+
+/// Launches the `reshape_and_cache_kernel_flash` on the given `key_caches` and `value_caches`,
+/// respecting a slot mapping.
+fn reshape_and_cache_flash_t<
     T: candle_core::cuda_backend::CudaDType + candle_core::cuda_backend::cudarc::driver::DeviceRepr,
 >(
     key: &Tensor,
