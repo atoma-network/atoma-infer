@@ -15,7 +15,7 @@ use std::collections::HashMap;
 /// the same cuda device, or one in either cpu and the other in a cuda device.
 /// Moreover, both `src` and `dst` have shape `[num_blocks, block_size, num_kv_heads, head_size]`,
 /// where `num_blocks` is the total number of blocks available for the current device.
-pub fn swap_blocks(src: &Tensor, dst: &mut Tensor, block_mapping: HashMap<i64, i64>) -> Result<()> {
+pub fn swap_blocks(src: &Tensor, dst: &mut Tensor, block_mapping: &HashMap<i64, i64>) -> Result<()> {
     let t_size_in_bytes = src.dtype().size_in_bytes();
     // NOTE: the rhs of * should be equivalent to src.i(0)?.elem_count()
     // but in this way, we do not need to clone the underlying `Tensor`
