@@ -195,19 +195,19 @@ impl FlashAttention {
             )
         }
 
-        let [cache_size, num_blocks, block_size, num_kv_heads, head_size] = kv_cache.dims();
-        if cache_size != 2 {
+        let [cache_size, num_blocks, block_size, num_kv_heads, head_dim] = kv_cache.dims();
+        if *cache_size != 2 {
             candle_core::bail!("KV cache must have cache_size 2 (got {cache_size})")
         }
-        if num_kv_heads != self.num_kv_heads {
+        if *num_kv_heads != self.num_kv_heads {
             candle_core::bail!(
                 "KV cache must have num_heads {} (got {num_kv_heads})",
                 self.num_kv_heads
             )
         }
-        if head_size != self.head_dim {
+        if *head_dim != self.head_dim {
             candle_core::bail!(
-                "KV cache must have head_size {} (got {head_size})",
+                "KV cache must have head_dim {} (got {head_dim})",
                 self.head_dim
             )
         }
@@ -225,8 +225,7 @@ impl FlashAttention {
         dst: &mut Tensor,
         block_mapping: HashMap<i64, i64>,
     ) -> Result<()> {
-        let (src_key, src_value) =
-            self.split_kv_cache(kv_cache, self.num_kv_heads, self.head_dim)?;
+        let (src_key, src_value) = self.split_kv_cache(src, self.num_kv_heads, self.head_dim)?;
         let (dst_key, dst_value) = self.split_kv_cache(dst, self.num_kv_heads, self.head_dim)?;
         swap_blocks(src, dst, block_mapping)
     }
@@ -367,7 +366,8 @@ impl FlashAttention {
                     .sequence_lengths
                     .map(|t| t.max(0))
                     .transpose()?
-                    .map(|t| t.to_scalar::<i64>()? as usize)
+                    .map(|t| t.to_scalar::<i64>().map(|u| u as usize))
+                    .transpose()?
                     .unwrap_or(0);
                 let query_start_locations = if let Some(query_start_locations) =
                     prefill_metadata.query_start_locations
@@ -395,7 +395,7 @@ impl FlashAttention {
                     self.softmax_scale,
                     self.sliding_window,
                     None,
-                    Some(prefill_metadata.block_tables),
+                    prefill_metadata.block_tables,
                 )?;
                 output.slice_assign(&[..num_prefill_tokens], &out)?;
             }

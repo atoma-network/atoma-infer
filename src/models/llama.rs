@@ -4,6 +4,8 @@ use candle_transformers::models::with_tracing::{linear_no_bias as linear, Linear
 use serde::Serialize;
 use std::collections::HashMap;
 
+use crate::flash_attention::FlashAttention;
+
 /// Maximum input sequence token length
 const MAX_SEQ_LEN: usize = 4096;
 
@@ -145,5 +147,5 @@ struct CausalSelfAttention {
     span: tracing::Span,
     span_rot: tracing::Span,
     cos_sin_cache: Cache,
-    attention: PagedAttention,
+    attention: FlashAttention,
 }
