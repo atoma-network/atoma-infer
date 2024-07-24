@@ -79,4 +79,20 @@ extern "C" {
         numel_per_block: i64,
         stream: *mut c_void,
     );
+
+    pub(crate) fn reshape_and_cache_flash(
+        key: *const c_void,
+        value: *const c_void,
+        key_cache: *const c_void,
+        value_cache: *const c_void,
+        slot_mapping: *const i64,
+        block_stride: i64,
+        num_tokens: i64,
+        num_heads: i64,
+        head_size: i64,
+        block_size: i64,
+        key_stride: i64,
+        value_stride: i64,
+        dtype: i32,
+    );
 }
