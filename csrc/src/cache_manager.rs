@@ -302,8 +302,8 @@ unsafe fn copy_blocks_t<
 ///
 ///  * `key` - A `Tensor` of shape `[num_tokens, num_heads, head_size]`.
 ///  * `value` - A `Tensor` of shape `[num_tokens, num_heads, head_size]`.
-///  * `key_cache` - A `Tensor` of shape `[num_blocks, num_heads, head_size, block_size]`.
-///  * `value_cache` - A `Tensor` of shape `[num_blocks, num_heads, head_size, block_size]`.
+///  * `key_cache` - A `Tensor` of shape `[num_blocks, block_size, num_heads, head_size]`.
+///  * `value_cache` - A `Tensor` of shape `[num_blocks, block_size, num_heads, head_size]`.
 ///  * `slot_mapping` - A `Tensor` of shape `[num_tokens]`.
 pub fn reshape_and_cache_flash_t<
     T: candle_core::cuda_backend::CudaDType + candle_core::cuda_backend::cudarc::driver::DeviceRepr,
