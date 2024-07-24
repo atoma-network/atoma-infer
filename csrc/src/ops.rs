@@ -168,7 +168,7 @@ impl<'a> InplaceOp1 for SwapBlockCpuToGpuOp<'a> {
 }
 
 /// Swap block operation for two
-/// tensors stored on a source cuda 
+/// tensors stored on a source cuda
 /// device and on a destination cpu
 /// device, respectively
 pub struct SwapBlockGpuToCpuOp<'a> {
