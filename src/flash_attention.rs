@@ -223,7 +223,7 @@ impl FlashAttention {
         &self,
         src: &Tensor,
         dst: &mut Tensor,
-        block_mapping: HashMap<i64, i64>,
+        block_mapping: &HashMap<i64, i64>,
     ) -> Result<()> {
         let (src_key, src_value) = self.split_kv_cache(src, self.num_kv_heads, self.head_dim)?;
         let (mut dst_key, mut dst_value) =
