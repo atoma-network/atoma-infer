@@ -363,25 +363,25 @@ pub fn reshape_and_cache_flash_t<
     }
     if [num_blocks, block_size, num_heads, head_size] != key_cache.dims() {
         candle_core::bail!(
-            "Only support key_cache with shape [num_blocks, num_heads, head_size, block_size] (got {:?})",
+            "Only support key_cache with shape [{num_blocks}, {num_heads}, {head_size}, {block_size}] (got {:?})",
             key_cache.dims()
         )
     }
     if [num_blocks, block_size, num_heads, head_size] != value_cache.dims() {
         candle_core::bail!(
-            "Only support value_cache with shape [num_blocks, block_size, num_heads, head_size] (got {:?})",
+            "Only support value_cache with shape [{num_blocks}, {block_size}, {num_heads}, {head_size}] (got {:?})",
             value_cache.dims()
         )
     }
     if [num_tokens, num_heads, head_size] != value.dims() {
         candle_core::bail!(
-            "Only support value with shape [num_tokens, num_heads, head_size] (got {:?})",
+            "Only support value with shape [{num_tokens}, {num_heads}, {head_size}] (got {:?})",
             value.dims()
         )
     }
     if (num_tokens) != slot_mapping.dims1()? {
         candle_core::bail!(
-            "Only support slot_mapping with shape [num_tokens] (got {:?})",
+            "Only support slot_mapping with shape [{num_tokens}] (got {:?})",
             slot_mapping.dims1()
         )
     }
