@@ -6,6 +6,9 @@
 #include <map>
 #include <vector>
 
+typedef unsigned short uint16_t;
+typedef unsigned long uint32_t;
+
 namespace vllm {
 
 // Grid: (num_layers, num_pairs)

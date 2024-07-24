@@ -400,3 +400,166 @@ impl FlashAttention {
         Ok(output)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use candle_core::{DType, Device, Tensor};
+
+    #[test]
+    fn test_new() {
+        let device = Device::new_cuda(0).unwrap();
+        let result = FlashAttention::new(8, 4, 64, 1.0, None, None, DType::F32, device);
+
+        assert!(result.is_ok());
+
+        let flash_attention = result.unwrap();
+
+        assert_eq!(flash_attention.num_heads, 8);
+        assert_eq!(flash_attention.num_kv_heads, 4);
+        assert_eq!(flash_attention.num_queries_per_kv, 2);
+        assert_eq!(flash_attention.head_dim, 64);
+        assert_eq!(flash_attention.softmax_scale, 1.0);
+        assert_eq!(flash_attention.kv_cache_dtype, DType::F32);
+    }
+
+    #[test]
+    fn test_new_invalid_heads() {
+        let device = Device::Cpu;
+        let result = FlashAttention::new(7, 4, 64, 1.0, None, None, DType::F32, device);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_new_invalid_head_dim() {
+        let device = Device::Cpu;
+        let result = FlashAttention::new(8, 4, 65, 1.0, None, None, DType::F32, device);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_supported_head_sizes() {
+        let sizes = FlashAttention::supported_head_sizes();
+        assert_eq!(sizes, vec![64, 80, 96, 112, 128, 192, 256]);
+    }
+
+    #[test]
+    fn test_get_kv_cache_shape() {
+        let shape = FlashAttention::get_kv_cache_shape(10, 32, 4, 64);
+        assert_eq!(shape, vec![2, 10, 8192]);
+    }
+
+    #[test]
+    fn test_split_kv_cache() {
+        let device = Device::Cpu;
+        let flash_attention =
+            FlashAttention::new(8, 4, 64, 1.0, None, None, DType::F32, device.clone()).unwrap();
+
+        let kv_cache = Tensor::zeros((2, 10, 32, 4, 64), DType::F32, &device).unwrap();
+        let result = flash_attention.split_kv_cache(&kv_cache, 4, 64);
+
+        assert!(result.is_ok());
+
+        let (key_cache, value_cache) = result.unwrap();
+
+        assert_eq!(key_cache.shape(), &[10, 32, 4, 64]);
+        assert_eq!(value_cache.shape(), &[10, 32, 4, 64]);
+    }
+
+    #[test]
+    fn test_split_kv_cache_invalid_shape() {
+        let device = Device::Cpu;
+        let flash_attention =
+            FlashAttention::new(8, 4, 64, 1.0, None, None, DType::F32, device.clone()).unwrap();
+
+        let kv_cache = Tensor::zeros((2, 10, 32, 4), DType::F32, &device).unwrap();
+        let result = flash_attention.split_kv_cache(&kv_cache, 4, 64);
+        assert!(result.is_err());
+    }
+
+    // Mock external functions
+    fn mock_flash_attn_varlen_with_block_table(
+        _q: &Tensor,
+        _k: &Tensor,
+        _v: &Tensor,
+        _alibi_slopes: Option<Tensor>,
+        _sequence_start_locations: &Tensor,
+        _max_sequence_length_q: usize,
+        _max_sequence_length_k: usize,
+        _softmax_scale: f32,
+        _sliding_window: Option<usize>,
+        _block_tables: Option<Tensor>,
+    ) -> Result<Tensor> {
+        Tensor::ones((10, 8, 64), DType::F32, &Device::Cpu)
+    }
+
+    fn mock_flash_attn_kv_cache_full(
+        _q: &Tensor,
+        _k_cache: &Tensor,
+        _v_cache: &Tensor,
+        _alibi_slopes: Option<Tensor>,
+        _softmax_scale: f32,
+        _sliding_window: Option<usize>,
+        _block_tables: Option<Tensor>,
+        _sequence_lengths: Option<Tensor>,
+    ) -> Result<Tensor> {
+        Tensor::ones((5, 8, 64), DType::F32, &Device::Cpu)
+    }
+
+    #[test]
+    fn test_forward() {
+        let device = Device::Cpu;
+        let mut flash_attention = FlashAttention {
+            num_heads: 8,
+            num_kv_heads: 4,
+            num_queries_per_kv: 2,
+            head_dim: 64,
+            softmax_scale: 1.0,
+            alibi_slopes: None,
+            sliding_window: None,
+            kv_cache_dtype: DType::F32,
+            device: device.clone(),
+        };
+
+        let q = Tensor::zeros((15, 512), DType::F32, &device).unwrap();
+        let k = Tensor::zeros((15, 256), DType::F32, &device).unwrap();
+        let v = Tensor::zeros((15, 256), DType::F32, &device).unwrap();
+        let kv_cache = Tensor::zeros((2, 10, 32, 4, 64), DType::F32, &device).unwrap();
+
+        let attention_metadata = FlashAttentionMetadata {
+            context_lengths: None,
+            slot_mapping: Tensor::zeros((15,), DType::I64, &device).unwrap(),
+            prefill_metadata: Some(FlashAttentionPrefillMetadata {
+                block_tables: Tensor::zeros((1, 10), DType::I64, &device).unwrap(),
+                max_query_length: Some(10),
+                max_prefill_sequence_length: 10,
+                query_start_locations: Some(Tensor::zeros((2,), DType::I64, &device).unwrap()),
+                sequence_start_locations: Some(Tensor::zeros((2,), DType::I64, &device).unwrap()),
+                sequence_lengths: Some(Tensor::zeros((1,), DType::I64, &device).unwrap()),
+            }),
+            decoding_metadata: Some(FlashAttentionDecodingMetadata {
+                block_tables: Some(Tensor::zeros((1, 10), DType::I64, &device).unwrap()),
+                max_decoding_sequence_length: 5,
+                sequence_lengths: Some(Tensor::zeros((1,), DType::I64, &device).unwrap()),
+            }),
+            num_prefill_tokens: 10,
+            num_decoding_tokens: 5,
+        };
+
+        // Replace the external function calls with our mocks
+        let original_flash_attn_varlen = flash_attn_varlen_with_block_table;
+        flash_attn_varlen_with_block_table = mock_flash_attn_varlen_with_block_table;
+        let original_flash_attn_kv_cache = flash_attn_kv_cache_full;
+        flash_attn_kv_cache_full = mock_flash_attn_kv_cache_full;
+
+        let result = flash_attention.forward(&q, &k, &v, &kv_cache, attention_metadata);
+
+        // Restore the original function calls
+        flash_attn_varlen_with_block_table = original_flash_attn_varlen;
+        flash_attn_kv_cache_full = original_flash_attn_kv_cache;
+
+        assert!(result.is_ok());
+        let output = result.unwrap();
+        assert_eq!(output.shape(), &[15, 512]);
+    }
+}
