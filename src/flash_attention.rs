@@ -195,7 +195,7 @@ impl FlashAttention {
             )
         }
 
-        let [cache_size, num_blocks, block_size, num_kv_heads, head_dim] = kv_cache.dims();
+        let (cache_size, num_blocks, block_size, num_kv_heads, head_dim) = kv_cache.dims5()?;
         if *cache_size != 2 {
             candle_core::bail!("KV cache must have cache_size 2 (got {cache_size})")
         }
@@ -226,24 +226,24 @@ impl FlashAttention {
         block_mapping: HashMap<i64, i64>,
     ) -> Result<()> {
         let (src_key, src_value) = self.split_kv_cache(src, self.num_kv_heads, self.head_dim)?;
-        let (dst_key, dst_value) = self.split_kv_cache(dst, self.num_kv_heads, self.head_dim)?;
-        swap_blocks(src, dst, block_mapping)
+        let (mut dst_key, mut dst_value) =
+            self.split_kv_cache(dst, self.num_kv_heads, self.head_dim)?;
+        swap_blocks(&src_key, &mut dst_key, block_mapping)?;
+        swap_blocks(&src_value, &mut dst_value, block_mapping)
     }
 
     /// Initiates a copy blocks operation on the current CUDA device
     pub fn copy_blocks(kv_caches: &mut Vec<Tensor>, block_mapping: Tensor) -> Result<()> {
-        let key_caches = kv_caches
+        let mut key_caches = kv_caches
             .iter_mut()
-            .map(|kv_cache| kv_cache.i(0)?.unsqueeze(0))
-            .collect::<Result<Vec<_>>>()?
+            .map(|kv_cache| kv_cache.i(0)?.squeeze(0))
+            .collect::<Result<Vec<_>>>()?;
+        let key_caches = key_caches.iter_mut().collect();
+        let mut value_caches = kv_caches
             .iter_mut()
-            .collect();
-        let value_caches = kv_caches
-            .iter_mut()
-            .map(|kv_cache| kv_cache.i(1)?.unsqueeze(0))
-            .collect::<Result<Vec<_>>>()?
-            .iter_mut()
-            .collect();
+            .map(|kv_cache| kv_cache.i(1)?.squeeze(0))
+            .collect::<Result<Vec<_>>>()?;
+        let value_caches = value_caches.iter_mut().collect();
         unsafe { copy_blocks(&key_caches, &value_caches, block_mapping) }
     }
 
@@ -261,7 +261,7 @@ impl FlashAttention {
     ///
     /// * `shape` - [num_tokens, num_heads * head_size]
     fn forward(
-        &mut self,
+        self,
         q: &Tensor,
         k: &Tensor,
         v: &Tensor,
@@ -322,11 +322,12 @@ impl FlashAttention {
         let k = k.i(..num_prefill_tokens)?;
         let v = v.i(..num_prefill_tokens)?;
 
-        let mut output = Tensor::zeros(q.shape(), q.dtype(), &self.device)?;
+        let output = Tensor::zeros(q.shape(), q.dtype(), &self.device)?;
 
         if let Some(prefill_metadata) = &attention_metadata.prefill_metadata {
             if prefill_metadata
                 .block_tables
+                .as_ref()
                 .map(|bt| bt.elem_count() == 0)
                 .unwrap_or(true)
             {
@@ -362,8 +363,7 @@ impl FlashAttention {
                 } else {
                     candle_core::bail!("Missing sequence lengths tensor for prefill inference, with prefix enabled attention")
                 };
-                let max_sequence_length_k = prefill_metadata
-                    .sequence_lengths
+                let max_sequence_length_k = sequence_lengths
                     .map(|t| t.max(0))
                     .transpose()?
                     .map(|t| t.to_scalar::<i64>().map(|u| u as usize))
@@ -483,8 +483,8 @@ mod tests {
 
         let (key_cache, value_cache) = result.unwrap();
 
-        assert_eq!(key_cache.shape(), &[10, 32, 4, 64]);
-        assert_eq!(value_cache.shape(), &[10, 32, 4, 64]);
+        assert_eq!(key_cache.shape().dims(), &[10, 32, 4, 64]);
+        assert_eq!(value_cache.shape().dims(), &[10, 32, 4, 64]);
     }
 
     #[test]
@@ -576,8 +576,8 @@ mod tests {
         let result = flash_attention.forward(&q, &k, &v, &kv_cache, attention_metadata);
 
         // Restore the original function calls
-        flash_attn_varlen_with_block_table = original_flash_attn_varlen;
-        flash_attn_kv_cache_full = original_flash_attn_kv_cache;
+        let flash_attn_varlen_with_block_table = original_flash_attn_varlen;
+        let flash_attn_kv_cache_full = original_flash_attn_kv_cache;
 
         assert!(result.is_ok());
         let output = result.unwrap();
