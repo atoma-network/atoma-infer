@@ -563,12 +563,12 @@ mod reshape_and_cache {
         let key = create_random_tensor(&[num_tokens, num_heads, head_size], &device, DType::F16);
         let value = create_random_tensor(&[num_tokens, num_heads, head_size], &device, DType::F16);
         let key_cache = create_random_tensor(
-            &[num_blocks, num_heads, head_size, block_size],
+            &[num_blocks, block_size, num_heads, head_size],
             &device,
             DType::F16,
         );
         let value_cache = create_random_tensor(
-            &[num_blocks, num_heads, head_size, block_size],
+            &[num_blocks, block_size, num_heads, head_size],
             &device,
             DType::F16,
         );
@@ -593,12 +593,12 @@ mod reshape_and_cache {
         let key = create_random_tensor(&[num_tokens, num_heads, head_size], &device, DType::BF16);
         let value = create_random_tensor(&[num_tokens, num_heads, head_size], &device, DType::BF16);
         let key_cache = create_random_tensor(
-            &[num_blocks, num_heads, head_size, block_size],
+            &[num_blocks, block_size, num_heads, head_size],
             &device,
             DType::BF16,
         );
         let value_cache = create_random_tensor(
-            &[num_blocks, num_heads, head_size, block_size],
+            &[num_blocks, block_size, num_heads, head_size],
             &device,
             DType::BF16,
         );
