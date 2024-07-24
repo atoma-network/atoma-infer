@@ -1,28 +1,48 @@
 use candle_core::{DType, Device, INdexOp, IndexOp, Result, Tensor};
 use csrc::{copy_blocks, swap_blocks};
 
-/// `FlashAttentionMetadata` - Structure wrapping the metadata
-/// required for running flash and paged attention kernels
-pub struct FlashAttentionMetadata {
-    /// The sequence length per sequence.
-    /// Sequence length means the computed 
-    /// tokens + new tokens and is empty
-    /// if it is a decoding
-    pub sequence_lengths: Vec<usize>,
+/// `FlashAttentionDecodingMetadata` - Structure wrapping the metadata
+/// required for running flash and paged attention kernels for decoding
+/// inference
+pub struct FlashAttentionDecodingMetadata {
+    /// The block tables, used for mapping each sequence id
+    /// to the list of physical blocks that have been currently
+    /// allocated for it.
+    ///
+    /// E.g., [0, 1, 2] means tokens are stored in 0th, 1st, and 2nd blocks
+    /// in the KV cache. Each block can contain up to `block_size` tokens.
+    ///
+    /// It is of shape `[batch_size, max_blocks_per_sequence]`
+    pub block_tables: Tensor,
+    /// The maximum decoding sequence length for the current batch.
+    /// It is `0` if there are only prefill sequences.
+    pub max_decoding_sequence_length: usize,
     /// The sequence length per sequence, as a tensor.
-    /// Sequence length means the computed 
-    /// tokens + new tokens `None` if it is a decoding, 
+    /// Sequence length means the computed
+    /// tokens + new tokens `None` if it is a decoding,
     /// of shape `[batch_size,]`
     pub sequence_lengths: Option<Tensor>,
+}
+
+/// `FlashAttentionPrefillMetadata` - Structure wrapping the metadata
+/// required for running flash and paged attention kernels for prefill
+/// inference
+pub struct FlashAttentionPrefillMetadata {
+    /// The block tables, used for mapping each sequence id
+    /// to the list of physical blocks that have been currently
+    /// allocated for it.
+    ///
+    /// E.g., [0, 1, 2] means tokens are stored in 0th, 1st, and 2nd blocks
+    /// in the KV cache. Each block can contain up to `block_size` tokens.
+    ///
+    /// It is of shape `[batch_size, max_blocks_per_sequence]`
+    pub block_tables: Tensor,
     /// The maximum query length for the current batch
     /// sequences. It is `None` if it is a decoding
     pub max_query_length: Option<usize>,
     /// The maximum prefill sequence length for the current batch.
     /// It is `0` if there are only decoding sequences.
     pub max_prefill_sequence_length: usize,
-    /// The maximum decoding sequence length for the current batch.
-    /// It is `0` if there are only prefill sequences.
-    pub max_decoding_sequence_length: usize,
     /// The cumulative sub-query lengths of the sequences in
     /// the batch, used to index into subquery. E.g., if the sub-query length
     /// is [4, 6], it is [0, 4, 10]. It is of shape `[batch_size + 1,]`
@@ -31,18 +51,27 @@ pub struct FlashAttentionMetadata {
     /// the batch, used to index into sequence. E.g., if the sequence length is
     /// [4, 6], it is [0, 4, 10]. It is of shape `[batch_size + 1,]`
     pub sequence_start_locations: Option<Tensor>,
+        /// The sequence length per sequence, as a tensor.
+    /// Sequence length means the computed
+    /// tokens + new tokens `None` if it is a decoding,
+    /// of shape `[batch_size,]`
+    pub sequence_lengths: Option<Tensor>,
+}
+
+/// `FlashAttentionMetadata` - Structure wrapping the metadata
+/// required for running flash and paged attention kernels
+pub struct FlashAttentionMetadata {
     /// A tensor of context lengths (tokens that are computed
     /// so far). Of shape `[batch_size,]`
     pub context_lengths: Option<Tensor>,
-    /// The block tables, used for mapping each sequence id
-    /// to the list of physical blocks that have been currently
-    /// allocated for it. 
-    /// 
-    /// E.g., [0, 1, 2] means tokens are stored in 0th, 1st, and 2nd blocks
-    /// in the KV cache. Each block can contain up to `block_size` tokens.
-    /// 
-    /// It is of shape `[batch_size, max_blocks_per_sequence]`
-    pub block_tables: Tensor,
+    /// Slot mapping, maps each token (or element in the input sequence) to a specific slot
+    /// or segment in the cached memory. This allows for efficient access and organization
+    /// of attention computations over large sequences.
+    pub slot_mapping: Tensor,
+    /// Flash attention decoding metadata
+    pub decoding_metadata: Option<FlashAttentionDecodingMetadata>,
+    /// Flash attention prefill metadata
+    pub prefill_metadata: Option<FlashAttentionPrefillMetadata>,
 }
 
 /// Flash attention
