@@ -196,16 +196,16 @@ impl FlashAttention {
         }
 
         let (cache_size, num_blocks, block_size, num_kv_heads, head_dim) = kv_cache.dims5()?;
-        if *cache_size != 2 {
+        if cache_size != 2 {
             candle_core::bail!("KV cache must have cache_size 2 (got {cache_size})")
         }
-        if *num_kv_heads != self.num_kv_heads {
+        if num_kv_heads != self.num_kv_heads {
             candle_core::bail!(
                 "KV cache must have num_heads {} (got {num_kv_heads})",
                 self.num_kv_heads
             )
         }
-        if *head_dim != self.head_dim {
+        if head_dim != self.head_dim {
             candle_core::bail!(
                 "KV cache must have head_dim {} (got {head_dim})",
                 self.head_dim
@@ -343,7 +343,7 @@ impl FlashAttention {
                     &q,
                     &k,
                     &v,
-                    self.alibi_slopes,
+                    self.alibi_slopes.as_ref(),
                     sequence_start_locations,
                     sequence_start_locations,
                     prefill_metadata.max_prefill_sequence_length,
@@ -357,7 +357,7 @@ impl FlashAttention {
             } else {
                 // We support prefix enabled attention, in which a block table is provided.
                 let sequence_lengths = if let Some(sequence_lengths) =
-                    prefill_metadata.sequence_lengths
+                    prefill_metadata.sequence_lengths.as_ref()
                 {
                     sequence_lengths
                 } else {
@@ -365,14 +365,14 @@ impl FlashAttention {
                 };
                 let max_sequence_length_k = sequence_lengths.max(0)?.to_scalar::<i64>()? as usize;
                 let query_start_locations = if let Some(query_start_locations) =
-                    prefill_metadata.query_start_locations
+                    prefill_metadata.query_start_locations.as_ref()
                 {
                     query_start_locations
                 } else {
                     candle_core::bail!("Missing query start locations tensor for prefill inference, with prefix enabled attention")
                 };
                 let sequence_start_locations = if let Some(sequence_start_locations) =
-                    prefill_metadata.sequence_start_locations
+                    prefill_metadata.sequence_start_locations.as_ref()
                 {
                     sequence_start_locations
                 } else {
@@ -383,14 +383,14 @@ impl FlashAttention {
                     &k_cache,
                     &v_cache,
                     self.alibi_slopes,
-                    &query_start_locations,
-                    &sequence_start_locations,
+                    query_start_locations,
+                    sequence_start_locations,
                     prefill_metadata.max_prefill_sequence_length,
                     max_sequence_length_k,
                     self.softmax_scale,
                     self.sliding_window,
                     None,
-                    prefill_metadata.block_tables,
+                    prefill_metadata.block_tables.as_ref(),
                 )?;
                 output.slice_assign(&[..num_prefill_tokens], &out)?;
             }
@@ -406,8 +406,8 @@ impl FlashAttention {
                 self.softmax_scale,
                 self.sliding_window,
                 None,
-                decoding_metadata.block_tables,
-                decoding_metadata.sequence_lengths,
+                decoding_metadata.block_tables.as_ref(),
+                decoding_metadata.sequence_lengths.as_ref(),
                 None,
             )?;
             output.slice_assign(&[num_prefill_tokens..], &out)?;
@@ -498,7 +498,7 @@ mod tests {
         _q: &Tensor,
         _k: &Tensor,
         _v: &Tensor,
-        _alibi_slopes: Option<Tensor>,
+        _alibi_slopes: Option<&Tensor>,
         _sequence_start_locations: &Tensor,
         _max_sequence_length_q: usize,
         _max_sequence_length_k: usize,
@@ -513,11 +513,11 @@ mod tests {
         _q: &Tensor,
         _k_cache: &Tensor,
         _v_cache: &Tensor,
-        _alibi_slopes: Option<Tensor>,
+        _alibi_slopes: Option<&Tensor>,
         _softmax_scale: f32,
         _sliding_window: Option<usize>,
-        _block_tables: Option<Tensor>,
-        _sequence_lengths: Option<Tensor>,
+        _block_tables: Option<&Tensor>,
+        _sequence_lengths: Option<&Tensor>,
     ) -> Result<Tensor> {
         Tensor::ones((5, 8, 64), DType::F32, &Device::Cpu)
     }

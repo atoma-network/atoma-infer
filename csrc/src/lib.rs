@@ -1339,7 +1339,7 @@ pub fn flash_attn_varlen_with_block_table(
     q: &Tensor,
     k: &Tensor,
     v: &Tensor,
-    alibi_slopes: Option<Tensor>,
+    alibi_slopes: Option<&Tensor>,
     seqlens_q: &Tensor,
     seqlens_k: &Tensor,
     max_seqlen_q: usize,
@@ -1347,7 +1347,7 @@ pub fn flash_attn_varlen_with_block_table(
     softmax_scale: f32,
     window_size_left: Option<usize>,
     window_size_right: Option<usize>,
-    block_table: Option<Tensor>,
+    block_table: Option<&Tensor>,
 ) -> Result<Tensor> {
     let op = FlashAttentionVarLen {
         softmax_scale,
@@ -1355,10 +1355,10 @@ pub fn flash_attn_varlen_with_block_table(
         max_seqlen_k,
         seqlens_q: seqlens_q.clone(),
         seqlens_k: seqlens_k.clone(),
-        alibi_slopes,
+        alibi_slopes: alibi_slopes.cloned(),
         window_size_left,
         window_size_right,
-        block_table,
+        block_table: block_table.cloned(),
         seqused_k: None,
         softcap: None,
     };
@@ -1411,7 +1411,7 @@ pub fn flash_attn_varlen_full(
     q: &Tensor,
     k: &Tensor,
     v: &Tensor,
-    alibi_slopes: Option<Tensor>,
+    alibi_slopes: Option<&Tensor>,
     seqlens_q: &Tensor,
     seqlens_k: &Tensor,
     max_seqlen_q: usize,
@@ -1419,8 +1419,8 @@ pub fn flash_attn_varlen_full(
     softmax_scale: f32,
     window_size_left: Option<usize>,
     window_size_right: Option<usize>,
-    block_table: Option<Tensor>,
-    seqused_k: Option<Tensor>,
+    block_table: Option<&Tensor>,
+    seqused_k: Option<&Tensor>,
     softcap: Option<f32>,
 ) -> Result<Tensor> {
     let op = FlashAttentionVarLen {
@@ -1429,11 +1429,11 @@ pub fn flash_attn_varlen_full(
         max_seqlen_k,
         seqlens_q: seqlens_q.clone(),
         seqlens_k: seqlens_k.clone(),
-        alibi_slopes,
+        alibi_slopes: alibi_slopes.cloned(),
         window_size_left,
         window_size_right,
-        block_table,
-        seqused_k,
+        block_table: block_table.cloned(),
+        seqused_k: seqused_k.cloned(),
         softcap,
     };
     q.apply_op3(k, v, op)
@@ -1988,7 +1988,7 @@ pub fn flash_attn_kv_cache_windowed(
     q: &Tensor,
     k: &Tensor,
     v: &Tensor,
-    seqlens_k: Option<Tensor>,
+    seqlens_k: Option<&Tensor>,
     softmax_scale: f32,
     window_size_left: Option<usize>,
     window_size_right: Option<usize>,
@@ -2000,7 +2000,7 @@ pub fn flash_attn_kv_cache_windowed(
         window_size_right,
         softcap: None,
         block_table: None,
-        seqlens_k,
+        seqlens_k: seqlens_k.cloned(),
     };
     q.apply_op3(k, v, op)
 }
@@ -2028,7 +2028,7 @@ pub fn flash_attn_kv_cache_alibi(
     k: &Tensor,
     v: &Tensor,
     alibi_slopes: &Tensor,
-    seqlens_k: Option<Tensor>,
+    seqlens_k: Option<&Tensor>,
     softmax_scale: f32,
     causal: bool,
 ) -> Result<Tensor> {
@@ -2042,7 +2042,7 @@ pub fn flash_attn_kv_cache_alibi(
         window_size_right,
         softcap: None,
         block_table: None,
-        seqlens_k,
+        seqlens_k: seqlens_k.cloned(),
     };
     q.apply_op3(k, v, op)
 }
@@ -2119,21 +2119,21 @@ pub fn flash_attn_kv_cache_full(
     q: &Tensor,
     k: &Tensor,
     v: &Tensor,
-    alibi_slopes: Option<Tensor>,
+    alibi_slopes: Option<&Tensor>,
     softmax_scale: f32,
     window_size_left: Option<usize>,
     window_size_right: Option<usize>,
-    block_table: Option<Tensor>,
-    seqlens_k: Option<Tensor>,
+    block_table: Option<&Tensor>,
+    seqlens_k: Option<&Tensor>,
     softcap: Option<f32>,
 ) -> Result<Tensor> {
     let op = FlashAttentionKvCache {
         softmax_scale,
-        alibi_slopes,
+        alibi_slopes: alibi_slopes.cloned(),
         window_size_left,
         window_size_right,
-        block_table,
-        seqlens_k,
+        block_table: block_table.cloned(),
+        seqlens_k: seqlens_k.cloned(),
         softcap,
     };
     q.apply_op3(k, v, op)
