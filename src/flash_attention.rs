@@ -295,7 +295,7 @@ impl FlashAttention {
 
         // Reshape the input keys and values and store them in the cache.
         let (k_cache, v_cache) = self.split_kv_cache(kv_cache)?;
-        reshape_and_cache_flash(&q, &v, &k_cache, &v_cache, &attention_metadata.slot_mapping)?;
+        reshape_and_cache_flash(&k, &v, &k_cache, &v_cache, &attention_metadata.slot_mapping)?;
 
         let num_prefill_tokens = attention_metadata.num_prefill_tokens;
         let num_decoding_tokens = attention_metadata.num_decoding_tokens;
