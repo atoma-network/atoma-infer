@@ -498,7 +498,7 @@ mod tests {
             softmax_scale: 1.0,
             alibi_slopes: None,
             sliding_window: None,
-            kv_cache_dtype: DType::F32,
+            kv_cache_dtype: DType::BF16,
             device: device.clone(),
         };
 
