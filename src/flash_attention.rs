@@ -347,7 +347,7 @@ impl FlashAttention {
                     None,
                     None,
                 )?;
-                // output.slice_assign(&[..num_prefill_tokens, ..output.dims()[1], ..output.dims()[2]], &out)?;
+                output.slice_assign(&[..num_prefill_tokens, ..output.dims()[1], ..output.dims()[2]], &out)?;
             } else {
                 // We support prefix enabled attention, in which a block table is provided.
                 let sequence_lengths = if let Some(sequence_lengths) =
@@ -386,7 +386,8 @@ impl FlashAttention {
                     None,
                     prefill_metadata.block_tables.as_ref(),
                 )?;
-                // output.slice_assign(&[..num_prefill_tokens, ..output.dims()[1], ..output.dims()[2]], &out)?;
+                assert!(out.dtype() == DType::BF16);
+                output.slice_assign(&[..num_prefill_tokens, ..output.dims()[1], ..output.dims()[2]], &out)?;
             }
         }
 
