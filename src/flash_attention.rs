@@ -547,7 +547,7 @@ mod tests {
                         .unwrap(),
                 ),
                 max_decoding_sequence_length: 3,
-                sequence_lengths: Some(Tensor::from_vec(vec![3i64; 5], (5,), &device).unwrap()),
+                sequence_lengths: Some(Tensor::from_vec(vec![3u32; 5], (5,), &device).unwrap()),
             }),
             num_prefill_tokens: 10,
             num_decoding_tokens: 5,
