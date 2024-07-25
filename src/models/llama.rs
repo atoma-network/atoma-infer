@@ -139,7 +139,6 @@ struct CausalSelfAttention {
     num_attention_heads: usize,
     num_key_value_heads: usize,
     head_dim: usize,
-    use_flash_attn: bool,
     span: tracing::Span,
     span_rot: tracing::Span,
     cos_sin_cache: Cache,
@@ -158,7 +157,7 @@ impl CausalSelfAttention {
             candle_core::bail!(
                 "index_positions must be of shape [batch_size, sequence_length] = [{}, {}, {}, {}], got {:?}",
                 b_sz,
-                num_total_tokens,,
+                num_total_tokens,
                 num_heads,
                 hidden_size
                 input_positions.dims()
@@ -212,7 +211,7 @@ impl CausalSelfAttention {
         let q = q
             .reshape((
                 b_sz,
-                total_num_tokens,
+                num_total_tokens,
                 self.num_attention_heads,
                 self.head_dim,
             ))?
@@ -221,26 +220,26 @@ impl CausalSelfAttention {
         let k = k
             .reshape((
                 b_sz,
-                total_num_tokens,
+                num_total_tokens,
                 self.num_key_value_heads,
                 self.head_dim,
             ))?
             .transpose(1, 2)?
             .contiguous()?;
         let mut v = v
-            .reshape((b_sz, seq_len, self.num_key_value_heads, self.head_dim))?
+            .reshape((b_sz, num_total_tokens, self.num_key_value_heads, self.head_dim))?
             .transpose(1, 2)?;
 
         let q = self.apply_rotary_embed(&q, input_positions)?;
-        let mut k = self.apply_rotary_embed(&k, input_positions)?;
+        let k = self.apply_rotary_embed(&k, input_positions)?;
 
-        let k = self.repeat_kv(k)?;
-        let v = self.repeat_kv(v)?;
+        let mut k = self.repeat_kv(k)?;
+        let mut v = self.repeat_kv(v)?;
 
         // transpose the matrices back to [batch_size, num_heads, sequence_length, head_dim]
-        q = q.transpose(1, 2)?;
-        k = k.transpose(1, 2)?;
-        v = v.transpose(1, 2)?;
+        let q = q.transpose(1, 2)?;
+        let k = k.transpose(1, 2)?;
+        let v = v.transpose(1, 2)?;
 
         let softmax_scale = 1f32 / (self.head_dim as f32).sqrt();
         let o = self
@@ -281,17 +280,17 @@ impl CausalSelfAttention {
             num_attention_heads: cfg.num_attention_heads,
             num_key_value_heads: cfg.num_key_value_heads,
             head_dim: head_dim,
-            use_flash_attn: cfg.use_flash_attn,
             span,
             span_rot,
-            attention: PagedAttention::new(
+            attention: FlashAttention::new(
                 cfg.num_attention_heads,
+                cfg.num_key_value_heads,
                 head_dim,
-                1. / ((head_dim as f64).sqrt()),
                 Some(cfg.num_key_value_heads),
                 None,
-                vb.device(),
                 None,
+                dtype,
+                device.clone(),
             )?,
             cos_sin_cache: Cache::new(&cfg, device, dtype)?,
         })
@@ -411,7 +410,7 @@ impl Llama {
         kv_caches: Vec<Tensor>,
         attention_metadata: FlashAttentionMetadata,
     ) -> Result<Tensor> {
-        if x.dims() != [1, _num_total_tokens] {
+        if x.dims()[0] != 1 {
             candle_core::bail!(
                 "x must be of shape [1, _num_total_tokens], got {:?}",
                 x.dims()
@@ -495,5 +494,6 @@ mod tests {
         let mut tokenizer = candle_examples::token_output_stream::TokenOutputStream::new(tokenizer);
         println!("starting the inference loop");
         print!("{prompt}");
+
     }
 }
