@@ -527,15 +527,11 @@ mod tests {
 
         let attention_metadata = FlashAttentionMetadata {
             context_lengths: None,
-            slot_mapping: Tensor::arange(1, 15, &device)
-                .unwrap()
-                .to_dtype(DType::I64)
+            slot_mapping: Tensor::arange(1i64, 15, &device)
                 .unwrap(),
             prefill_metadata: Some(FlashAttentionPrefillMetadata {
                 block_tables: Some(
-                    Tensor::arange(0, 2, &device)
-                        .unwrap()
-                        .to_dtype(DType::I64)
+                    Tensor::arange(0i64, 2, &device)
                         .unwrap()
                         .reshape(((), 2))
                         .unwrap(),
@@ -543,29 +539,21 @@ mod tests {
                 max_query_length: Some(3),
                 max_prefill_sequence_length: 3,
                 query_start_locations: Some(
-                    Tensor::from_vec(vec![0, 5], (2,), &device)
-                        .unwrap()
-                        .to_dtype(DType::I64)
+                    Tensor::from_vec(vec![0i64, 5], (2,), &device)
                         .unwrap(),
                 ),
                 sequence_start_locations: Some(
-                    Tensor::from_vec(vec![0, 5], (2,), &device)
-                        .unwrap()
-                        .to_dtype(DType::I64)
+                    Tensor::from_vec(vec![0i64, 5], (2,), &device)
                         .unwrap(),
                 ),
                 sequence_lengths: Some(
-                    Tensor::from_vec(vec![5, 5], (2,), &device)
-                        .unwrap()
-                        .to_dtype(DType::I64)
+                    Tensor::from_vec(vec![5i64, 5], (2,), &device)
                         .unwrap(),
                 ),
             }),
             decoding_metadata: Some(FlashAttentionDecodingMetadata {
                 block_tables: Some(
                     Tensor::arange(2i64, 3, &device)
-                        .unwrap()
-                        .to_dtype(DType::I64)
                         .unwrap()
                         .reshape((2, 2))
                         .unwrap(),
