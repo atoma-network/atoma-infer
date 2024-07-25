@@ -569,7 +569,7 @@ mod tests {
             .unwrap()
             .flatten_all()
             .unwrap()
-            .to_vec1::<bool>()
+            .to_vec1::<u8>()
             .unwrap()
             .iter()
             .any(|&x| x));
