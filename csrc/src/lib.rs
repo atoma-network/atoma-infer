@@ -1890,7 +1890,7 @@ impl FlashAttentionKvCache {
         //     out_shape
         // };
 
-        // let dst = candle_core::CudaStorage::wrap_cuda_slice(dst, dev.clone());
+        let dst = candle_core::CudaStorage::wrap_cuda_slice(dst, dev.clone());
         Ok((dst, out_shape))
     }
 }
