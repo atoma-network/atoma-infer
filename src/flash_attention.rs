@@ -532,12 +532,12 @@ mod tests {
                 max_query_length: Some(3),
                 max_prefill_sequence_length: 3,
                 query_start_locations: Some(
-                    Tensor::from_vec(vec![0i64, 5], (2,), &device).unwrap(),
+                    Tensor::from_vec(vec![0u32, 5], (2,), &device).unwrap(),
                 ),
                 sequence_start_locations: Some(
-                    Tensor::from_vec(vec![0i64, 5], (2,), &device).unwrap(),
+                    Tensor::from_vec(vec![0u32, 5], (2,), &device).unwrap(),
                 ),
-                sequence_lengths: Some(Tensor::from_vec(vec![5i64, 5], (2,), &device).unwrap()),
+                sequence_lengths: Some(Tensor::from_vec(vec![5u32, 5], (2,), &device).unwrap()),
             }),
             decoding_metadata: Some(FlashAttentionDecodingMetadata {
                 block_tables: Some(
@@ -547,7 +547,7 @@ mod tests {
                         .unwrap(),
                 ),
                 max_decoding_sequence_length: 3,
-                sequence_lengths: Some(Tensor::zeros((3, 2), DType::I64, &device).unwrap()),
+                sequence_lengths: Some(Tensor::zeros((3, 2), DType::IU32, &device).unwrap()),
             }),
             num_prefill_tokens: 10,
             num_decoding_tokens: 5,
