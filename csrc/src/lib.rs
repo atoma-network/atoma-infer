@@ -1761,53 +1761,53 @@ impl FlashAttentionKvCache {
 
         let elem_count = out_shape.elem_count();
         let dst = unsafe { dev.alloc::<T>(elem_count) }.w()?;
-        // let softmax_lse = dev
-        //     .alloc_zeros::<f32>(batch_size * num_heads * seqlen_q)
-        //     .w()?;
+        let softmax_lse = dev
+            .alloc_zeros::<f32>(batch_size * num_heads * seqlen_q)
+            .w()?;
 
-        // let is_bf16 = if is_bf16 { 1 } else { 0 };
+        let is_bf16 = if is_bf16 { 1 } else { 0 };
 
-        // // Causal is the special case where window_size_right == 0 and window_size_left < 0.
-        // // Local is the more general case where window_size_right >= 0 or window_size_left >= 0.
-        // let mut is_causal = if window_size_left < 0 && window_size_right == 0 {
-        //     1
-        // } else {
-        //     0
-        // };
+        // Causal is the special case where window_size_right == 0 and window_size_left < 0.
+        // Local is the more general case where window_size_right >= 0 or window_size_left >= 0.
+        let mut is_causal = if window_size_left < 0 && window_size_right == 0 {
+            1
+        } else {
+            0
+        };
 
-        // if seqlen_q == 1 && !self.alibi_slopes.is_some() {
-        //     // is_causal = true is the same as is_causal = false, in this case
-        //     is_causal = 0;
-        // }
+        if seqlen_q == 1 && !self.alibi_slopes.is_some() {
+            // is_causal = true is the same as is_causal = false, in this case
+            is_causal = 0;
+        }
 
-        // if window_size_left < 0 && window_size_right >= 0 {
-        //     window_size_left = seqlens_k as i32;
-        // }
-        // if window_size_left >= 0 && window_size_right < 0 {
-        //     window_size_right = seqlens_k as i32;
-        // }
+        if window_size_left < 0 && window_size_right >= 0 {
+            window_size_left = seqlens_k as i32;
+        }
+        if window_size_left >= 0 && window_size_right < 0 {
+            window_size_right = seqlens_k as i32;
+        }
 
-        // let num_splits = utils::compute_num_splits(
-        //     batch_size,
-        //     num_heads,
-        //     head_size,
-        //     seqlens_k,
-        //     seqlen_q,
-        //     dev.ordinal(),
-        // )?;
+        let num_splits = utils::compute_num_splits(
+            batch_size,
+            num_heads,
+            head_size,
+            seqlens_k,
+            seqlen_q,
+            dev.ordinal(),
+        )?;
 
-        // let mut softcap = self.softcap.unwrap_or(0.0);
-        // let (softmax_scale, scale_softmatx_log2) = if softcap > 0.0 {
-        //     softcap = self.softmax_scale / softcap;
-        //     (softcap, softcap * std::f32::consts::LOG2_E)
-        // } else {
-        //     // Remove potential NaN
-        //     softcap = 0.0;
-        //     (
-        //         self.softmax_scale,
-        //         self.softmax_scale * std::f32::consts::LOG2_E,
-        //     )
-        // };
+        let mut softcap = self.softcap.unwrap_or(0.0);
+        let (softmax_scale, scale_softmatx_log2) = if softcap > 0.0 {
+            softcap = self.softmax_scale / softcap;
+            (softcap, softcap * std::f32::consts::LOG2_E)
+        } else {
+            // Remove potential NaN
+            softcap = 0.0;
+            (
+                self.softmax_scale,
+                self.softmax_scale * std::f32::consts::LOG2_E,
+            )
+        };
 
         // unsafe {
         //     let q_ptr = *q.device_ptr() as *const core::ffi::c_void;
