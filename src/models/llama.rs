@@ -471,10 +471,10 @@ mod tests {
 
         let tokenizer_filename = api.get("tokenizer.json")?;
         let config_filename = api.get("config.json")?;
-        let config: LlamaConfig = serde_json::from_slice(&std::fs::read(config_filename)?)?;
+        let config: LlamaConfig = serde_json::from_slice(&std::fs::read(config_filename).expect("Failed to read config.json")).expect("Failed to deserialize config.json");
         let config = config.into_config();
 
-        let filenames = vec![api.get("model.safetensors")?];
+        let filenames = vec![api.get("model.safetensors").expect("Failed to get model.safetensors")];
         let cache = Cache::new(&config, &device, dtype)?;
         let llama_model = {
             let vb = unsafe { VarBuilder::from_mmaped_safetensors(&filenames, dtype, &device)? };
