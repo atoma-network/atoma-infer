@@ -570,6 +570,7 @@ mod tests {
             .flatten_all()
             .unwrap()
             .to_vec1::<bool>()
+            .unwrap()
             .any(|&x| x));
     }
 }
