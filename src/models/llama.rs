@@ -225,7 +225,12 @@ impl CausalSelfAttention {
             .transpose(1, 2)?
             .contiguous()?;
         let mut v = v
-            .reshape((b_sz, num_total_tokens, self.num_key_value_heads, self.head_dim))?
+            .reshape((
+                b_sz,
+                num_total_tokens,
+                self.num_key_value_heads,
+                self.head_dim,
+            ))?
             .transpose(1, 2)?;
 
         let q = self.apply_rotary_embed(&q, input_positions)?;
@@ -450,7 +455,8 @@ impl Llama {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hf_hub::{api::sync::Api, RepoType, Repo};
+    use crate::flash_attention::FlashAttentionPrefillMetadata;
+    use hf_hub::{api::sync::Api, Repo, RepoType};
     use tokenizers::Tokenizer;
 
     const EOS_TOKEN: &str = "</s>";
@@ -468,18 +474,26 @@ mod tests {
         println!("loading the model weights from {model_id}");
         let api = api.repo(Repo::with_revision(model_id, RepoType::Model, revision));
 
-        let tokenizer_filename = api.get("tokenizer.json").expect("Failed to get tokenizer.json");
+        let tokenizer_filename = api
+            .get("tokenizer.json")
+            .expect("Failed to get tokenizer.json");
         let config_filename = api.get("config.json").expect("Failed to get config.json");
-        let config: LlamaConfig = serde_json::from_slice(&std::fs::read(config_filename).expect("Failed to read config.json")).expect("Failed to deserialize config.json");
+        let config: LlamaConfig = serde_json::from_slice(
+            &std::fs::read(config_filename).expect("Failed to read config.json"),
+        )
+        .expect("Failed to deserialize config.json");
         let config = config.into_config();
 
-        let filenames = vec![api.get("model.safetensors").expect("Failed to get model.safetensors")];
+        let filenames = vec![api
+            .get("model.safetensors")
+            .expect("Failed to get model.safetensors")];
         let cache = Cache::new(&config, &device, dtype)?;
         let llama_model = {
             let vb = unsafe { VarBuilder::from_mmaped_safetensors(&filenames, dtype, &device)? };
             Llama::load(vb, &config, dtype, &device).expect("Failed to load the model")
         };
-        let tokenizer = Tokenizer::from_file(tokenizer_filename).expect("Failed to load the tokenizer");
+        let tokenizer =
+            Tokenizer::from_file(tokenizer_filename).expect("Failed to load the tokenizer");
         let eos_token_id = config
             .eos_token_id
             .or_else(|| tokenizer.token_to_id(EOS_TOKEN));
@@ -493,6 +507,104 @@ mod tests {
         let mut tokenizer = candle_examples::token_output_stream::TokenOutputStream::new(tokenizer);
         println!("starting the inference loop");
         print!("{prompt}");
+
+        let mut logits_processor = {
+            let temperature = 0.8;
+            let sampling = Sampling::All { temperature };
+            LogitsProcessor::from_sampling(42, sampling)
+        };
+
+        let sample_len = 100;
+        let mut start_gen = std::time::Instant::now();
+        let mut index_pos = 0;
+        let mut token_generated = 0;
+
+        // kv cache
+        let num_blocks = 100;
+        let block_size = 16;
+        let num_heads = config.num_attention_heads;
+        let head_dim = config.hidden_size / config.num_attention_heads;
+        let mut kv_cache = Tensor::zeros(
+            (2, num_blocks, block_size, num_heads, head_dim),
+            dtype,
+            &device,
+        )?;
+
+        // prefill forward pass
+        let input_positions = Tensor::arange(0, tokens.len() as u32, &device)?.unsqueeze(0)?;
+        let input = Tensor::new(&tokens, &device)?.unsqueeze(0)?;
+        let attention_metadata = FlashAttentionMetadata {
+            context_lengths: Some(Tensor::from_vec(vec![tokens.len() as u32], (1,), &device)?),
+            slot_mapping: Tensor::arange(0, tokens.len() as u32, &device)?,
+            decoding_metadata: None,
+            num_prefill_tokens: tokens.len(),
+            num_decoding_tokens: 0,
+            prefill_metadata: Some(FlashAttentionPrefillMetadata {
+                block_tables: None,
+                max_query_length: Some(tokens.len()),
+                max_prefill_sequence_length: tokens.len(),
+                query_start_locations: Some(Tensor::from_vec(
+                    vec![0, tokens.len() as u32],
+                    (2,),
+                    &device,
+                )?),
+                sequence_start_locations: Some(Tensor::from_vec(
+                    vec![0, tokens.len() as u32],
+                    (2,),
+                    &device,
+                )?),
+                sequence_lengths: Some(Tensor::from_vec(vec![tokens.len() as u32], (1,), &device)?),
+            }),
+        };
+        let x = llama_model.forward(
+            &input,
+            &input_positions,
+            &Tensor::new(vec![tokens.len() + 1 as u32], &device)?.reshape((1, 1))?,
+            &mut kv_cache,
+            attention_metadata,
+        )?;
+
+        // for index in 0..sample_len {
+        //     if index == 1 {
+        //         start_gen = std::time::Instant::now()
+        //     }
+        //     let ctxt = &tokens[tokens.len().saturating_sub(context_size)..];
+        //     let input = Tensor::new(ctxt, &device)?.unsqueeze(0)?;
+        //     let logits = llama.forward(&input, context_index, &mut cache)?;
+        //     let logits = logits.squeeze(0)?;
+        //     let logits = if args.repeat_penalty == 1. {
+        //         logits
+        //     } else {
+        //         let start_at = tokens.len();
+        //         candle_transformers::utils::apply_repeat_penalty(
+        //             &logits,
+        //             args.repeat_penalty,
+        //             &tokens[start_at..],
+        //         )?
+        //     };
+        //     index_pos += ctxt.len();
+
+        //     let next_token = logits_processor.sample(&logits)?;
+        //     token_generated += 1;
+        //     tokens.push(next_token);
+
+        //     if Some(next_token) == eos_token_id {
+        //         break;
+        //     }
+        //     if let Some(t) = tokenizer.next_token(next_token)? {
+        //         print!("{t}");
+        //         std::io::stdout().flush()?;
+        //     }
+        // }
+        // if let Some(rest) = tokenizer.decode_rest().map_err(E::msg)? {
+        //     print!("{rest}");
+        // }
+        // let dt = start_gen.elapsed();
+        // println!(
+        //     "\n\n{} tokens generated ({} token/s)\n",
+        //     token_generated,
+        //     (token_generated - 1) as f64 / dt.as_secs_f64(),
+        // );
 
         Ok(())
     }
