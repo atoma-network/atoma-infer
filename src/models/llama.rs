@@ -490,7 +490,7 @@ mod tests {
             .get("model.safetensors")
             .expect("Failed to get model.safetensors")];
         let cache = Cache::new(&config, &device, dtype)?;
-        let llama_model = {
+        let mut llama_model = {
             let vb = unsafe { VarBuilder::from_mmaped_safetensors(&filenames, dtype, &device)? };
             Llama::load(vb, &config, dtype, &device).expect("Failed to load the model")
         };
