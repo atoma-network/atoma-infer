@@ -318,94 +318,94 @@ impl FlashAttention {
 
         let output = Tensor::zeros(q.shape(), q.dtype(), &self.device)?;
 
-        if let Some(prefill_metadata) = &attention_metadata.prefill_metadata {
-            if prefill_metadata
-                .block_tables
-                .as_ref()
-                .map(|bt| bt.elem_count() == 0)
-                .unwrap_or(true)
-            {
-                // This is the case in which we have new incoming prompts,
-                // to which there is no previous query, key and cache to reuse.
-                let sequence_start_locations = prefill_metadata
-                    .sequence_start_locations
-                    .as_ref()
-                    .ok_or(candle_core::Error::Msg(
-                    "Missing sequence start locations tensor for prefill inference".into(),
-                ))?;
-                let out = flash_attn_varlen_with_block_table(
-                    &q,
-                    &k,
-                    &v,
-                    self.alibi_slopes.as_ref(),
-                    sequence_start_locations,
-                    sequence_start_locations,
-                    prefill_metadata.max_prefill_sequence_length,
-                    prefill_metadata.max_prefill_sequence_length,
-                    self.softmax_scale,
-                    self.sliding_window,
-                    None,
-                    None,
-                )?;
-                output.slice_assign(&[..num_prefill_tokens], &out)?;
-            } else {
-                // We support prefix enabled attention, in which a block table is provided.
-                let sequence_lengths = if let Some(sequence_lengths) =
-                    prefill_metadata.sequence_lengths.as_ref()
-                {
-                    sequence_lengths
-                } else {
-                    candle_core::bail!("Missing sequence lengths tensor for prefill inference, with prefix enabled attention")
-                };
-                let max_sequence_length_k = sequence_lengths.max(0)?.to_scalar::<i64>()? as usize;
-                let query_start_locations = if let Some(query_start_locations) =
-                    prefill_metadata.query_start_locations.as_ref()
-                {
-                    query_start_locations
-                } else {
-                    candle_core::bail!("Missing query start locations tensor for prefill inference, with prefix enabled attention")
-                };
-                let sequence_start_locations = if let Some(sequence_start_locations) =
-                    prefill_metadata.sequence_start_locations.as_ref()
-                {
-                    sequence_start_locations
-                } else {
-                    candle_core::bail!("Missing sequence start locations tensor for prefill inference, with prefix enabled attention")
-                };
-                let out = flash_attn_varlen_with_block_table(
-                    &q,
-                    &k_cache,
-                    &v_cache,
-                    self.alibi_slopes.as_ref(),
-                    query_start_locations,
-                    sequence_start_locations,
-                    prefill_metadata.max_prefill_sequence_length,
-                    max_sequence_length_k,
-                    self.softmax_scale,
-                    self.sliding_window,
-                    None,
-                    prefill_metadata.block_tables.as_ref(),
-                )?;
-                output.slice_assign(&[..num_prefill_tokens], &out)?;
-            }
-        }
+        // if let Some(prefill_metadata) = &attention_metadata.prefill_metadata {
+        //     if prefill_metadata
+        //         .block_tables
+        //         .as_ref()
+        //         .map(|bt| bt.elem_count() == 0)
+        //         .unwrap_or(true)
+        //     {
+        //         // This is the case in which we have new incoming prompts,
+        //         // to which there is no previous query, key and cache to reuse.
+        //         let sequence_start_locations = prefill_metadata
+        //             .sequence_start_locations
+        //             .as_ref()
+        //             .ok_or(candle_core::Error::Msg(
+        //             "Missing sequence start locations tensor for prefill inference".into(),
+        //         ))?;
+        //         let out = flash_attn_varlen_with_block_table(
+        //             &q,
+        //             &k,
+        //             &v,
+        //             self.alibi_slopes.as_ref(),
+        //             sequence_start_locations,
+        //             sequence_start_locations,
+        //             prefill_metadata.max_prefill_sequence_length,
+        //             prefill_metadata.max_prefill_sequence_length,
+        //             self.softmax_scale,
+        //             self.sliding_window,
+        //             None,
+        //             None,
+        //         )?;
+        //         output.slice_assign(&[..num_prefill_tokens], &out)?;
+        //     } else {
+        //         // We support prefix enabled attention, in which a block table is provided.
+        //         let sequence_lengths = if let Some(sequence_lengths) =
+        //             prefill_metadata.sequence_lengths.as_ref()
+        //         {
+        //             sequence_lengths
+        //         } else {
+        //             candle_core::bail!("Missing sequence lengths tensor for prefill inference, with prefix enabled attention")
+        //         };
+        //         let max_sequence_length_k = sequence_lengths.max(0)?.to_scalar::<i64>()? as usize;
+        //         let query_start_locations = if let Some(query_start_locations) =
+        //             prefill_metadata.query_start_locations.as_ref()
+        //         {
+        //             query_start_locations
+        //         } else {
+        //             candle_core::bail!("Missing query start locations tensor for prefill inference, with prefix enabled attention")
+        //         };
+        //         let sequence_start_locations = if let Some(sequence_start_locations) =
+        //             prefill_metadata.sequence_start_locations.as_ref()
+        //         {
+        //             sequence_start_locations
+        //         } else {
+        //             candle_core::bail!("Missing sequence start locations tensor for prefill inference, with prefix enabled attention")
+        //         };
+        //         let out = flash_attn_varlen_with_block_table(
+        //             &q,
+        //             &k_cache,
+        //             &v_cache,
+        //             self.alibi_slopes.as_ref(),
+        //             query_start_locations,
+        //             sequence_start_locations,
+        //             prefill_metadata.max_prefill_sequence_length,
+        //             max_sequence_length_k,
+        //             self.softmax_scale,
+        //             self.sliding_window,
+        //             None,
+        //             prefill_metadata.block_tables.as_ref(),
+        //         )?;
+        //         output.slice_assign(&[..num_prefill_tokens], &out)?;
+        //     }
+        // }
 
-        if let Some(decoding_metadata) = &attention_metadata.decoding_metadata {
-            // Decoding inference forward pass
-            let out = flash_attn_kv_cache_full(
-                &q,
-                &k_cache,
-                &v_cache,
-                self.alibi_slopes.as_ref(),
-                self.softmax_scale,
-                self.sliding_window,
-                None,
-                decoding_metadata.block_tables.as_ref(),
-                decoding_metadata.sequence_lengths.as_ref(),
-                None,
-            )?;
-            output.slice_assign(&[num_prefill_tokens..], &out)?;
-        }
+        // if let Some(decoding_metadata) = &attention_metadata.decoding_metadata {
+        //     // Decoding inference forward pass
+        //     let out = flash_attn_kv_cache_full(
+        //         &q,
+        //         &k_cache,
+        //         &v_cache,
+        //         self.alibi_slopes.as_ref(),
+        //         self.softmax_scale,
+        //         self.sliding_window,
+        //         None,
+        //         decoding_metadata.block_tables.as_ref(),
+        //         decoding_metadata.sequence_lengths.as_ref(),
+        //         None,
+        //     )?;
+        //     output.slice_assign(&[num_prefill_tokens..], &out)?;
+        // }
 
         Ok(output)
     }
