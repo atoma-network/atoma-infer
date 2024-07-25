@@ -35,7 +35,7 @@ fn default_rope() -> f32 {
 }
 
 impl LlamaConfig {
-    pub fn into_config(self, use_flash_attn: bool) -> Config {
+    pub fn into_config(self) -> Config {
         Config {
             hidden_size: self.hidden_size,
             intermediate_size: self.intermediate_size,
@@ -45,7 +45,6 @@ impl LlamaConfig {
             num_key_value_heads: self.num_key_value_heads(),
             rms_norm_eps: self.rms_norm_eps,
             rope_theta: self.rope_theta,
-            use_flash_attn,
             bos_token_id: self.bos_token_id,
             eos_token_id: self.eos_token_id,
         }
@@ -60,7 +59,6 @@ pub struct Config {
     pub num_hidden_layers: usize,
     pub num_attention_heads: usize,
     pub num_key_value_heads: usize,
-    pub use_flash_attn: bool,
     pub rms_norm_eps: f64,
     pub rope_theta: f32,
     pub bos_token_id: Option<u32>,
@@ -76,7 +74,6 @@ impl Config {
             num_hidden_layers: 32,
             num_attention_heads: 32,
             num_key_value_heads: 32,
-            use_flash_attn,
             rms_norm_eps: 1e-6,
             rope_theta: 10_000.0,
             bos_token_id: None,
@@ -92,7 +89,6 @@ impl Config {
             num_hidden_layers: 32,
             num_attention_heads: 32,
             num_key_value_heads: 32,
-            use_flash_attn,
             rms_norm_eps: 1e-5,
             rope_theta: 10_000.0,
             bos_token_id: None,
@@ -251,7 +247,9 @@ impl CausalSelfAttention {
             .attention
             .forward(&q, &k, &v, kv_cache, attention_metadata)?;
 
-        let o = o.transpose(1, 2)?.reshape(&[b_sz, num_total_tokens, hidden_size])?;
+        let o = o
+            .transpose(1, 2)?
+            .reshape(&[b_sz, num_total_tokens, hidden_size])?;
         let out = self.o_proj.forward(&o)?;
 
         Ok(out)
@@ -413,6 +411,12 @@ impl Llama {
         kv_caches: Vec<Tensor>,
         attention_metadata: FlashAttentionMetadata,
     ) -> Result<Tensor> {
+        if x.dims() != [1, _num_total_tokens] {
+            candle_core::bail!(
+                "x must be of shape [1, _num_total_tokens], got {:?}",
+                x.dims()
+            );
+        }
         let mut x = self.wte.forward(x)?;
         for (i, block) in self.blocks.iter_mut().enumerate() {
             x = block.forward(&x, input_positions, &kv_caches[i], attention_metadata)?;
@@ -444,5 +448,52 @@ impl Llama {
 
     pub fn get_config(&self) -> &Config {
         &self.cfg
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hf_hub::{api::Api, RepoType};
+    use tokenizers::Tokenizer;
+
+    #[test]
+    fn test_llama_model() {
+        let prompt = "Write a poem about the beauty of the moon.".to_string();
+
+        let dtype = DType::BF16;
+        let device = Device::new_cuda(0).unwrap();
+        let model_id = "TinyLlama/TinyLlama-1.1B-Chat-v1.0".to_string();
+        let revision = "main".to_string();
+        let api = Api::new()?;
+
+        println!("loading the model weights from {model_id}");
+        let api = api.repo(Repo::with_revision(model_id, RepoType::Model, revision));
+
+        let tokenizer_filename = api.get("tokenizer.json")?;
+        let config_filename = api.get("config.json")?;
+        let config: LlamaConfig = serde_json::from_slice(&std::fs::read(config_filename)?)?;
+        let config = config.into_config();
+
+        let filenames = vec![api.get("model.safetensors")?];
+        let cache = Cache::new(&config, &device, dtype)?;
+        let llama_model = {
+            let vb = unsafe { VarBuilder::from_mmaped_safetensors(&filenames, dtype, &device)? };
+            Llama::load(vb, &config, dtype, &device).expect("Failed to load the model")
+        };
+        let tokenizer = Tokenizer::from_file(tokenizer_filename).map_err(E::msg)?;
+        let eos_token_id = config
+            .eos_token_id
+            .or_else(|| tokenizer.token_to_id(EOS_TOKEN));
+
+        let mut tokens = tokenizer
+            .encode(prompt, true)
+            .expect("Failed to encode the prompt")
+            .get_ids()
+            .to_vec();
+
+        let mut tokenizer = candle_examples::token_output_stream::TokenOutputStream::new(tokenizer);
+        println!("starting the inference loop");
+        print!("{prompt}");
     }
 }
