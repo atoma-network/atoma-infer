@@ -2,6 +2,7 @@ use candle_core::{DType, Device, Module, Result, Tensor};
 use candle_nn::{embedding, Embedding, VarBuilder};
 use candle_transformers::models::with_tracing::{linear_no_bias as linear, Linear, RmsNorm};
 use serde::{Deserialize, Serialize};
+use core::panic;
 use std::collections::HashMap;
 
 use crate::flash_attention::{FlashAttention, FlashAttentionMetadata};
@@ -347,10 +348,9 @@ impl Block {
         attention_metadata: &FlashAttentionMetadata,
     ) -> Result<Tensor> {
         let _enter = self.span.enter();
-        panic!("FLAG");
-
         let residual = x;
         let x = self.rms_1.forward(&x)?;
+        panic!("FLAG");
         let x = (self
             .attn
             .forward(&x, input_positions, cache, attention_metadata)?
