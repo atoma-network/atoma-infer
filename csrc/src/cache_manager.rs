@@ -467,22 +467,22 @@ fn reshape_and_cache_flash_t<
         _ => candle_core::bail!("slot_mapping must be a cuda tensor"),
     };
 
-    unsafe {
-        ffi::reshape_and_cache_flash(
-            k_ptr,
-            v_ptr,
-            kc_ptr,
-            vc_ptr,
-            slot_mapping_ptr,
-            num_tokens as i64,
-            num_heads as i64,
-            head_size as i64,
-            block_size as i64,
-            key_stride as i64,
-            value_stride as i64,
-            block_stride as i64,
-            dtype,
-        )
-    }
+    // unsafe {
+    //     ffi::reshape_and_cache_flash(
+    //         k_ptr,
+    //         v_ptr,
+    //         kc_ptr,
+    //         vc_ptr,
+    //         slot_mapping_ptr,
+    //         num_tokens as i64,
+    //         num_heads as i64,
+    //         head_size as i64,
+    //         block_size as i64,
+    //         key_stride as i64,
+    //         value_stride as i64,
+    //         block_stride as i64,
+    //         dtype,
+    //     )
+    // }
     Ok(())
 }
