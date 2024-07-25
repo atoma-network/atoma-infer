@@ -1809,32 +1809,32 @@ impl FlashAttentionKvCache {
             )
         };
 
-        // unsafe {
-        //     let q_ptr = *q.device_ptr() as *const core::ffi::c_void;
-        //     let kc_ptr = *kc.device_ptr() as *const core::ffi::c_void;
-        //     let vc_ptr = *vc.device_ptr() as *const core::ffi::c_void;
-        //     let block_table_batch_stride = if let Some(layout) = block_table_layout {
-        //         layout.stride()[0] as u32
-        //     } else {
-        //         0
-        //     };
-        //     let dst_ptr = *dst.device_ptr() as *const core::ffi::c_void;
-        //     let softmax_lse_ptr = *softmax_lse.device_ptr() as *const core::ffi::c_void;
-        //     let (k_batch_stride, v_batch_stride) = block_table_layout
-        //         .as_ref()
-        //         .map(|_| (kc_stride[0] as u32, vc_stride[0] as u32))
-        //         .unwrap_or((0, 0));
+        unsafe {
+            let q_ptr = *q.device_ptr() as *const core::ffi::c_void;
+            let kc_ptr = *kc.device_ptr() as *const core::ffi::c_void;
+            let vc_ptr = *vc.device_ptr() as *const core::ffi::c_void;
+            let block_table_batch_stride = if let Some(layout) = block_table_layout {
+                layout.stride()[0] as u32
+            } else {
+                0
+            };
+            let dst_ptr = *dst.device_ptr() as *const core::ffi::c_void;
+            let softmax_lse_ptr = *softmax_lse.device_ptr() as *const core::ffi::c_void;
+            let (k_batch_stride, v_batch_stride) = block_table_layout
+                .as_ref()
+                .map(|_| (kc_stride[0] as u32, vc_stride[0] as u32))
+                .unwrap_or((0, 0));
 
-        //     let o_stride = out_l.stride();
-        //     let o_rank = o_stride.len();
-        //     let (q_batch_stride, o_batch_stride) = if !seqlenq_ngroups_swapped {
-        //         (q_stride[0] as u32, o_stride[0] as u32)
-        //     } else {
-        //         (
-        //             (q_stride[0] * seqlen_q) as u32,
-        //             (o_stride[0] * seqlen_q) as u32,
-        //         )
-        //     };
+            let o_stride = out_l.stride();
+            let o_rank = o_stride.len();
+            let (q_batch_stride, o_batch_stride) = if !seqlenq_ngroups_swapped {
+                (q_stride[0] as u32, o_stride[0] as u32)
+            } else {
+                (
+                    (q_stride[0] * seqlen_q) as u32,
+                    (o_stride[0] * seqlen_q) as u32,
+                )
+            };
         //     ffi::run_mha(
         //         q_ptr,
         //         kc_ptr,
@@ -1882,7 +1882,7 @@ impl FlashAttentionKvCache {
         //         /* unpadded_lse */ false,
         //         /* force_split_kernel */ !block_table_ptr.is_null(),
         //     )
-        // }
+        }
 
         let out_shape = if seqlenq_ngroups_swapped {
             Shape::from((batch_size, 1, num_heads_k * seqlen_q, head_size_og))
