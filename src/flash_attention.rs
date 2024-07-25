@@ -541,7 +541,7 @@ mod tests {
             }),
             decoding_metadata: Some(FlashAttentionDecodingMetadata {
                 block_tables: Some(
-                    Tensor::arange(2i64, 3, &device)
+                    Tensor::arange(2i64, 4, &device)
                         .unwrap()
                         .reshape((2, 2))
                         .unwrap(),
