@@ -16,6 +16,6 @@ tracing = "0.1.40"
 
 [dev-dependencies]
 candle-examples = "0.6.0"
-hf-hub = "0.3.2"
+hf-hub = { version = "0.3.2", features = ["tokio"] }
 serde_json = "1.0.120"
 tokenizers = "0.19.1"

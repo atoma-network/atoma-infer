@@ -148,18 +148,16 @@ struct CausalSelfAttention {
 impl CausalSelfAttention {
     fn apply_rotary_embed(&self, x: &Tensor, input_positions: &Tensor) -> Result<Tensor> {
         let _enter = self.span_rot.enter();
-        let (b_sz, num_heads, num_total_tokens, hidden_size) = x.dims4()?; // [1, num_heads, num_ hidden_size]
+        let (b_sz, num_heads, num_total_tokens, hidden_size) = x.dims4()?; // [1, num_heads, num_total_tokens, hidden_size]
 
         if b_sz != 1 {
             candle_core::bail!("batch size must be 1, got {}", b_sz);
         }
         if input_positions.dims() != [1, num_total_tokens] {
             candle_core::bail!(
-                "index_positions must be of shape [batch_size, sequence_length] = [{}, {}, {}, {}], got {:?}",
+                "index_positions must be of shape [batch_size, sequence_length] = [{}, {}], got {:?}",
                 b_sz,
                 num_total_tokens,
-                num_heads,
-                hidden_size
                 input_positions.dims()
             );
         }
@@ -453,7 +451,7 @@ impl Llama {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hf_hub::{api::Api, RepoType};
+    use hf_hub::{api::tokio::Api, RepoType, Repo};
     use tokenizers::Tokenizer;
 
     const EOS_TOKEN: &str = "</s>";
