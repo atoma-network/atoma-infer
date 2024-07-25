@@ -386,27 +386,26 @@ impl FlashAttention {
                     None,
                     prefill_metadata.block_tables.as_ref(),
                 )?;
-                assert!(out.dtype() == DType::BF16);
                 output.slice_assign(&[..num_prefill_tokens, ..output.dims()[1], ..output.dims()[2]], &out)?;
             }
         }
 
-        // if let Some(decoding_metadata) = &attention_metadata.decoding_metadata {
-        //     // Decoding inference forward pass
-        //     let out = flash_attn_kv_cache_full(
-        //         &q,
-        //         &k_cache,
-        //         &v_cache,
-        //         self.alibi_slopes.as_ref(),
-        //         self.softmax_scale,
-        //         self.sliding_window,
-        //         None,
-        //         decoding_metadata.block_tables.as_ref(),
-        //         decoding_metadata.sequence_lengths.as_ref(),
-        //         None,
-        //     )?;
-        //     output.slice_assign(&[num_prefill_tokens..], &out)?;
-        // }
+        if let Some(decoding_metadata) = &attention_metadata.decoding_metadata {
+            // Decoding inference forward pass
+            let out = flash_attn_kv_cache_full(
+                &q,
+                &k_cache,
+                &v_cache,
+                self.alibi_slopes.as_ref(),
+                self.softmax_scale,
+                self.sliding_window,
+                None,
+                decoding_metadata.block_tables.as_ref(),
+                decoding_metadata.sequence_lengths.as_ref(),
+                None,
+            )?;
+            output.slice_assign(&[num_prefill_tokens..], &out)?;
+        }
 
         Ok(output)
     }
@@ -556,8 +555,8 @@ mod tests {
 
         let result = flash_attention.forward(&q, &k, &v, &kv_cache, attention_metadata);
 
-        // assert!(result.is_ok());
+        assert!(result.is_ok());
         let output = result.unwrap();
-        // assert_eq!(output.shape().dims(), &[15, 512]);
+        assert_eq!(output.shape().dims(), &[15, 512]);
     }
 }
