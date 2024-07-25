@@ -1884,11 +1884,11 @@ impl FlashAttentionKvCache {
         //     )
         // }
 
-        // let out_shape = if seqlenq_ngroups_swapped {
-        //     Shape::from((batch_size, 1, num_heads_k * seqlen_q, head_size_og))
-        // } else {
-        //     out_shape
-        // };
+        let out_shape = if seqlenq_ngroups_swapped {
+            Shape::from((batch_size, 1, num_heads_k * seqlen_q, head_size_og))
+        } else {
+            out_shape
+        };
 
         let dst = candle_core::CudaStorage::wrap_cuda_slice(dst, dev.clone());
         Ok((dst, out_shape))
