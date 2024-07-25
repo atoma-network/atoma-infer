@@ -239,7 +239,6 @@ impl CausalSelfAttention {
         let k = k.transpose(1, 2)?;
         let v = v.transpose(1, 2)?;
 
-        let softmax_scale = 1f32 / (self.head_dim as f32).sqrt();
         let o = self
             .attention
             .forward(&q, &k, &v, kv_cache, attention_metadata)?;
@@ -284,7 +283,7 @@ impl CausalSelfAttention {
                 cfg.num_attention_heads,
                 cfg.num_key_value_heads,
                 head_dim,
-                Some(cfg.num_key_value_heads),
+                1f32 / (head_dim as f32).sqrt(),
                 None,
                 None,
                 dtype,
