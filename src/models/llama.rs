@@ -349,12 +349,12 @@ impl Block {
         let _enter = self.span.enter();
         let residual = x;
         let x = self.rms_1.forward(&x)?;
-        let x = (self
-            .attn
-            .forward(&x, input_positions, cache, attention_metadata)?
-            + residual)?;
-        let residual = &x;
-        let x = (self.mlp.forward(&self.rms_2.forward(&x)?)? + residual)?;
+        // let x = (self
+        //     .attn
+        //     .forward(&x, input_positions, cache, attention_metadata)?
+        //     + residual)?;
+        // let residual = &x;
+        // let x = (self.mlp.forward(&self.rms_2.forward(&x)?)? + residual)?;
         Ok(x)
     }
 
