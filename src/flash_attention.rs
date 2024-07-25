@@ -563,7 +563,7 @@ mod tests {
             }),
             decoding_metadata: Some(FlashAttentionDecodingMetadata {
                 block_tables: Some(
-                    Tensor::arange(2, 3, &device)
+                    Tensor::arange(2i64, 3, &device)
                         .unwrap()
                         .to_dtype(DType::I64)
                         .unwrap()
