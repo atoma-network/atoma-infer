@@ -369,56 +369,56 @@ fn reshape_and_cache_flash_t<
     let kc_rank = key_cache.rank();
     let vc_rank = value_cache.rank();
 
-    if block_stride != value_cache.stride()[0] {
-        candle_core::bail!(
-            "Only support block_stride == value_cache.stride[0] (got block_stride {} and value_cache.stride[0] {})", 
-            block_stride,
-            value_cache.stride()[0]
-        )
-    }
-    if k_rank != 3 || v_rank != 3 {
-        candle_core::bail!(
-            "Only support key and value tensors with rank 3 (got {} and v_rank {})",
-            k_rank,
-            v_rank
-        )
-    }
-    if kc_rank != 4 {
-        candle_core::bail!(
-            "Only support key_cache tensors with rank 4 (got {})",
-            kc_rank
-        )
-    }
-    if vc_rank != 4 {
-        candle_core::bail!(
-            "Only support value_cache tensors with rank 4 (got {})",
-            vc_rank
-        )
-    }
-    if [num_blocks, block_size, num_heads, head_size] != key_cache.dims() {
-        candle_core::bail!(
-            "Only support key_cache with shape [{num_blocks}, {block_size}, {num_heads}, {head_size}] (got {:?})",
-            key_cache.dims()
-        )
-    }
-    if [num_blocks, block_size, num_heads, head_size] != value_cache.dims() {
-        candle_core::bail!(
-            "Only support value_cache with shape [{num_blocks}, {block_size}, {num_heads}, {head_size}] (got {:?})",
-            value_cache.dims()
-        )
-    }
-    if [num_tokens, num_heads, head_size] != value.dims() {
-        candle_core::bail!(
-            "Only support value with shape [{num_tokens}, {num_heads}, {head_size}] (got {:?})",
-            value.dims()
-        )
-    }
-    if (num_tokens) != slot_mapping.dims1()? {
-        candle_core::bail!(
-            "Only support slot_mapping with shape [{num_tokens}] (got {:?})",
-            slot_mapping.dims1()
-        )
-    }
+    // if block_stride != value_cache.stride()[0] {
+    //     candle_core::bail!(
+    //         "Only support block_stride == value_cache.stride[0] (got block_stride {} and value_cache.stride[0] {})", 
+    //         block_stride,
+    //         value_cache.stride()[0]
+    //     )
+    // }
+    // if k_rank != 3 || v_rank != 3 {
+    //     candle_core::bail!(
+    //         "Only support key and value tensors with rank 3 (got {} and v_rank {})",
+    //         k_rank,
+    //         v_rank
+    //     )
+    // }
+    // if kc_rank != 4 {
+    //     candle_core::bail!(
+    //         "Only support key_cache tensors with rank 4 (got {})",
+    //         kc_rank
+    //     )
+    // }
+    // if vc_rank != 4 {
+    //     candle_core::bail!(
+    //         "Only support value_cache tensors with rank 4 (got {})",
+    //         vc_rank
+    //     )
+    // }
+    // if [num_blocks, block_size, num_heads, head_size] != key_cache.dims() {
+    //     candle_core::bail!(
+    //         "Only support key_cache with shape [{num_blocks}, {block_size}, {num_heads}, {head_size}] (got {:?})",
+    //         key_cache.dims()
+    //     )
+    // }
+    // if [num_blocks, block_size, num_heads, head_size] != value_cache.dims() {
+    //     candle_core::bail!(
+    //         "Only support value_cache with shape [{num_blocks}, {block_size}, {num_heads}, {head_size}] (got {:?})",
+    //         value_cache.dims()
+    //     )
+    // }
+    // if [num_tokens, num_heads, head_size] != value.dims() {
+    //     candle_core::bail!(
+    //         "Only support value with shape [{num_tokens}, {num_heads}, {head_size}] (got {:?})",
+    //         value.dims()
+    //     )
+    // }
+    // if (num_tokens) != slot_mapping.dims1()? {
+    //     candle_core::bail!(
+    //         "Only support slot_mapping with shape [{num_tokens}] (got {:?})",
+    //         slot_mapping.dims1()
+    //     )
+    // }
 
     // let (k, k_l) = key.storage_and_layout();
     // let (v, v_l) = value.storage_and_layout();
