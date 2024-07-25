@@ -1880,6 +1880,7 @@ impl FlashAttentionKvCache {
                 /* window_size_right */ window_size_right,
                 /* softcap */ softcap,
                 /* unpadded_lse */ false,
+                false,
                 // /* force_split_kernel */ !block_table_ptr.is_null(),
             )
         }
