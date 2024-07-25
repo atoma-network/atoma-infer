@@ -254,7 +254,7 @@ impl FlashAttention {
     /// # Returns
     ///
     /// * `shape` - [num_tokens, num_heads * head_size]
-    fn forward(
+    pub fn forward(
         self,
         q: &Tensor,
         k: &Tensor,

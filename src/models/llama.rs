@@ -4,7 +4,7 @@ use candle_transformers::models::with_tracing::{linear_no_bias as linear, Linear
 use serde::Serialize;
 use std::collections::HashMap;
 
-use crate::flash_attention::FlashAttention;
+use crate::flash_attention::{FlashAttention, FlashAttentionMetadata};
 
 /// Maximum input sequence token length
 const MAX_SEQ_LEN: usize = 4096;
@@ -148,4 +148,301 @@ struct CausalSelfAttention {
     span_rot: tracing::Span,
     cos_sin_cache: Cache,
     attention: FlashAttention,
+}
+
+impl CausalSelfAttention {
+    fn apply_rotary_embed(&self, x: &Tensor, input_positions: &Tensor) -> Result<Tensor> {
+        let _enter = self.span_rot.enter();
+        let (b_sz, num_heads, num_total_tokens, hidden_size) = x.dims4()?; // [1, num_heads, num_ hidden_size]
+
+        if b_sz != 1 {
+            candle_core::bail!("batch size must be 1, got {}", b_sz);
+        }
+        if input_positions.dims() != [1, num_total_tokens] {
+            candle_core::bail!(
+                "index_positions must be of shape [batch_size, sequence_length] = [{}, {}, {}, {}], got {:?}",
+                b_sz,
+                num_total_tokens,,
+                num_heads,
+                hidden_size
+                input_positions.dims()
+            );
+        }
+        if input_positions.dtype() != DType::I64 {
+            candle_core::bail!(
+                "index_positions must be of dtype i64, got {:?}",
+                input_positions.dtype()
+            );
+        }
+
+        // select input positions tokens
+        let cos = self
+            .cos_sin_cache
+            .cos
+            .index_select(&input_positions.flatten(0, 1)?, 0)?;
+        let sin = self
+            .cos_sin_cache
+            .sin
+            .index_select(&input_positions.flatten(0, 1)?, 0)?;
+
+        // Reshape cos and sin to match the input tensor shape
+        let cos = cos.reshape((b_sz, num_heads, num_total_tokens, hidden_size))?;
+        let sin = sin.reshape((b_sz, num_heads, num_total_tokens, hidden_size))?;
+
+        candle_nn::rotary_emb::rope(x, &cos, &sin)
+    }
+
+    fn forward(
+        &mut self,
+        x: &Tensor,
+        input_positions: &Tensor,
+        kv_cache: &Tensor,
+        attention_metadata: FlashAttentionMetadata,
+    ) -> Result<Tensor> {
+        let (batch_size, num_total_tokens, hidden_size) = x.dims3()?;
+        let b_sz = 1;
+        if x.dims()[0] != b_sz {
+            candle_core::bail!(
+                "x must be of shape [1, num_total_tokens], got {:?}",
+                x.dims()
+            );
+        }
+
+        let _enter = self.span.enter();
+        let q = self.q_proj.forward(x)?;
+        let k = self.k_proj.forward(x)?;
+        let v = self.v_proj.forward(x)?;
+
+        let q = q
+            .reshape((
+                b_sz,
+                total_num_tokens,
+                self.num_attention_heads,
+                self.head_dim,
+            ))?
+            .transpose(1, 2)?
+            .contiguous()?;
+        let k = k
+            .reshape((
+                b_sz,
+                total_num_tokens,
+                self.num_key_value_heads,
+                self.head_dim,
+            ))?
+            .transpose(1, 2)?
+            .contiguous()?;
+        let mut v = v
+            .reshape((b_sz, seq_len, self.num_key_value_heads, self.head_dim))?
+            .transpose(1, 2)?;
+
+        let q = self.apply_rotary_embed(&q, input_positions)?;
+        let mut k = self.apply_rotary_embed(&k, input_positions)?;
+
+        let k = self.repeat_kv(k)?;
+        let v = self.repeat_kv(v)?;
+
+        // transpose the matrices back to [batch_size, num_heads, sequence_length, head_dim]
+        q = q.transpose(1, 2)?;
+        k = k.transpose(1, 2)?;
+        v = v.transpose(1, 2)?;
+
+        let softmax_scale = 1f32 / (self.head_dim as f32).sqrt();
+        let o = self
+            .attention
+            .forward(&q, &k, &v, kv_cache, attention_metadata)?;
+
+        let o = o.transpose(1, 2)?.reshape(&[b_sz, num_total_tokens, hidden_size])?;
+        let out = self.o_proj.forward(&o)?;
+
+        Ok(out)
+    }
+
+    fn repeat_kv(&self, x: Tensor) -> Result<Tensor> {
+        candle_transformers::utils::repeat_kv(
+            x,
+            self.num_attention_heads / self.num_key_value_heads,
+        )
+    }
+
+    fn load(vb: VarBuilder, cfg: &Config, dtype: DType, device: &Device) -> Result<Self> {
+        let span = tracing::span!(tracing::Level::TRACE, "attn");
+        let span_rot = tracing::span!(tracing::Level::TRACE, "attn-rot");
+        let size_in = cfg.hidden_size;
+        let size_q = (cfg.hidden_size / cfg.num_attention_heads) * cfg.num_attention_heads;
+        let size_kv = (cfg.hidden_size / cfg.num_attention_heads) * cfg.num_key_value_heads;
+        let q_proj = linear(size_in, size_q, vb.pp("q_proj"))?;
+        let k_proj = linear(size_in, size_kv, vb.pp("k_proj"))?;
+        let v_proj = linear(size_in, size_kv, vb.pp("v_proj"))?;
+        let o_proj = linear(size_q, size_in, vb.pp("o_proj"))?;
+        let head_dim = cfg.hidden_size / cfg.num_attention_heads;
+        Ok(Self {
+            q_proj,
+            k_proj,
+            v_proj,
+            o_proj,
+            num_attention_heads: cfg.num_attention_heads,
+            num_key_value_heads: cfg.num_key_value_heads,
+            head_dim: head_dim,
+            use_flash_attn: cfg.use_flash_attn,
+            span,
+            span_rot,
+            attention: PagedAttention::new(
+                cfg.num_attention_heads,
+                head_dim,
+                1. / ((head_dim as f64).sqrt()),
+                Some(cfg.num_key_value_heads),
+                None,
+                vb.device(),
+                None,
+            )?,
+            cos_sin_cache: Cache::new(&cfg, device, dtype)?,
+        })
+    }
+}
+
+#[derive(Clone, Debug)]
+struct Mlp {
+    c_fc1: Linear,
+    c_fc2: Linear,
+    c_proj: Linear,
+    span: tracing::Span,
+}
+
+impl Mlp {
+    fn forward(&self, x: &Tensor) -> Result<Tensor> {
+        let _enter = self.span.enter();
+        let x = (candle_nn::ops::silu(&self.c_fc1.forward(x)?)? * self.c_fc2.forward(x)?)?;
+        self.c_proj.forward(&x)
+    }
+
+    fn load(vb: &VarBuilder, cfg: &Config) -> Result<Self> {
+        let span = tracing::span!(tracing::Level::TRACE, "mlp");
+        let h_size = cfg.hidden_size;
+        let i_size = cfg.intermediate_size;
+        let c_fc1 = linear(h_size, i_size, vb.pp("gate_proj"))?;
+        let c_fc2 = linear(h_size, i_size, vb.pp("up_proj"))?;
+        let c_proj = linear(i_size, h_size, vb.pp("down_proj"))?;
+        Ok(Self {
+            c_fc1,
+            c_fc2,
+            c_proj,
+            span,
+        })
+    }
+}
+
+struct Block {
+    rms_1: RmsNorm,
+    attn: CausalSelfAttention,
+    rms_2: RmsNorm,
+    mlp: Mlp,
+    span: tracing::Span,
+}
+
+impl Block {
+    fn forward(
+        &mut self,
+        x: &Tensor,
+        input_positions: &Tensor,
+        cache: &Tensor,
+        attention_metadata: FlashAttentionMetadata,
+    ) -> Result<Tensor> {
+        let _enter = self.span.enter();
+        let residual = x;
+        let x = self.rms_1.forward(&x)?;
+        let x = (self
+            .attn
+            .forward(&x, input_positions, cache, attention_metadata)?
+            + residual)?;
+        let residual = &x;
+        let x = (self.mlp.forward(&self.rms_2.forward(&x)?)? + residual)?;
+        Ok(x)
+    }
+
+    fn load(vb: VarBuilder, cfg: &Config, dtype: DType, device: &Device) -> Result<Self> {
+        let span = tracing::span!(tracing::Level::TRACE, "block");
+        let attn = CausalSelfAttention::load(vb.pp("self_attn"), cfg, dtype, device)?;
+        let mlp = Mlp::load(&vb.pp("mlp"), cfg)?;
+        let rms_1 = RmsNorm::new(cfg.hidden_size, cfg.rms_norm_eps, vb.pp("input_layernorm"))?;
+        let rms_2 = RmsNorm::new(
+            cfg.hidden_size,
+            cfg.rms_norm_eps,
+            vb.pp("post_attention_layernorm"),
+        )?;
+        Ok(Self {
+            rms_1,
+            attn,
+            rms_2,
+            mlp,
+            span,
+        })
+    }
+}
+
+pub struct Llama {
+    wte: Embedding,
+    blocks: Vec<Block>,
+    ln_f: RmsNorm,
+    lm_head: Linear,
+    cfg: Config,
+    dtype: DType,
+    device: Device,
+}
+
+impl Llama {
+    /// Forward pass of Llama model, using
+    /// flash attention kernels, with paged attention
+    /// batching optimizations.
+    ///
+    /// # Arguments
+    ///
+    /// * `x` - Input tensor of shape `[1, num_total_tokens]`,
+    ///     where `num_total_tokens = num_prefill_tokens + num_decode_tokens`
+    /// * `input_positions` - Input positions tensor of shape `[1, num_total_tokens]`,
+    ///     where `num_total_tokens = num_prefill_tokens + num_decode_tokens`.
+    ///     it contains all input positions, so that rotary embeddings can be applied correctly
+    /// * `selected_token_indices` - Selected token indices tensor of shape `[1, num_decode_tokens]`
+    /// * `kv_caches` - KV caches with paged block arrangement for each model layer. Each tensor is of
+    ///      shape `[num_blocks, block_size, num_heads, head_dim]`
+    /// * `attention_metadata` - Flash attention metadata, that
+    pub fn forward(
+        &mut self,
+        x: &Tensor,
+        input_positions: &Tensor,
+        selected_token_indices: &Tensor,
+        kv_caches: Vec<Tensor>,
+        attention_metadata: FlashAttentionMetadata,
+    ) -> Result<Tensor> {
+        let mut x = self.wte.forward(x)?;
+        for (i, block) in self.blocks.iter_mut().enumerate() {
+            x = block.forward(&x, input_positions, &kv_caches[i], attention_metadata)?;
+        }
+        let x = self.ln_f.forward(&x)?;
+        let x = x.index_select(selected_token_indices, 1)?.contiguous()?;
+        let logits = self.lm_head.forward(&x)?;
+        logits.to_dtype(DType::F32)
+    }
+
+    pub fn load(vb: VarBuilder, cfg: &Config, dtype: DType, device: &Device) -> Result<Self> {
+        let wte = embedding(cfg.vocab_size, cfg.hidden_size, vb.pp("model.embed_tokens"))?;
+        let lm_head = linear(cfg.hidden_size, cfg.vocab_size, vb.pp("lm_head"))?;
+        let ln_f = RmsNorm::new(cfg.hidden_size, cfg.rms_norm_eps, vb.pp("model.norm"))?;
+        let blocks: Vec<_> = (0..cfg.num_hidden_layers)
+            .map(|i| Block::load(vb.pp(&format!("model.layers.{i}")), cfg, dtype, device).unwrap())
+            .collect();
+
+        Ok(Self {
+            wte,
+            blocks,
+            ln_f,
+            lm_head,
+            cfg: cfg.clone(),
+            dtype: dtype,
+            device: device.clone(),
+        })
+    }
+
+    pub fn get_config(&self) -> &Config {
+        &self.cfg
+    }
 }
