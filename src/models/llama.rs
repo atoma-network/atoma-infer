@@ -459,6 +459,7 @@ mod tests {
     use hf_hub::{api::sync::Api, Repo, RepoType};
     use tokenizers::Tokenizer;
     use std::io::Write;
+    use candle_transformers::generation::{Sampling, LogitsProcessor};
 
     const EOS_TOKEN: &str = "</s>";
 
