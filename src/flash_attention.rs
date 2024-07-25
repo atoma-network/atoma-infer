@@ -547,7 +547,7 @@ mod tests {
                         .unwrap(),
                 ),
                 max_decoding_sequence_length: 3,
-                sequence_lengths: Some(Tensor::zeros((3, 2), DType::IU32, &device).unwrap()),
+                sequence_lengths: Some(Tensor::zeros((3, 2), DType::U32, &device).unwrap()),
             }),
             num_prefill_tokens: 10,
             num_decoding_tokens: 5,
