@@ -389,7 +389,10 @@ impl FlashAttention {
                     None,
                     prefill_metadata.block_tables.as_ref(),
                 )?;
-                output.slice_assign(&[..num_prefill_tokens, ..output.dims()[1], ..output.dims()[2]], &out)?;
+                output.slice_assign(
+                    &[..num_prefill_tokens, ..output.dims()[1], ..output.dims()[2]],
+                    &out,
+                )?;
             }
         }
 
@@ -561,6 +564,14 @@ mod tests {
         // assert!(result.is_ok());
         let output = result.unwrap();
         assert_eq!(output.shape().dims(), &[15, 512]);
-        // assert!(!output.eq(0.).unwrap().flatten_all().unwrap().to_vec1().unwrap().iter().any(|&x| x == 0.));
+        assert!(!output
+            .eq(0.)
+            .unwrap()
+            .flatten_all()
+            .unwrap()
+            .to_vec1()
+            .unwrap()
+            .iter()
+            .any(|&x| x == 0.));
     }
 }
