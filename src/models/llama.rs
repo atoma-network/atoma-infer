@@ -524,11 +524,14 @@ mod tests {
         let block_size = 16;
         let num_heads = config.num_attention_heads;
         let head_dim = config.hidden_size / config.num_attention_heads;
-        let mut kv_cache = Tensor::zeros(
-            (2, num_blocks, block_size, num_heads, head_dim),
-            dtype,
-            &device,
-        )?;
+        let mut kv_cache = vec![
+            Tensor::zeros(
+                (2, num_blocks, block_size, num_heads, head_dim),
+                dtype,
+                &device,
+            )?;
+            config.num_hidden_layers as usize
+        ];
 
         // prefill forward pass
         let input_positions = Tensor::arange(0, tokens.len() as u32, &device)?.unsqueeze(0)?;
@@ -556,13 +559,25 @@ mod tests {
                 sequence_lengths: Some(Tensor::from_vec(vec![tokens.len() as u32], (1,), &device)?),
             }),
         };
-        let x = llama_model.forward(
+        let logits = llama_model.forward(
             &input,
             &input_positions,
-            &Tensor::new(vec![tokens.len() + 1 as u32], &device)?.reshape((1, 1))?,
+            &Tensor::new(vec![tokens.len() as u32 + 1], &device)?.reshape((1, 1))?,
             &mut kv_cache,
             attention_metadata,
         )?;
+        let logits = logits.squeeze(0)?;
+
+        index_pos += ctxt.len();
+
+        let next_token = logits_processor.sample(&logits)?;
+        token_generated += 1;
+        tokens.push(next_token);
+
+        if let Some(t) = tokenizer.next_token(next_token)? {
+            print!("{t}");
+            std::io::stdout().flush()?;
+        }
 
         // for index in 0..sample_len {
         //     if index == 1 {
