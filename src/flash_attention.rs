@@ -579,10 +579,6 @@ mod tests {
 
         let result = flash_attention.forward(&q, &k, &v, &kv_cache, attention_metadata);
 
-        // Restore the original function calls
-        let flash_attn_varlen_with_block_table = original_flash_attn_varlen;
-        let flash_attn_kv_cache_full = original_flash_attn_kv_cache;
-
         assert!(result.is_ok());
         let output = result.unwrap();
         assert_eq!(output.shape().dims(), &[15, 512]);
