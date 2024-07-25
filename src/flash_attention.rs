@@ -537,7 +537,7 @@ mod tests {
                 sequence_start_locations: Some(
                     Tensor::from_vec(vec![0u32, 5], (2,), &device).unwrap(),
                 ),
-                sequence_lengths: Some(Tensor::from_vec(vec![5u32, 5], (2,), &device).unwrap()),
+                sequence_lengths: Some(Tensor::from_vec(vec![5i64, 5], (2,), &device).unwrap()),
             }),
             decoding_metadata: Some(FlashAttentionDecodingMetadata {
                 block_tables: Some(
