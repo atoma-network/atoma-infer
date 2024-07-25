@@ -393,7 +393,7 @@ impl FlashAttention {
         if let Some(decoding_metadata) = &attention_metadata.decoding_metadata {
             // Decoding inference forward pass
             let out = flash_attn_kv_cache_full(
-                &q,
+                &q.unsqueeze(1)?, // in decoding phase, each batch sequence has length 1
                 &k_cache,
                 &v_cache,
                 self.alibi_slopes.as_ref(),
