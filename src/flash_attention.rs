@@ -572,6 +572,6 @@ mod tests {
             .to_vec1::<u8>()
             .unwrap()
             .iter()
-            .any(|&x| x));
+            .any(|&x| x == 0));
     }
 }
