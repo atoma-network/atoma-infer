@@ -225,8 +225,6 @@ impl CausalSelfAttention {
             ))?
             .transpose(1, 2)?
             .contiguous()?;
-        panic!("FLAG: q.dims() = {:?}, k.dims() = {:?}, v.dims() = {:?}", q.dims(), k.dims(), v.dims());
-
         let mut v = v
             .reshape((
                 b_sz,
@@ -235,6 +233,9 @@ impl CausalSelfAttention {
                 self.head_dim,
             ))?
             .transpose(1, 2)?;
+
+            panic!("FLAG: q.dims() = {:?}, k.dims() = {:?}, v.dims() = {:?}", q.dims(), k.dims(), v.dims());
+
 
         let q = self.apply_rotary_embed(&q, input_positions)?;
         let k = self.apply_rotary_embed(&k, input_positions)?;
