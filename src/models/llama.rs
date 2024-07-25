@@ -150,7 +150,7 @@ impl CausalSelfAttention {
     fn apply_rotary_embed(&self, x: &Tensor, input_positions: &Tensor) -> Result<Tensor> {
         let _enter = self.span_rot.enter();
         let (b_sz, num_heads, num_total_tokens, hidden_size) = x.dims4()?; // [1, num_heads, num_total_tokens, hidden_size]
-
+    
         if b_sz != 1 {
             candle_core::bail!("batch size must be 1, got {}", b_sz);
         }
@@ -168,7 +168,7 @@ impl CausalSelfAttention {
                 input_positions.dtype()
             );
         }
-
+    
         // select input positions tokens
         let cos = self
             .cos_sin_cache
@@ -178,13 +178,13 @@ impl CausalSelfAttention {
             .cos_sin_cache
             .sin
             .index_select(&input_positions.flatten(0, 1)?, 0)?;
-
-        panic!("FLAG: cos.dims() = {:?}, sin.dims() = {:?}", cos.dims(), sin.dims());
-
-        // Reshape cos and sin to match the input tensor shape
-        let cos = cos.reshape((b_sz, num_heads, num_total_tokens, hidden_size))?;
-        let sin = sin.reshape((b_sz, num_heads, num_total_tokens, hidden_size))?;
-
+    
+        // Reshape cos and sin to match the input tensor shape, but only for the rotary dimension
+        let cos = cos.reshape((1, 1, num_total_tokens, self.head_dim))?
+                   .expand((b_sz, num_heads, num_total_tokens, self.head_dim))?;
+        let sin = sin.reshape((1, 1, num_total_tokens, self.head_dim))?
+                   .expand((b_sz, num_heads, num_total_tokens, self.head_dim))?;
+    
         candle_nn::rotary_emb::rope(x, &cos, &sin)
     }
 
