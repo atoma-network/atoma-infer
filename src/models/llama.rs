@@ -533,7 +533,8 @@ mod tests {
                 &device,
             )?;
             config.num_hidden_layers as usize
-        ].iter_mut().collect();
+        ];
+        let mut kv_cache = kv_cache.iter_mut().collect();
 
         // prefill forward pass
         let input_positions = Tensor::arange(0, tokens.len() as u32, &device)?.unsqueeze(0)?;
