@@ -485,7 +485,7 @@ mod tests {
             .or_else(|| tokenizer.token_to_id(EOS_TOKEN));
 
         let mut tokens = tokenizer
-            .encode(prompt, true)
+            .encode(prompt.clone(), true)
             .expect("Failed to encode the prompt")
             .get_ids()
             .to_vec();
