@@ -464,13 +464,13 @@ mod tests {
         let device = Device::new_cuda(0).unwrap();
         let model_id = "TinyLlama/TinyLlama-1.1B-Chat-v1.0".to_string();
         let revision = "main".to_string();
-        let api = Api::new()?;
+        let api = Api::new().expect("Failed to create the HF API");
 
         println!("loading the model weights from {model_id}");
         let api = api.repo(Repo::with_revision(model_id, RepoType::Model, revision));
 
-        let tokenizer_filename = api.get("tokenizer.json")?;
-        let config_filename = api.get("config.json")?;
+        let tokenizer_filename = api.get("tokenizer.json").expect("Failed to get tokenizer.json");
+        let config_filename = api.get("config.json").expect("Failed to get config.json");
         let config: LlamaConfig = serde_json::from_slice(&std::fs::read(config_filename).expect("Failed to read config.json")).expect("Failed to deserialize config.json");
         let config = config.into_config();
 
