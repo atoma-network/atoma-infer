@@ -407,6 +407,7 @@ impl FlashAttention {
                 decoding_metadata.sequence_lengths.as_ref(),
                 None,
             )?;
+            panic!("FLAG: out.shape() = {:?}", out.shape());
             output.slice_assign(&[num_prefill_tokens.., 0.., 0..], &out.squeeze(1)?)?;
         }
 
