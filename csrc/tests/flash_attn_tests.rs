@@ -223,7 +223,7 @@ fn flash_attn_kv_cache() -> Result<()> {
             None,
             None,
             None,
-            Some(seqlens_k),
+            Some(&seqlens_k),
             None,
         )?
         // .transpose(0, 1)?
