@@ -179,6 +179,8 @@ impl CausalSelfAttention {
             .sin
             .index_select(&input_positions.flatten(0, 1)?, 0)?;
 
+        panic!("FLAG: cos.dims() = {:?}, sin.dims() = {:?}", cos.dims(), sin.dims());
+
         // Reshape cos and sin to match the input tensor shape
         let cos = cos.reshape((b_sz, num_heads, num_total_tokens, hidden_size))?;
         let sin = sin.reshape((b_sz, num_heads, num_total_tokens, hidden_size))?;
@@ -236,9 +238,6 @@ impl CausalSelfAttention {
 
         let q = self.apply_rotary_embed(&q, input_positions)?;
         let k = self.apply_rotary_embed(&k, input_positions)?;
-
-        panic!("FLAG: q.dims() = {:?}, k.dims() = {:?}, v.dims() = {:?}", q.dims(), k.dims(), v.dims());
-
 
         let mut k = self.repeat_kv(k)?;
         let mut v = self.repeat_kv(v)?;
