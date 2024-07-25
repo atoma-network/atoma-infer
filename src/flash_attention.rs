@@ -70,7 +70,7 @@ pub struct FlashAttentionMetadata {
     pub context_lengths: Option<Tensor>,
     /// Slot mapping, maps each token (or element in the input sequence) to a specific slot
     /// or segment in the cached memory. This allows for efficient access and organization
-    /// of attention computations over large sequences.
+    /// of attention computations over large sequences. Of shape `[num_prefill_tokens + num_decoding_tokens,]`
     pub slot_mapping: Tensor,
     /// Flash attention decoding metadata
     pub decoding_metadata: Option<FlashAttentionDecodingMetadata>,
@@ -493,35 +493,6 @@ mod tests {
         assert!(result.is_err());
     }
 
-    // Mock external functions
-    fn mock_flash_attn_varlen_with_block_table(
-        _q: &Tensor,
-        _k: &Tensor,
-        _v: &Tensor,
-        _alibi_slopes: Option<&Tensor>,
-        _sequence_start_locations: &Tensor,
-        _max_sequence_length_q: usize,
-        _max_sequence_length_k: usize,
-        _softmax_scale: f32,
-        _sliding_window: Option<usize>,
-        _block_tables: Option<Tensor>,
-    ) -> Result<Tensor> {
-        Tensor::ones((10, 8, 64), DType::F32, &Device::Cpu)
-    }
-
-    fn mock_flash_attn_kv_cache_full(
-        _q: &Tensor,
-        _k_cache: &Tensor,
-        _v_cache: &Tensor,
-        _alibi_slopes: Option<&Tensor>,
-        _softmax_scale: f32,
-        _sliding_window: Option<usize>,
-        _block_tables: Option<&Tensor>,
-        _sequence_lengths: Option<&Tensor>,
-    ) -> Result<Tensor> {
-        Tensor::ones((5, 8, 64), DType::F32, &Device::Cpu)
-    }
-
     #[test]
     fn test_forward() {
         let device = Device::Cpu;
@@ -537,36 +508,74 @@ mod tests {
             device: device.clone(),
         };
 
-        let q = Tensor::zeros((15, 512), DType::F32, &device).unwrap();
-        let k = Tensor::zeros((15, 256), DType::F32, &device).unwrap();
-        let v = Tensor::zeros((15, 256), DType::F32, &device).unwrap();
-        let kv_cache = Tensor::zeros((2, 10, 32, 4, 64), DType::F32, &device).unwrap();
+        let q = Tensor::rand(0.0, 10.0, (15, 512), &device)
+            .unwrap()
+            .to_dtype(DType::BF16)
+            .unwrap();
+        let k = Tensor::rand(0.0, 10.0, (15, 256), &device)
+            .unwrap()
+            .to_dtype(DType::BF16)
+            .unwrap();
+        let v = Tensor::rand(0.0, 10.0, (15, 256), &device)
+            .unwrap()
+            .to_dtype(DType::BF16)
+            .unwrap();
+        let kv_cache = Tensor::rand(0.0, 10.0, (2, 10, 32, 4, 64), &device)
+            .unwrap()
+            .to_dtype(DType::BF16)
+            .unwrap();
 
         let attention_metadata = FlashAttentionMetadata {
             context_lengths: None,
-            slot_mapping: Tensor::zeros((15,), DType::I64, &device).unwrap(),
+            slot_mapping: Tensor::arange(1, 15, &device)
+                .unwrap()
+                .to_dtype(DType::I64)
+                .unwrap(),
             prefill_metadata: Some(FlashAttentionPrefillMetadata {
-                block_tables: Some(Tensor::zeros((1, 10), DType::I64, &device).unwrap()),
-                max_query_length: Some(10),
-                max_prefill_sequence_length: 10,
-                query_start_locations: Some(Tensor::zeros((2,), DType::I64, &device).unwrap()),
-                sequence_start_locations: Some(Tensor::zeros((2,), DType::I64, &device).unwrap()),
-                sequence_lengths: Some(Tensor::zeros((1,), DType::I64, &device).unwrap()),
+                block_tables: Some(
+                    Tensor::arange(0, 2, &device)
+                        .unwrap()
+                        .to_dtype(DType::I64)
+                        .unwrap()
+                        .reshape(((), 2))
+                        .unwrap(),
+                ),
+                max_query_length: Some(3),
+                max_prefill_sequence_length: 3,
+                query_start_locations: Some(
+                    Tensor::from_vec(vec![0, 5], (2,), &device)
+                        .unwrap()
+                        .to_dtype(DType::I64)
+                        .unwrap(),
+                ),
+                sequence_start_locations: Some(
+                    Tensor::from_vec(vec![0, 5], (2,), &device)
+                        .unwrap()
+                        .to_dtype(DType::I64)
+                        .unwrap(),
+                ),
+                sequence_lengths: Some(
+                    Tensor::from_vec(vec![5, 5], (2,), &device)
+                        .unwrap()
+                        .to_dtype(DType::I64)
+                        .unwrap(),
+                ),
             }),
             decoding_metadata: Some(FlashAttentionDecodingMetadata {
-                block_tables: Some(Tensor::zeros((1, 10), DType::I64, &device).unwrap()),
-                max_decoding_sequence_length: 5,
-                sequence_lengths: Some(Tensor::zeros((1,), DType::I64, &device).unwrap()),
+                block_tables: Some(
+                    Tensor::arange(2, 3, &device)
+                        .unwrap()
+                        .to_dtype(DType::I64)
+                        .unwrap()
+                        .reshape((2, 2))
+                        .unwrap(),
+                ),
+                max_decoding_sequence_length: 3,
+                sequence_lengths: Some(Tensor::zeros((3, 2), DType::I64, &device).unwrap()),
             }),
             num_prefill_tokens: 10,
             num_decoding_tokens: 5,
         };
-
-        // Replace the external function calls with our mocks
-        let original_flash_attn_varlen = flash_attn_varlen_with_block_table;
-        flash_attn_varlen_with_block_table = mock_flash_attn_varlen_with_block_table;
-        let original_flash_attn_kv_cache = flash_attn_kv_cache_full;
-        flash_attn_kv_cache_full = mock_flash_attn_kv_cache_full;
 
         let result = flash_attention.forward(&q, &k, &v, &kv_cache, attention_metadata);
 
