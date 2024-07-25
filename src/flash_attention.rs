@@ -407,11 +407,10 @@ impl FlashAttention {
                 decoding_metadata.sequence_lengths.as_ref(),
                 None,
             )?;
-            // panic!("FLAG: out.shape() = {:?}, output.shape() = {:?}", out.squeeze(1)?.shape(), output.shape());
             output.slice_assign(&[num_prefill_tokens.., 0.., 0..], &out.squeeze(1)?)?;
         }
 
-        Ok(output)
+        output.reshape(q.shape())
     }
 }
 
@@ -561,7 +560,7 @@ mod tests {
 
         // assert!(result.is_ok());
         let output = result.unwrap();
-        // assert_eq!(output.shape().dims(), &[15, 512]);
+        assert_eq!(output.shape().dims(), &[15, 512]);
         // assert!(!output.eq(0.).unwrap().flatten_all().unwrap().to_vec1().unwrap().iter().any(|&x| x == 0.));
     }
 }
