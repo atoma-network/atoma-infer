@@ -451,7 +451,7 @@ impl Llama {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hf_hub::{api::tokio::Api, RepoType, Repo};
+    use hf_hub::{api::sync::Api, RepoType, Repo};
     use tokenizers::Tokenizer;
 
     const EOS_TOKEN: &str = "</s>";
