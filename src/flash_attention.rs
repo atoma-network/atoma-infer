@@ -260,7 +260,7 @@ impl FlashAttention {
         k: &Tensor,
         v: &Tensor,
         kv_cache: &Tensor,
-        attention_metadata: FlashAttentionMetadata,
+        attention_metadata: &FlashAttentionMetadata,
     ) -> Result<Tensor> {
         let (q_num_tokens, q_hidden_size) = q.dims2()?;
         let (k_num_tokens, k_hidden_size) = k.dims2()?;
@@ -559,7 +559,7 @@ mod tests {
             num_decoding_tokens: 5,
         };
 
-        let result = flash_attention.forward(&q, &k, &v, &kv_cache, attention_metadata);
+        let result = flash_attention.forward(&q, &k, &v, &kv_cache, &attention_metadata);
 
         assert!(result.is_ok());
 

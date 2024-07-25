@@ -190,7 +190,7 @@ impl CausalSelfAttention {
         x: &Tensor,
         input_positions: &Tensor,
         kv_cache: &Tensor,
-        attention_metadata: FlashAttentionMetadata,
+        attention_metadata: &FlashAttentionMetadata,
     ) -> Result<Tensor> {
         let (batch_size, num_total_tokens, hidden_size) = x.dims3()?;
         let b_sz = 1;
@@ -340,7 +340,7 @@ impl Block {
         x: &Tensor,
         input_positions: &Tensor,
         cache: &Tensor,
-        attention_metadata: FlashAttentionMetadata,
+        attention_metadata: &FlashAttentionMetadata,
     ) -> Result<Tensor> {
         let _enter = self.span.enter();
         let residual = x;
@@ -416,7 +416,7 @@ impl Llama {
         }
         let mut x = self.wte.forward(x)?;
         for (i, block) in self.blocks.iter_mut().enumerate() {
-            x = block.forward(&x, input_positions, &kv_caches[i], attention_metadata)?;
+            x = block.forward(&x, input_positions, &kv_caches[i], &attention_metadata)?;
         }
         let x = self.ln_f.forward(&x)?;
         let x = x.index_select(selected_token_indices, 1)?.contiguous()?;
