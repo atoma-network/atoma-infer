@@ -496,7 +496,7 @@ mod tests {
     #[test]
     fn test_forward() {
         let device = Device::new_cuda(0).unwrap();
-        let mut flash_attention = FlashAttention {
+        let flash_attention = FlashAttention {
             num_heads: 8,
             num_kv_heads: 4,
             num_queries_per_kv: 2,
