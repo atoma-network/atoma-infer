@@ -480,7 +480,7 @@ mod tests {
             let vb = unsafe { VarBuilder::from_mmaped_safetensors(&filenames, dtype, &device)? };
             Llama::load(vb, &config, dtype, &device).expect("Failed to load the model")
         };
-        let tokenizer = Tokenizer::from_file(tokenizer_filename).map_err(E::msg)?;
+        let tokenizer = Tokenizer::from_file(tokenizer_filename).expect("Failed to load the tokenizer");
         let eos_token_id = config
             .eos_token_id
             .or_else(|| tokenizer.token_to_id(EOS_TOKEN));
@@ -495,5 +495,6 @@ mod tests {
         println!("starting the inference loop");
         print!("{prompt}");
 
+        Ok(())
     }
 }
