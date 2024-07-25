@@ -404,7 +404,7 @@ impl FlashAttention {
                 decoding_metadata.sequence_lengths.as_ref(),
                 None,
             )?;
-            output.slice_assign(&[num_prefill_tokens..], &out)?;
+            output.slice_assign(&[num_prefill_tokens.., ..output.dims()[1], ..output.dims()[2]], &out)?;
         }
 
         Ok(output)
@@ -502,19 +502,19 @@ mod tests {
             device: device.clone(),
         };
 
-        let q = Tensor::rand(0.0, 10.0, (15, 512), &device)
+        let q = Tensor::rand(1.0, 10.0, (15, 512), &device)
             .unwrap()
             .to_dtype(DType::BF16)
             .unwrap();
-        let k = Tensor::rand(0.0, 10.0, (15, 256), &device)
+        let k = Tensor::rand(1.0, 10.0, (15, 256), &device)
             .unwrap()
             .to_dtype(DType::BF16)
             .unwrap();
-        let v = Tensor::rand(0.0, 10.0, (15, 256), &device)
+        let v = Tensor::rand(1.0, 10.0, (15, 256), &device)
             .unwrap()
             .to_dtype(DType::BF16)
             .unwrap();
-        let kv_cache = Tensor::rand(0.0, 10.0, (2, 10, 32, 4, 64), &device)
+        let kv_cache = Tensor::rand(1.0, 10.0, (2, 10, 32, 4, 64), &device)
             .unwrap()
             .to_dtype(DType::BF16)
             .unwrap();
@@ -558,5 +558,6 @@ mod tests {
         assert!(result.is_ok());
         let output = result.unwrap();
         assert_eq!(output.shape().dims(), &[15, 512]);
+        assert!(!output.eq(0.).unwrap().flatten_all().unwrap().to_vec1().unwrap().iter().any(|&x| x == 0.));
     }
 }
