@@ -355,134 +355,134 @@ fn reshape_and_cache_flash_t<
             candle_core::bail!("Only support f16/bf16 dtypes and src and dst must have same dtype")
         }
     };
-    // let num_tokens = key.dims()[0];
-    // let num_heads = key.dims()[1];
-    // let head_size = key.dims()[2];
-    // let num_blocks = key_cache.dims()[0];
-    // let block_size = key_cache.dims()[1];
+    let num_tokens = key.dims()[0];
+    let num_heads = key.dims()[1];
+    let head_size = key.dims()[2];
+    let num_blocks = key_cache.dims()[0];
+    let block_size = key_cache.dims()[1];
 
-    // let key_stride = key.stride()[0];
-    // let value_stride = value.stride()[0];
-    // let block_stride = key_cache.stride()[0];
-    // let k_rank = key.rank();
-    // let v_rank = value.rank();
-    // let kc_rank = key_cache.rank();
-    // let vc_rank = value_cache.rank();
+    let key_stride = key.stride()[0];
+    let value_stride = value.stride()[0];
+    let block_stride = key_cache.stride()[0];
+    let k_rank = key.rank();
+    let v_rank = value.rank();
+    let kc_rank = key_cache.rank();
+    let vc_rank = value_cache.rank();
 
-    // if block_stride != value_cache.stride()[0] {
-    //     candle_core::bail!(
-    //         "Only support block_stride == value_cache.stride[0] (got block_stride {} and value_cache.stride[0] {})", 
-    //         block_stride,
-    //         value_cache.stride()[0]
-    //     )
-    // }
-    // if k_rank != 3 || v_rank != 3 {
-    //     candle_core::bail!(
-    //         "Only support key and value tensors with rank 3 (got {} and v_rank {})",
-    //         k_rank,
-    //         v_rank
-    //     )
-    // }
-    // if kc_rank != 4 {
-    //     candle_core::bail!(
-    //         "Only support key_cache tensors with rank 4 (got {})",
-    //         kc_rank
-    //     )
-    // }
-    // if vc_rank != 4 {
-    //     candle_core::bail!(
-    //         "Only support value_cache tensors with rank 4 (got {})",
-    //         vc_rank
-    //     )
-    // }
-    // if [num_blocks, block_size, num_heads, head_size] != key_cache.dims() {
-    //     candle_core::bail!(
-    //         "Only support key_cache with shape [{num_blocks}, {block_size}, {num_heads}, {head_size}] (got {:?})",
-    //         key_cache.dims()
-    //     )
-    // }
-    // if [num_blocks, block_size, num_heads, head_size] != value_cache.dims() {
-    //     candle_core::bail!(
-    //         "Only support value_cache with shape [{num_blocks}, {block_size}, {num_heads}, {head_size}] (got {:?})",
-    //         value_cache.dims()
-    //     )
-    // }
-    // if [num_tokens, num_heads, head_size] != value.dims() {
-    //     candle_core::bail!(
-    //         "Only support value with shape [{num_tokens}, {num_heads}, {head_size}] (got {:?})",
-    //         value.dims()
-    //     )
-    // }
-    // if (num_tokens) != slot_mapping.dims1()? {
-    //     candle_core::bail!(
-    //         "Only support slot_mapping with shape [{num_tokens}] (got {:?})",
-    //         slot_mapping.dims1()
-    //     )
-    // }
+    if block_stride != value_cache.stride()[0] {
+        candle_core::bail!(
+            "Only support block_stride == value_cache.stride[0] (got block_stride {} and value_cache.stride[0] {})", 
+            block_stride,
+            value_cache.stride()[0]
+        )
+    }
+    if k_rank != 3 || v_rank != 3 {
+        candle_core::bail!(
+            "Only support key and value tensors with rank 3 (got {} and v_rank {})",
+            k_rank,
+            v_rank
+        )
+    }
+    if kc_rank != 4 {
+        candle_core::bail!(
+            "Only support key_cache tensors with rank 4 (got {})",
+            kc_rank
+        )
+    }
+    if vc_rank != 4 {
+        candle_core::bail!(
+            "Only support value_cache tensors with rank 4 (got {})",
+            vc_rank
+        )
+    }
+    if [num_blocks, block_size, num_heads, head_size] != key_cache.dims() {
+        candle_core::bail!(
+            "Only support key_cache with shape [{num_blocks}, {block_size}, {num_heads}, {head_size}] (got {:?})",
+            key_cache.dims()
+        )
+    }
+    if [num_blocks, block_size, num_heads, head_size] != value_cache.dims() {
+        candle_core::bail!(
+            "Only support value_cache with shape [{num_blocks}, {block_size}, {num_heads}, {head_size}] (got {:?})",
+            value_cache.dims()
+        )
+    }
+    if [num_tokens, num_heads, head_size] != value.dims() {
+        candle_core::bail!(
+            "Only support value with shape [{num_tokens}, {num_heads}, {head_size}] (got {:?})",
+            value.dims()
+        )
+    }
+    if (num_tokens) != slot_mapping.dims1()? {
+        candle_core::bail!(
+            "Only support slot_mapping with shape [{num_tokens}] (got {:?})",
+            slot_mapping.dims1()
+        )
+    }
 
-    // let (k, k_l) = key.storage_and_layout();
-    // let (v, v_l) = value.storage_and_layout();
-    // let (kc, kc_l) = key_cache.storage_and_layout();
-    // let (vc, vc_l) = value_cache.storage_and_layout();
-    // let (slot_mapping, slot_mapping_l) = slot_mapping.storage_and_layout();
+    let (k, k_l) = key.storage_and_layout();
+    let (v, v_l) = value.storage_and_layout();
+    let (kc, kc_l) = key_cache.storage_and_layout();
+    let (vc, vc_l) = value_cache.storage_and_layout();
+    let (slot_mapping, slot_mapping_l) = slot_mapping.storage_and_layout();
 
-    // let k_ptr = match &*k {
-    //     candle_core::Storage::Cuda(c) => {
-    //         let k = c.as_cuda_slice::<T>()?;
-    //         let k = k.slice(k_l.start_offset()..);
-    //         *k.device_ptr() as *const core::ffi::c_void
-    //     }
-    //     _ => candle_core::bail!("key must be a cuda tensor"),
-    // };
-    // let v_ptr = match &*v {
-    //     candle_core::Storage::Cuda(c) => {
-    //         let v = c.as_cuda_slice::<T>()?;
-    //         let v = v.slice(v_l.start_offset()..);
-    //         *v.device_ptr() as *const core::ffi::c_void
-    //     }
-    //     _ => candle_core::bail!("value must be a cuda tensor"),
-    // };
-    // let kc_ptr = match &*kc {
-    //     candle_core::Storage::Cuda(c) => {
-    //         let kc = c.as_cuda_slice::<T>()?;
-    //         let kc = kc.slice(kc_l.start_offset()..);
-    //         *kc.device_ptr() as *const core::ffi::c_void
-    //     }
-    //     _ => candle_core::bail!("key_cache must be a cuda tensor"),
-    // };
-    // let vc_ptr = match &*vc {
-    //     candle_core::Storage::Cuda(c) => {
-    //         let vc = c.as_cuda_slice::<T>()?;
-    //         let vc = vc.slice(vc_l.start_offset()..);
-    //         *vc.device_ptr() as *const core::ffi::c_void
-    //     }
-    //     _ => candle_core::bail!("value_cache must be a cuda tensor"),
-    // };
-    // let slot_mapping_ptr = match &*slot_mapping {
-    //     candle_core::Storage::Cuda(c) => {
-    //         let slot_mapping = c.as_cuda_slice::<i64>()?;
-    //         let slot_mapping = slot_mapping.slice(slot_mapping_l.start_offset()..);
-    //         *slot_mapping.device_ptr() as *const i64
-    //     }
-    //     _ => candle_core::bail!("slot_mapping must be a cuda tensor"),
-    // };
+    let k_ptr = match &*k {
+        candle_core::Storage::Cuda(c) => {
+            let k = c.as_cuda_slice::<T>()?;
+            let k = k.slice(k_l.start_offset()..);
+            *k.device_ptr() as *const core::ffi::c_void
+        }
+        _ => candle_core::bail!("key must be a cuda tensor"),
+    };
+    let v_ptr = match &*v {
+        candle_core::Storage::Cuda(c) => {
+            let v = c.as_cuda_slice::<T>()?;
+            let v = v.slice(v_l.start_offset()..);
+            *v.device_ptr() as *const core::ffi::c_void
+        }
+        _ => candle_core::bail!("value must be a cuda tensor"),
+    };
+    let kc_ptr = match &*kc {
+        candle_core::Storage::Cuda(c) => {
+            let kc = c.as_cuda_slice::<T>()?;
+            let kc = kc.slice(kc_l.start_offset()..);
+            *kc.device_ptr() as *const core::ffi::c_void
+        }
+        _ => candle_core::bail!("key_cache must be a cuda tensor"),
+    };
+    let vc_ptr = match &*vc {
+        candle_core::Storage::Cuda(c) => {
+            let vc = c.as_cuda_slice::<T>()?;
+            let vc = vc.slice(vc_l.start_offset()..);
+            *vc.device_ptr() as *const core::ffi::c_void
+        }
+        _ => candle_core::bail!("value_cache must be a cuda tensor"),
+    };
+    let slot_mapping_ptr = match &*slot_mapping {
+        candle_core::Storage::Cuda(c) => {
+            let slot_mapping = c.as_cuda_slice::<i64>()?;
+            let slot_mapping = slot_mapping.slice(slot_mapping_l.start_offset()..);
+            *slot_mapping.device_ptr() as *const i64
+        }
+        _ => candle_core::bail!("slot_mapping must be a cuda tensor"),
+    };
 
-    // unsafe {
-    //     ffi::reshape_and_cache_flash(
-    //         k_ptr,
-    //         v_ptr,
-    //         kc_ptr,
-    //         vc_ptr,
-    //         slot_mapping_ptr,
-    //         num_tokens as i64,
-    //         num_heads as i64,
-    //         head_size as i64,
-    //         block_size as i64,
-    //         key_stride as i64,
-    //         value_stride as i64,
-    //         block_stride as i64,
-    //         dtype,
-    //     )
-    // }
+    unsafe {
+        ffi::reshape_and_cache_flash(
+            k_ptr,
+            v_ptr,
+            kc_ptr,
+            vc_ptr,
+            slot_mapping_ptr,
+            num_tokens as i64,
+            num_heads as i64,
+            head_size as i64,
+            block_size as i64,
+            key_stride as i64,
+            value_stride as i64,
+            block_stride as i64,
+            dtype,
+        )
+    }
     Ok(())
 }

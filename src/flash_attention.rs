@@ -297,24 +297,24 @@ impl FlashAttention {
         let (k_cache, v_cache) = self.split_kv_cache(kv_cache)?;
         reshape_and_cache_flash(&k, &v, &k_cache, &v_cache, &attention_metadata.slot_mapping)?;
 
-        let num_prefill_tokens = attention_metadata.num_prefill_tokens;
-        let num_decoding_tokens = attention_metadata.num_decoding_tokens;
+        // let num_prefill_tokens = attention_metadata.num_prefill_tokens;
+        // let num_decoding_tokens = attention_metadata.num_decoding_tokens;
 
-        if k_num_tokens != num_prefill_tokens + num_decoding_tokens {
-            candle_core::bail!(
-                "query must have number of tokens {} (got {})",
-                num_prefill_tokens + num_decoding_tokens,
-                q_num_tokens
-            )
-        }
+        // if k_num_tokens != num_prefill_tokens + num_decoding_tokens {
+        //     candle_core::bail!(
+        //         "query must have number of tokens {} (got {})",
+        //         num_prefill_tokens + num_decoding_tokens,
+        //         q_num_tokens
+        //     )
+        // }
 
-        // Query for decode
-        // KV is not needed because it is already cached
-        let q = q.i(num_prefill_tokens..)?;
-        // QKV for prefill
-        let q = q.i(..num_prefill_tokens)?;
-        let k = k.i(..num_prefill_tokens)?;
-        let v = v.i(..num_prefill_tokens)?;
+        // // Query for decode
+        // // KV is not needed because it is already cached
+        // let q = q.i(num_prefill_tokens..)?;
+        // // QKV for prefill
+        // let q = q.i(..num_prefill_tokens)?;
+        // let k = k.i(..num_prefill_tokens)?;
+        // let v = v.i(..num_prefill_tokens)?;
 
         let output = Tensor::zeros(q.shape(), q.dtype(), &self.device)?;
 
