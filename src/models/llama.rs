@@ -216,8 +216,6 @@ impl CausalSelfAttention {
             ))?
             .transpose(1, 2)?
             .contiguous()?;
-        panic!("FLAG: q.dims() = {:?}, k.dims() = {:?}, v.dims() = {:?}", q.dims(), k.dims(), v.dims());
-
         let k = k
             .reshape((
                 b_sz,
@@ -227,6 +225,8 @@ impl CausalSelfAttention {
             ))?
             .transpose(1, 2)?
             .contiguous()?;
+        panic!("FLAG: q.dims() = {:?}, k.dims() = {:?}, v.dims() = {:?}", q.dims(), k.dims(), v.dims());
+
         let mut v = v
             .reshape((
                 b_sz,
