@@ -1725,39 +1725,39 @@ impl FlashAttentionKvCache {
         let seqlen_q_rounded = utils::round_multiple(seqlen_q, 128);
         let seqlen_k_rounded = utils::round_multiple(seqlens_k, 128);
 
-        // let cu_seqlens_k_ptr = if let Some(seqlens_k) = &self.seqlens_k {
-        //     if seqlens_k.dims() != &[batch_size] {
-        //         candle_core::bail!(
-        //             "shape mismatch of seqlens_k (got {:?}) expected {:?})",
-        //             seqlens_k.dims(),
-        //             [batch_size]
-        //         )
-        //     }
-        //     if seqlens_k.dtype() != DType::U32 {
-        //         candle_core::bail!(
-        //             "DType mismatch seqlens_k {:?}, expected {:?}",
-        //             seqlens_k.dtype(),
-        //             DType::U32
-        //         );
-        //     }
-        //     let (seqlens_k, seqlens_k_layout) = seqlens_k.storage_and_layout();
-        //     let seqlens_k = match &*seqlens_k {
-        //         candle_core::Storage::Cuda(c) => c.as_cuda_slice::<u32>()?,
-        //         _ => candle_core::bail!("seqlens_k must be a cuda tensor"),
-        //     };
-        //     let seqlens_k = seqlens_k.slice(seqlens_k_layout.start_offset()..);
-        //     let seqlens_k_stride = seqlens_k_layout.stride();
-        //     let seqlens_k_rank = seqlens_k_stride.len();
-        //     if seqlens_k_stride[seqlens_k_rank - 1] != 1 {
-        //         candle_core::bail!(
-        //             "the last dim of seqlens_k must be contiguous {seqlens_k_stride:?}"
-        //         )
-        //     }
-        //     *seqlens_k.device_ptr() as *const core::ffi::c_int
-        // } else {
-        //     std::ptr::null()
-        // };
-        // let is_seqlens_k_cumulative = self.seqlens_k.is_none();
+        let cu_seqlens_k_ptr = if let Some(seqlens_k) = &self.seqlens_k {
+            if seqlens_k.dims() != &[batch_size] {
+                candle_core::bail!(
+                    "shape mismatch of seqlens_k (got {:?}) expected {:?})",
+                    seqlens_k.dims(),
+                    [batch_size]
+                )
+            }
+            if seqlens_k.dtype() != DType::U32 {
+                candle_core::bail!(
+                    "DType mismatch seqlens_k {:?}, expected {:?}",
+                    seqlens_k.dtype(),
+                    DType::U32
+                );
+            }
+            let (seqlens_k, seqlens_k_layout) = seqlens_k.storage_and_layout();
+            let seqlens_k = match &*seqlens_k {
+                candle_core::Storage::Cuda(c) => c.as_cuda_slice::<u32>()?,
+                _ => candle_core::bail!("seqlens_k must be a cuda tensor"),
+            };
+            let seqlens_k = seqlens_k.slice(seqlens_k_layout.start_offset()..);
+            let seqlens_k_stride = seqlens_k_layout.stride();
+            let seqlens_k_rank = seqlens_k_stride.len();
+            if seqlens_k_stride[seqlens_k_rank - 1] != 1 {
+                candle_core::bail!(
+                    "the last dim of seqlens_k must be contiguous {seqlens_k_stride:?}"
+                )
+            }
+            *seqlens_k.device_ptr() as *const core::ffi::c_int
+        } else {
+            std::ptr::null()
+        };
+        let is_seqlens_k_cumulative = self.seqlens_k.is_none();
 
         let elem_count = out_shape.elem_count();
         let dst = unsafe { dev.alloc::<T>(elem_count) }.w()?;
