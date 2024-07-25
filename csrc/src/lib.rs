@@ -909,7 +909,7 @@ impl FlashAttentionVarLen {
         let seqlen_k_rounded = utils::round_multiple(self.max_seqlen_k, 128);
 
         let elem_count = out_shape.elem_count();
-        let dst = unsafe { dev.alloc::<f16>(elem_count) }.w()?;
+        let dst = unsafe { dev.alloc::<T>(elem_count) }.w()?;
         let softmax_lse = dev
             .alloc_zeros::<f32>(batch_size * num_heads * self.max_seqlen_q)
             .w()?;
@@ -1634,9 +1634,9 @@ impl FlashAttentionKvCache {
             )
         };
 
-        let q = q.as_cuda_slice::<f16>()?;
-        let kc = kc.as_cuda_slice::<f16>()?;
-        let vc = vc.as_cuda_slice::<f16>()?;
+        let q = q.as_cuda_slice::<T>()?;
+        let kc = kc.as_cuda_slice::<T>()?;
+        let vc = vc.as_cuda_slice::<T>()?;
         let q = q.slice(q_l.start_offset()..);
         let kc = kc.slice(kc_l.start_offset()..);
         let vc = vc.slice(vc_l.start_offset()..);
@@ -1760,7 +1760,7 @@ impl FlashAttentionKvCache {
         let is_seqlens_k_cumulative = self.seqlens_k.is_none();
 
         let elem_count = out_shape.elem_count();
-        let dst = unsafe { dev.alloc::<f16>(elem_count) }.w()?;
+        let dst = unsafe { dev.alloc::<T>(elem_count) }.w()?;
         let softmax_lse = dev
             .alloc_zeros::<f32>(batch_size * num_heads * seqlen_q)
             .w()?;
