@@ -492,7 +492,7 @@ mod tests {
         let device = Device::Cpu;
         let mut flash_attention = FlashAttention {
             num_heads: 8,
-            num_kv_heads: 8,
+            num_kv_heads: 4,
             num_queries_per_kv: 2,
             head_dim: 64,
             softmax_scale: 1.0,
@@ -514,7 +514,7 @@ mod tests {
             .unwrap()
             .to_dtype(DType::BF16)
             .unwrap();
-        let kv_cache = Tensor::rand(0.0, 10.0, (2, 10, 32, 8, 64), &device)
+        let kv_cache = Tensor::rand(0.0, 10.0, (2, 10, 32, 4, 64), &device)
             .unwrap()
             .to_dtype(DType::BF16)
             .unwrap();
