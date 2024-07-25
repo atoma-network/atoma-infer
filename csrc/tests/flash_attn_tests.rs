@@ -1,5 +1,6 @@
 use anyhow::Result;
 use candle_core::{DType, Device, IndexOp, Tensor, D};
+use serial_test::serial;
 
 fn to_vec3_round(t: Tensor, digits: i32) -> Result<Vec<Vec<Vec<f32>>>> {
     let b = 10f32.powi(digits);
@@ -28,6 +29,7 @@ fn fa_acausal(q: &Tensor, k: &Tensor, v: &Tensor, softmax_scale: f32) -> Result<
 }
 
 #[test]
+#[serial]
 fn flash_attn_acausal() -> Result<()> {
     let device = Device::new_cuda(0)?;
     let q = Tensor::arange(0u32, 48, &device)?
@@ -91,6 +93,7 @@ fn flash_attn_acausal() -> Result<()> {
 }
 
 #[test]
+#[serial]
 fn flash_attn_varlen() -> Result<()> {
     let device = Device::new_cuda(0)?;
     let q = Tensor::arange(0u32, 48, &device)?
@@ -135,9 +138,9 @@ fn flash_attn_varlen() -> Result<()> {
 }
 
 #[test]
+#[serial]
 fn flash_attn_varlen_with_block_table() -> Result<()> {
     // Wait in order for CUDA state to sync
-    std::thread::sleep(std::time::Duration::from_millis(500));
     let device = Device::new_cuda(0)?;
     let block_size = 16;
     let num_blocks = 2;
@@ -195,6 +198,7 @@ fn flash_attn_varlen_with_block_table() -> Result<()> {
 }
 
 #[test]
+#[serial]
 fn flash_attn_kv_cache() -> Result<()> {
     let device = Device::new_cuda(0)?;
     let q = Tensor::arange(0u32, 48, &device)?
