@@ -553,9 +553,9 @@ mod tests {
             num_decoding_tokens: 5,
         };
 
-        // let result = flash_attention.forward(&q, &k, &v, &kv_cache, attention_metadata);
+        let result = flash_attention.forward(&q, &k, &v, &kv_cache, attention_metadata);
 
-        assert!(result.is_ok());
+        // assert!(result.is_ok());
         let output = result.unwrap();
         assert_eq!(output.shape().dims(), &[15, 512]);
     }
