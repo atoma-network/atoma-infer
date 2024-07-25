@@ -1759,7 +1759,7 @@ impl FlashAttentionKvCache {
         // };
         // let is_seqlens_k_cumulative = self.seqlens_k.is_none();
 
-        // let elem_count = out_shape.elem_count();
+        let elem_count = out_shape.elem_count();
         let dst = unsafe { dev.alloc::<T>(elem_count) }.w()?;
         // let softmax_lse = dev
         //     .alloc_zeros::<f32>(batch_size * num_heads * seqlen_q)
