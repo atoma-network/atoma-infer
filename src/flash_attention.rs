@@ -389,7 +389,7 @@ impl FlashAttention {
                     None,
                     prefill_metadata.block_tables.as_ref(),
                 )?;
-                // output.slice_assign(&[..num_prefill_tokens, ..output.dims()[1], ..output.dims()[2]], &out)?;
+                output.slice_assign(&[..num_prefill_tokens, ..output.dims()[1], ..output.dims()[2]], &out)?;
             }
         }
 
@@ -407,7 +407,7 @@ impl FlashAttention {
                 decoding_metadata.sequence_lengths.as_ref(),
                 None,
             )?;
-            // output.slice_assign(&[num_prefill_tokens.., 0.., 0..], &out)?;
+            output.slice_assign(&[num_prefill_tokens.., 0.., 0..], &out)?;
         }
 
         Ok(output)
@@ -558,7 +558,7 @@ mod tests {
 
         let result = flash_attention.forward(&q, &k, &v, &kv_cache, attention_metadata);
 
-        // assert!(result.is_ok());
+        assert!(result.is_ok());
         let output = result.unwrap();
         // assert_eq!(output.shape().dims(), &[15, 512]);
         // assert!(!output.eq(0.).unwrap().flatten_all().unwrap().to_vec1().unwrap().iter().any(|&x| x == 0.));
