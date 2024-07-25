@@ -350,11 +350,12 @@ impl Block {
         let _enter = self.span.enter();
         let residual = x;
         let x = self.rms_1.forward(&x)?;
-        panic!("FLAG");
         let x = (self
             .attn
             .forward(&x, input_positions, cache, attention_metadata)?
             + residual)?;
+            panic!("FLAG");
+
         let residual = &x;
         let x = (self.mlp.forward(&self.rms_2.forward(&x)?)? + residual)?;
         Ok(x)
