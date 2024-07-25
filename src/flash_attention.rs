@@ -393,7 +393,7 @@ impl FlashAttention {
         if let Some(decoding_metadata) = &attention_metadata.decoding_metadata {
             // Decoding inference forward pass
             let out = flash_attn_kv_cache_full(
-                &q.unsqueeze(1)?, // in decoding phase, each batch sequence has length 1
+                &decode_q.unsqueeze(1)?, // in decoding phase, each batch sequence has length 1
                 &k_cache,
                 &v_cache,
                 self.alibi_slopes.as_ref(),
@@ -547,7 +547,7 @@ mod tests {
                         .unwrap(),
                 ),
                 max_decoding_sequence_length: 3,
-                sequence_lengths: Some(Tensor::from_vec(vec![3i64, 2], (2,), &device).unwrap()),
+                sequence_lengths: Some(Tensor::from_vec(vec![3i64; 5], (10,), &device).unwrap()),
             }),
             num_prefill_tokens: 10,
             num_decoding_tokens: 5,
