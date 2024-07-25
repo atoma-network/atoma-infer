@@ -521,7 +521,7 @@ mod tests {
 
         let attention_metadata = FlashAttentionMetadata {
             context_lengths: None,
-            slot_mapping: Tensor::arange(0u32, 15, &device).unwrap(),
+            slot_mapping: Tensor::arange(0i64, 15, &device).unwrap(),
             prefill_metadata: Some(FlashAttentionPrefillMetadata {
                 block_tables: Some(
                     Tensor::arange(0u32, 2, &device)
