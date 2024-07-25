@@ -1,7 +1,7 @@
 use candle_core::{DType, Device, Module, Result, Tensor};
 use candle_nn::{embedding, Embedding, VarBuilder};
 use candle_transformers::models::with_tracing::{linear_no_bias as linear, Linear, RmsNorm};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use crate::flash_attention::{FlashAttention, FlashAttentionMetadata};
@@ -9,7 +9,7 @@ use crate::flash_attention::{FlashAttention, FlashAttentionMetadata};
 /// Maximum input sequence token length
 const MAX_SEQ_LEN: usize = 4096;
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct LlamaConfig {
     pub hidden_size: usize,
     pub intermediate_size: usize,
@@ -456,8 +456,10 @@ mod tests {
     use hf_hub::{api::Api, RepoType};
     use tokenizers::Tokenizer;
 
+    const EOS_TOKEN: &str = "</s>";
+
     #[test]
-    fn test_llama_model() {
+    fn test_llama_model() -> Result<()> {
         let prompt = "Write a poem about the beauty of the moon.".to_string();
 
         let dtype = DType::BF16;
