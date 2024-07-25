@@ -1,4 +1,4 @@
-use candle_core::{quantized, DType, Device, IndexOp, Result, Tensor};
+use candle_core::{DType, Device, IndexOp, Result, Tensor};
 use csrc::{
     copy_blocks, flash_attn_kv_cache_full, flash_attn_varlen_with_block_table,
     reshape_and_cache_flash, swap_blocks,
@@ -182,12 +182,7 @@ impl FlashAttention {
     }
 
     /// Splits the KV cache
-    pub fn split_kv_cache(
-        &self,
-        kv_cache: &Tensor,
-        num_kv_heads: usize,
-        head_size: usize,
-    ) -> Result<(Tensor, Tensor)> {
+    pub fn split_kv_cache(&self, kv_cache: &Tensor) -> Result<(Tensor, Tensor)> {
         if kv_cache.dims().len() != 5 {
             candle_core::bail!(
                 "KV cache must have rank 5 (got {})",
@@ -195,7 +190,7 @@ impl FlashAttention {
             )
         }
 
-        let (cache_size, num_blocks, block_size, num_kv_heads, head_dim) = kv_cache.dims5()?;
+        let (cache_size, _num_blocks, _block_size, num_kv_heads, head_dim) = kv_cache.dims5()?;
         if cache_size != 2 {
             candle_core::bail!("KV cache must have cache_size 2 (got {cache_size})")
         }
@@ -225,9 +220,8 @@ impl FlashAttention {
         dst: &mut Tensor,
         block_mapping: &HashMap<i64, i64>,
     ) -> Result<()> {
-        let (src_key, src_value) = self.split_kv_cache(src, self.num_kv_heads, self.head_dim)?;
-        let (mut dst_key, mut dst_value) =
-            self.split_kv_cache(dst, self.num_kv_heads, self.head_dim)?;
+        let (src_key, src_value) = self.split_kv_cache(src)?;
+        let (mut dst_key, mut dst_value) = self.split_kv_cache(dst)?;
         swap_blocks(&src_key, &mut dst_key, block_mapping)?;
         swap_blocks(&src_value, &mut dst_value, block_mapping)
     }
@@ -300,8 +294,8 @@ impl FlashAttention {
         let v = v.reshape(&[v_num_tokens, self.num_kv_heads, self.head_dim])?;
 
         // Reshape the input keys and values and store them in the cache.
-        let (k_cache, v_cache) = self.split_kv_cache(kv_cache, self.num_kv_heads, self.head_dim)?;
-        reshape_and_cache_flash(&q, &v, &k_cache, &v_cache, &attention_metadata.slot_mapping);
+        let (k_cache, v_cache) = self.split_kv_cache(kv_cache)?;
+        reshape_and_cache_flash(&k, &v, &k_cache, &v_cache, &attention_metadata.slot_mapping)?;
 
         let num_prefill_tokens = attention_metadata.num_prefill_tokens;
         let num_decoding_tokens = attention_metadata.num_decoding_tokens;
@@ -314,15 +308,15 @@ impl FlashAttention {
             )
         }
 
+        let output = Tensor::zeros(q.shape(), q.dtype(), &self.device)?;
+
         // Query for decode
         // KV is not needed because it is already cached
-        let q = q.i(num_prefill_tokens..)?;
+        let decode_q = q.i(num_prefill_tokens..)?;
         // QKV for prefill
         let q = q.i(..num_prefill_tokens)?;
         let k = k.i(..num_prefill_tokens)?;
         let v = v.i(..num_prefill_tokens)?;
-
-        let output = Tensor::zeros(q.shape(), q.dtype(), &self.device)?;
 
         if let Some(prefill_metadata) = &attention_metadata.prefill_metadata {
             if prefill_metadata
@@ -353,7 +347,10 @@ impl FlashAttention {
                     None,
                     None,
                 )?;
-                output.slice_assign(&[..num_prefill_tokens], &out)?;
+                output.slice_assign(
+                    &[..num_prefill_tokens, ..output.dims()[1], ..output.dims()[2]],
+                    &out,
+                )?;
             } else {
                 // We support prefix enabled attention, in which a block table is provided.
                 let sequence_lengths = if let Some(sequence_lengths) =
@@ -392,14 +389,17 @@ impl FlashAttention {
                     None,
                     prefill_metadata.block_tables.as_ref(),
                 )?;
-                output.slice_assign(&[..num_prefill_tokens], &out)?;
+                output.slice_assign(
+                    &[..num_prefill_tokens, ..output.dims()[1], ..output.dims()[2]],
+                    &out,
+                )?;
             }
         }
 
         if let Some(decoding_metadata) = &attention_metadata.decoding_metadata {
             // Decoding inference forward pass
             let out = flash_attn_kv_cache_full(
-                &q,
+                &decode_q.unsqueeze(1)?, // in decoding phase, each batch sequence has length 1
                 &k_cache,
                 &v_cache,
                 self.alibi_slopes.as_ref(),
@@ -410,10 +410,10 @@ impl FlashAttention {
                 decoding_metadata.sequence_lengths.as_ref(),
                 None,
             )?;
-            output.slice_assign(&[num_prefill_tokens..], &out)?;
+            output.slice_assign(&[num_prefill_tokens.., 0.., 0..], &out.squeeze(1)?)?;
         }
 
-        Ok(output)
+        output.reshape((q_num_tokens, self.num_heads * self.head_dim))
     }
 }
 
@@ -472,7 +472,7 @@ mod tests {
             FlashAttention::new(8, 4, 64, 1.0, None, None, DType::F32, device.clone()).unwrap();
 
         let kv_cache = Tensor::zeros((2, 10, 32, 4, 64), DType::F32, &device).unwrap();
-        let result = flash_attention.split_kv_cache(&kv_cache, 4, 64);
+        let result = flash_attention.split_kv_cache(&kv_cache);
 
         assert!(result.is_ok());
 
@@ -489,14 +489,14 @@ mod tests {
             FlashAttention::new(8, 4, 64, 1.0, None, None, DType::F32, device.clone()).unwrap();
 
         let kv_cache = Tensor::zeros((2, 10, 32, 4), DType::F32, &device).unwrap();
-        let result = flash_attention.split_kv_cache(&kv_cache, 4, 64);
+        let result = flash_attention.split_kv_cache(&kv_cache);
         assert!(result.is_err());
     }
 
     #[test]
     fn test_forward() {
-        let device = Device::Cpu;
-        let mut flash_attention = FlashAttention {
+        let device = Device::new_cuda(0).unwrap();
+        let flash_attention = FlashAttention {
             num_heads: 8,
             num_kv_heads: 4,
             num_queries_per_kv: 2,
@@ -504,74 +504,56 @@ mod tests {
             softmax_scale: 1.0,
             alibi_slopes: None,
             sliding_window: None,
-            kv_cache_dtype: DType::F32,
+            kv_cache_dtype: DType::BF16,
             device: device.clone(),
         };
 
-        let q = Tensor::rand(0.0, 10.0, (15, 512), &device)
+        let q = Tensor::rand(1.0, 10.0, (15, 512), &device)
             .unwrap()
             .to_dtype(DType::BF16)
             .unwrap();
-        let k = Tensor::rand(0.0, 10.0, (15, 256), &device)
+        let k = Tensor::rand(1.0, 10.0, (15, 256), &device)
             .unwrap()
             .to_dtype(DType::BF16)
             .unwrap();
-        let v = Tensor::rand(0.0, 10.0, (15, 256), &device)
+        let v = Tensor::rand(1.0, 10.0, (15, 256), &device)
             .unwrap()
             .to_dtype(DType::BF16)
             .unwrap();
-        let kv_cache = Tensor::rand(0.0, 10.0, (2, 10, 32, 4, 64), &device)
+        let kv_cache = Tensor::rand(1.0, 10.0, (2, 10, 32, 4, 64), &device)
             .unwrap()
             .to_dtype(DType::BF16)
             .unwrap();
 
         let attention_metadata = FlashAttentionMetadata {
             context_lengths: None,
-            slot_mapping: Tensor::arange(1, 15, &device)
-                .unwrap()
-                .to_dtype(DType::I64)
-                .unwrap(),
+            slot_mapping: Tensor::arange(0i64, 15, &device).unwrap(),
             prefill_metadata: Some(FlashAttentionPrefillMetadata {
                 block_tables: Some(
-                    Tensor::arange(0, 2, &device)
+                    Tensor::arange(0i64, 2, &device)
                         .unwrap()
-                        .to_dtype(DType::I64)
-                        .unwrap()
-                        .reshape(((), 2))
+                        .reshape((2, 1))
                         .unwrap(),
                 ),
                 max_query_length: Some(3),
                 max_prefill_sequence_length: 3,
                 query_start_locations: Some(
-                    Tensor::from_vec(vec![0, 5], (2,), &device)
-                        .unwrap()
-                        .to_dtype(DType::I64)
-                        .unwrap(),
+                    Tensor::from_vec(vec![0u32, 5, 10], (3,), &device).unwrap(),
                 ),
                 sequence_start_locations: Some(
-                    Tensor::from_vec(vec![0, 5], (2,), &device)
-                        .unwrap()
-                        .to_dtype(DType::I64)
-                        .unwrap(),
+                    Tensor::from_vec(vec![0u32, 5, 10], (3,), &device).unwrap(),
                 ),
-                sequence_lengths: Some(
-                    Tensor::from_vec(vec![5, 5], (2,), &device)
-                        .unwrap()
-                        .to_dtype(DType::I64)
-                        .unwrap(),
-                ),
+                sequence_lengths: Some(Tensor::from_vec(vec![5i64, 5], (2,), &device).unwrap()),
             }),
             decoding_metadata: Some(FlashAttentionDecodingMetadata {
                 block_tables: Some(
-                    Tensor::arange(2, 3, &device)
+                    Tensor::arange(2i64, 7, &device)
                         .unwrap()
-                        .to_dtype(DType::I64)
-                        .unwrap()
-                        .reshape((2, 2))
+                        .reshape((5, 1))
                         .unwrap(),
                 ),
                 max_decoding_sequence_length: 3,
-                sequence_lengths: Some(Tensor::zeros((3, 2), DType::I64, &device).unwrap()),
+                sequence_lengths: Some(Tensor::from_vec(vec![3u32; 5], (5,), &device).unwrap()),
             }),
             num_prefill_tokens: 10,
             num_decoding_tokens: 5,
@@ -580,7 +562,17 @@ mod tests {
         let result = flash_attention.forward(&q, &k, &v, &kv_cache, attention_metadata);
 
         assert!(result.is_ok());
+
         let output = result.unwrap();
         assert_eq!(output.shape().dims(), &[15, 512]);
+        assert!(!output
+            .eq(0.)
+            .unwrap()
+            .flatten_all()
+            .unwrap()
+            .to_vec1::<u8>()
+            .unwrap()
+            .iter()
+            .any(|&x| x == 0));
     }
 }

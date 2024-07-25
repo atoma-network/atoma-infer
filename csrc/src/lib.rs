@@ -628,9 +628,9 @@ impl FlashAttentionVarLen {
             None => candle_core::bail!("seqlens_k has to be contiguous"),
         };
 
-        let q = q.as_cuda_slice::<f16>()?;
-        let k = k.as_cuda_slice::<f16>()?;
-        let v = v.as_cuda_slice::<f16>()?;
+        let q = q.as_cuda_slice::<T>()?;
+        let k = k.as_cuda_slice::<T>()?;
+        let v = v.as_cuda_slice::<T>()?;
         let q = q.slice(q_l.start_offset()..);
         let k = k.slice(k_l.start_offset()..);
         let v = v.slice(v_l.start_offset()..);
@@ -643,7 +643,7 @@ impl FlashAttentionVarLen {
             let (block_table_storage, block_table_layout) = block_table.storage_and_layout();
             let block_table_ptr = match &*block_table_storage {
                 candle_core::Storage::Cuda(c) => {
-                    let cuda_slice = c.as_cuda_slice::<u32>()?;
+                    let cuda_slice = c.as_cuda_slice::<i64>()?;
                     let block_table = cuda_slice.slice(block_table_layout.start_offset()..);
                     let block_table_stride = block_table_layout.stride();
                     let block_table_rank = block_table_stride.len();
@@ -729,7 +729,14 @@ impl FlashAttentionVarLen {
         }
 
         let max_num_blocks_per_sequence = if let Some(layout) = block_table_layout {
-            let (_b_sz, max_num_blocks_per_sequence) = layout.shape().dims2()?;
+            let (b_sz, max_num_blocks_per_sequence) = layout.shape().dims2()?;
+            if b_sz != batch_size {
+                candle_core::bail!(
+                    "shape mismatch of block_table (got {:?}) expected {:?})",
+                    layout.shape(),
+                    (batch_size, max_num_blocks_per_sequence)
+                )
+            }
             max_num_blocks_per_sequence
         } else {
             0
@@ -909,7 +916,7 @@ impl FlashAttentionVarLen {
         let seqlen_k_rounded = utils::round_multiple(self.max_seqlen_k, 128);
 
         let elem_count = out_shape.elem_count();
-        let dst = unsafe { dev.alloc::<f16>(elem_count) }.w()?;
+        let dst = unsafe { dev.alloc::<T>(elem_count) }.w()?;
         let softmax_lse = dev
             .alloc_zeros::<f32>(batch_size * num_heads * self.max_seqlen_q)
             .w()?;
@@ -1498,7 +1505,7 @@ impl FlashAttentionKvCache {
             let (block_table_storage, block_table_layout) = block_table.storage_and_layout();
             let block_table_ptr = match &*block_table_storage {
                 candle_core::Storage::Cuda(c) => {
-                    let cuda_slice = c.as_cuda_slice::<u32>()?;
+                    let cuda_slice = c.as_cuda_slice::<i64>()?;
                     let block_table = cuda_slice.slice(block_table_layout.start_offset()..);
                     let block_table_stride = block_table_layout.stride();
                     let block_table_rank = block_table_stride.len();
@@ -1518,7 +1525,14 @@ impl FlashAttentionKvCache {
         let (batch_size, seqlen_q, num_heads, head_size_og) = q_l.shape().dims4()?;
 
         let max_num_blocks_per_sequence = if let Some(layout) = block_table_layout {
-            let (_b_sz, max_num_blocks_per_sequence) = layout.shape().dims2()?;
+            let (b_sz, max_num_blocks_per_sequence) = layout.shape().dims2()?;
+            if b_sz != batch_size {
+                candle_core::bail!(
+                    "shape mismatch of block_table (got {:?}) expected {:?})",
+                    layout.shape(),
+                    (batch_size, max_num_blocks_per_sequence)
+                )
+            }
             max_num_blocks_per_sequence
         } else {
             0
@@ -1634,9 +1648,9 @@ impl FlashAttentionKvCache {
             )
         };
 
-        let q = q.as_cuda_slice::<f16>()?;
-        let kc = kc.as_cuda_slice::<f16>()?;
-        let vc = vc.as_cuda_slice::<f16>()?;
+        let q = q.as_cuda_slice::<T>()?;
+        let kc = kc.as_cuda_slice::<T>()?;
+        let vc = vc.as_cuda_slice::<T>()?;
         let q = q.slice(q_l.start_offset()..);
         let kc = kc.slice(kc_l.start_offset()..);
         let vc = vc.slice(vc_l.start_offset()..);
@@ -1760,7 +1774,7 @@ impl FlashAttentionKvCache {
         let is_seqlens_k_cumulative = self.seqlens_k.is_none();
 
         let elem_count = out_shape.elem_count();
-        let dst = unsafe { dev.alloc::<f16>(elem_count) }.w()?;
+        let dst = unsafe { dev.alloc::<T>(elem_count) }.w()?;
         let softmax_lse = dev
             .alloc_zeros::<f32>(batch_size * num_heads * seqlen_q)
             .w()?;
