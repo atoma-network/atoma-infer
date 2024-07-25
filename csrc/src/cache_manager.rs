@@ -420,52 +420,52 @@ fn reshape_and_cache_flash_t<
         )
     }
 
-    let (k, k_l) = key.storage_and_layout();
-    let (v, v_l) = value.storage_and_layout();
-    let (kc, kc_l) = key_cache.storage_and_layout();
-    let (vc, vc_l) = value_cache.storage_and_layout();
-    let (slot_mapping, slot_mapping_l) = slot_mapping.storage_and_layout();
+    // let (k, k_l) = key.storage_and_layout();
+    // let (v, v_l) = value.storage_and_layout();
+    // let (kc, kc_l) = key_cache.storage_and_layout();
+    // let (vc, vc_l) = value_cache.storage_and_layout();
+    // let (slot_mapping, slot_mapping_l) = slot_mapping.storage_and_layout();
 
-    let k_ptr = match &*k {
-        candle_core::Storage::Cuda(c) => {
-            let k = c.as_cuda_slice::<T>()?;
-            let k = k.slice(k_l.start_offset()..);
-            *k.device_ptr() as *const core::ffi::c_void
-        }
-        _ => candle_core::bail!("key must be a cuda tensor"),
-    };
-    let v_ptr = match &*v {
-        candle_core::Storage::Cuda(c) => {
-            let v = c.as_cuda_slice::<T>()?;
-            let v = v.slice(v_l.start_offset()..);
-            *v.device_ptr() as *const core::ffi::c_void
-        }
-        _ => candle_core::bail!("value must be a cuda tensor"),
-    };
-    let kc_ptr = match &*kc {
-        candle_core::Storage::Cuda(c) => {
-            let kc = c.as_cuda_slice::<T>()?;
-            let kc = kc.slice(kc_l.start_offset()..);
-            *kc.device_ptr() as *const core::ffi::c_void
-        }
-        _ => candle_core::bail!("key_cache must be a cuda tensor"),
-    };
-    let vc_ptr = match &*vc {
-        candle_core::Storage::Cuda(c) => {
-            let vc = c.as_cuda_slice::<T>()?;
-            let vc = vc.slice(vc_l.start_offset()..);
-            *vc.device_ptr() as *const core::ffi::c_void
-        }
-        _ => candle_core::bail!("value_cache must be a cuda tensor"),
-    };
-    let slot_mapping_ptr = match &*slot_mapping {
-        candle_core::Storage::Cuda(c) => {
-            let slot_mapping = c.as_cuda_slice::<i64>()?;
-            let slot_mapping = slot_mapping.slice(slot_mapping_l.start_offset()..);
-            *slot_mapping.device_ptr() as *const i64
-        }
-        _ => candle_core::bail!("slot_mapping must be a cuda tensor"),
-    };
+    // let k_ptr = match &*k {
+    //     candle_core::Storage::Cuda(c) => {
+    //         let k = c.as_cuda_slice::<T>()?;
+    //         let k = k.slice(k_l.start_offset()..);
+    //         *k.device_ptr() as *const core::ffi::c_void
+    //     }
+    //     _ => candle_core::bail!("key must be a cuda tensor"),
+    // };
+    // let v_ptr = match &*v {
+    //     candle_core::Storage::Cuda(c) => {
+    //         let v = c.as_cuda_slice::<T>()?;
+    //         let v = v.slice(v_l.start_offset()..);
+    //         *v.device_ptr() as *const core::ffi::c_void
+    //     }
+    //     _ => candle_core::bail!("value must be a cuda tensor"),
+    // };
+    // let kc_ptr = match &*kc {
+    //     candle_core::Storage::Cuda(c) => {
+    //         let kc = c.as_cuda_slice::<T>()?;
+    //         let kc = kc.slice(kc_l.start_offset()..);
+    //         *kc.device_ptr() as *const core::ffi::c_void
+    //     }
+    //     _ => candle_core::bail!("key_cache must be a cuda tensor"),
+    // };
+    // let vc_ptr = match &*vc {
+    //     candle_core::Storage::Cuda(c) => {
+    //         let vc = c.as_cuda_slice::<T>()?;
+    //         let vc = vc.slice(vc_l.start_offset()..);
+    //         *vc.device_ptr() as *const core::ffi::c_void
+    //     }
+    //     _ => candle_core::bail!("value_cache must be a cuda tensor"),
+    // };
+    // let slot_mapping_ptr = match &*slot_mapping {
+    //     candle_core::Storage::Cuda(c) => {
+    //         let slot_mapping = c.as_cuda_slice::<i64>()?;
+    //         let slot_mapping = slot_mapping.slice(slot_mapping_l.start_offset()..);
+    //         *slot_mapping.device_ptr() as *const i64
+    //     }
+    //     _ => candle_core::bail!("slot_mapping must be a cuda tensor"),
+    // };
 
     // unsafe {
     //     ffi::reshape_and_cache_flash(
