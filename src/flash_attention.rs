@@ -308,6 +308,8 @@ impl FlashAttention {
             )
         }
 
+        let output = Tensor::zeros(q.shape(), q.dtype(), &self.device)?;
+
         // Query for decode
         // KV is not needed because it is already cached
         let decode_q = q.i(num_prefill_tokens..)?;
@@ -315,8 +317,6 @@ impl FlashAttention {
         let q = q.i(..num_prefill_tokens)?;
         let k = k.i(..num_prefill_tokens)?;
         let v = v.i(..num_prefill_tokens)?;
-
-        let output = Tensor::zeros(q.shape(), q.dtype(), &self.device)?;
 
         if let Some(prefill_metadata) = &attention_metadata.prefill_metadata {
             if prefill_metadata
