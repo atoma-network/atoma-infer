@@ -564,6 +564,7 @@ mod tests {
         assert!(result.is_ok());
 
         let output = result.unwrap();
+        
         assert_eq!(output.shape().dims(), &[15, 512]);
         assert!(!output
             .eq(0.)

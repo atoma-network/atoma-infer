@@ -19,3 +19,4 @@ bindgen_cuda = "0.1.5"
 [dev-dependencies]
 anyhow = { version = "1", features = ["backtrace"] }
 candle-nn = { version = "0.6.0", features = ["cuda"] }
+serial_test = "3.1.1"
