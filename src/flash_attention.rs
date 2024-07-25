@@ -407,7 +407,7 @@ impl FlashAttention {
                 decoding_metadata.sequence_lengths.as_ref(),
                 None,
             )?;
-            // output.slice_assign(&[num_prefill_tokens.., 0.., 0..], &out)?;
+            output.slice_assign(&[num_prefill_tokens.., 0.., 0..], &out.squeeze(1)?)?;
         }
 
         Ok(output)
