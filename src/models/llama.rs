@@ -207,6 +207,8 @@ impl CausalSelfAttention {
         let k = self.k_proj.forward(x)?;
         let v = self.v_proj.forward(x)?;
 
+        panic!("FLAG: q.dims() = {:?}, k.dims() = {:?}, v.dims() = {:?}", q.dims(), k.dims(), v.dims());
+
         let q = q
             .reshape((
                 b_sz,
@@ -354,8 +356,6 @@ impl Block {
             .attn
             .forward(&x, input_positions, cache, attention_metadata)?
             + residual)?;
-            panic!("FLAG");
-
         let residual = &x;
         let x = (self.mlp.forward(&self.rms_2.forward(&x)?)? + residual)?;
         Ok(x)
