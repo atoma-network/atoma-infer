@@ -526,7 +526,7 @@ mod tests {
                 block_tables: Some(
                     Tensor::arange(0i64, 2, &device)
                         .unwrap()
-                        .reshape(((), 2))
+                        .reshape(((), 1))
                         .unwrap(),
                 ),
                 max_query_length: Some(3),
@@ -543,7 +543,7 @@ mod tests {
                 block_tables: Some(
                     Tensor::arange(2i64, 4, &device)
                         .unwrap()
-                        .reshape((2, 2))
+                        .reshape((2, 1))
                         .unwrap(),
                 ),
                 max_decoding_sequence_length: 3,
