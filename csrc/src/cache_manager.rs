@@ -355,19 +355,19 @@ fn reshape_and_cache_flash_t<
             candle_core::bail!("Only support f16/bf16 dtypes and src and dst must have same dtype")
         }
     };
-    let num_tokens = key.dims()[0];
-    let num_heads = key.dims()[1];
-    let head_size = key.dims()[2];
-    let num_blocks = key_cache.dims()[0];
-    let block_size = key_cache.dims()[1];
+    // let num_tokens = key.dims()[0];
+    // let num_heads = key.dims()[1];
+    // let head_size = key.dims()[2];
+    // let num_blocks = key_cache.dims()[0];
+    // let block_size = key_cache.dims()[1];
 
-    let key_stride = key.stride()[0];
-    let value_stride = value.stride()[0];
-    let block_stride = key_cache.stride()[0];
-    let k_rank = key.rank();
-    let v_rank = value.rank();
-    let kc_rank = key_cache.rank();
-    let vc_rank = value_cache.rank();
+    // let key_stride = key.stride()[0];
+    // let value_stride = value.stride()[0];
+    // let block_stride = key_cache.stride()[0];
+    // let k_rank = key.rank();
+    // let v_rank = value.rank();
+    // let kc_rank = key_cache.rank();
+    // let vc_rank = value_cache.rank();
 
     // if block_stride != value_cache.stride()[0] {
     //     candle_core::bail!(
