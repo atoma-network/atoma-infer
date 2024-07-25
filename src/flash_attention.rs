@@ -316,7 +316,7 @@ impl FlashAttention {
         // let k = k.i(..num_prefill_tokens)?;
         // let v = v.i(..num_prefill_tokens)?;
 
-        // let output = Tensor::zeros(q.shape(), q.dtype(), &self.device)?;
+        let output = Tensor::zeros(q.shape(), q.dtype(), &self.device)?;
 
         // if let Some(prefill_metadata) = &attention_metadata.prefill_metadata {
         //     if prefill_metadata
