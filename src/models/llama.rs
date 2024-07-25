@@ -234,11 +234,11 @@ impl CausalSelfAttention {
             ))?
             .transpose(1, 2)?;
 
-            panic!("FLAG: q.dims() = {:?}, k.dims() = {:?}, v.dims() = {:?}", q.dims(), k.dims(), v.dims());
-
-
         let q = self.apply_rotary_embed(&q, input_positions)?;
         let k = self.apply_rotary_embed(&k, input_positions)?;
+
+        panic!("FLAG: q.dims() = {:?}, k.dims() = {:?}, v.dims() = {:?}", q.dims(), k.dims(), v.dims());
+
 
         let mut k = self.repeat_kv(k)?;
         let mut v = self.repeat_kv(v)?;
