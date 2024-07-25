@@ -572,6 +572,6 @@ mod tests {
             .to_vec1()
             .unwrap()
             .iter()
-            .any(|&x| x == 0.));
+            .any(|&x: f32| x == 0.));
     }
 }
