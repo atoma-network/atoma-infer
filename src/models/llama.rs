@@ -409,7 +409,7 @@ impl Llama {
         x: &Tensor,
         input_positions: &Tensor,
         selected_token_indices: &Tensor,
-        kv_caches: Vec<Tensor>,
+        kv_caches: Vec<&mut Tensor>,
         attention_metadata: FlashAttentionMetadata,
     ) -> Result<Tensor> {
         if x.dims()[0] != 1 {
@@ -458,6 +458,7 @@ mod tests {
     use crate::flash_attention::FlashAttentionPrefillMetadata;
     use hf_hub::{api::sync::Api, Repo, RepoType};
     use tokenizers::Tokenizer;
+    use std::io::Write;
 
     const EOS_TOKEN: &str = "</s>";
 
@@ -531,11 +532,11 @@ mod tests {
                 &device,
             )?;
             config.num_hidden_layers as usize
-        ];
+        ].iter_mut().collect();
 
         // prefill forward pass
         let input_positions = Tensor::arange(0, tokens.len() as u32, &device)?.unsqueeze(0)?;
-        let input = Tensor::new(&tokens, &device)?.unsqueeze(0)?;
+        let input = Tensor::new(&tokens[..], &device)?.unsqueeze(0)?;
         let attention_metadata = FlashAttentionMetadata {
             context_lengths: Some(Tensor::from_vec(vec![tokens.len() as u32], (1,), &device)?),
             slot_mapping: Tensor::arange(0, tokens.len() as u32, &device)?,
@@ -563,12 +564,11 @@ mod tests {
             &input,
             &input_positions,
             &Tensor::new(vec![tokens.len() as u32 + 1], &device)?.reshape((1, 1))?,
-            &mut kv_cache,
+            kv_cache,
             attention_metadata,
         )?;
         let logits = logits.squeeze(0)?;
-
-        index_pos += ctxt.len();
+        index_pos += tokens.len();
 
         let next_token = logits_processor.sample(&logits)?;
         token_generated += 1;
