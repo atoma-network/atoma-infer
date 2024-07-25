@@ -524,7 +524,7 @@ mod tests {
             slot_mapping: Tensor::arange(0i64, 15, &device).unwrap(),
             prefill_metadata: Some(FlashAttentionPrefillMetadata {
                 block_tables: Some(
-                    Tensor::arange(0u32, 2, &device)
+                    Tensor::arange(0i64, 2, &device)
                         .unwrap()
                         .reshape(((), 1))
                         .unwrap(),
