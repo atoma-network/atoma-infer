@@ -1725,172 +1725,172 @@ impl FlashAttentionKvCache {
         let seqlen_q_rounded = utils::round_multiple(seqlen_q, 128);
         let seqlen_k_rounded = utils::round_multiple(seqlens_k, 128);
 
-        let cu_seqlens_k_ptr = if let Some(seqlens_k) = &self.seqlens_k {
-            if seqlens_k.dims() != &[batch_size] {
-                candle_core::bail!(
-                    "shape mismatch of seqlens_k (got {:?}) expected {:?})",
-                    seqlens_k.dims(),
-                    [batch_size]
-                )
-            }
-            if seqlens_k.dtype() != DType::U32 {
-                candle_core::bail!(
-                    "DType mismatch seqlens_k {:?}, expected {:?}",
-                    seqlens_k.dtype(),
-                    DType::U32
-                );
-            }
-            let (seqlens_k, seqlens_k_layout) = seqlens_k.storage_and_layout();
-            let seqlens_k = match &*seqlens_k {
-                candle_core::Storage::Cuda(c) => c.as_cuda_slice::<u32>()?,
-                _ => candle_core::bail!("seqlens_k must be a cuda tensor"),
-            };
-            let seqlens_k = seqlens_k.slice(seqlens_k_layout.start_offset()..);
-            let seqlens_k_stride = seqlens_k_layout.stride();
-            let seqlens_k_rank = seqlens_k_stride.len();
-            if seqlens_k_stride[seqlens_k_rank - 1] != 1 {
-                candle_core::bail!(
-                    "the last dim of seqlens_k must be contiguous {seqlens_k_stride:?}"
-                )
-            }
-            *seqlens_k.device_ptr() as *const core::ffi::c_int
-        } else {
-            std::ptr::null()
-        };
-        let is_seqlens_k_cumulative = self.seqlens_k.is_none();
+        // let cu_seqlens_k_ptr = if let Some(seqlens_k) = &self.seqlens_k {
+        //     if seqlens_k.dims() != &[batch_size] {
+        //         candle_core::bail!(
+        //             "shape mismatch of seqlens_k (got {:?}) expected {:?})",
+        //             seqlens_k.dims(),
+        //             [batch_size]
+        //         )
+        //     }
+        //     if seqlens_k.dtype() != DType::U32 {
+        //         candle_core::bail!(
+        //             "DType mismatch seqlens_k {:?}, expected {:?}",
+        //             seqlens_k.dtype(),
+        //             DType::U32
+        //         );
+        //     }
+        //     let (seqlens_k, seqlens_k_layout) = seqlens_k.storage_and_layout();
+        //     let seqlens_k = match &*seqlens_k {
+        //         candle_core::Storage::Cuda(c) => c.as_cuda_slice::<u32>()?,
+        //         _ => candle_core::bail!("seqlens_k must be a cuda tensor"),
+        //     };
+        //     let seqlens_k = seqlens_k.slice(seqlens_k_layout.start_offset()..);
+        //     let seqlens_k_stride = seqlens_k_layout.stride();
+        //     let seqlens_k_rank = seqlens_k_stride.len();
+        //     if seqlens_k_stride[seqlens_k_rank - 1] != 1 {
+        //         candle_core::bail!(
+        //             "the last dim of seqlens_k must be contiguous {seqlens_k_stride:?}"
+        //         )
+        //     }
+        //     *seqlens_k.device_ptr() as *const core::ffi::c_int
+        // } else {
+        //     std::ptr::null()
+        // };
+        // let is_seqlens_k_cumulative = self.seqlens_k.is_none();
 
-        let elem_count = out_shape.elem_count();
-        let dst = unsafe { dev.alloc::<T>(elem_count) }.w()?;
-        let softmax_lse = dev
-            .alloc_zeros::<f32>(batch_size * num_heads * seqlen_q)
-            .w()?;
+        // let elem_count = out_shape.elem_count();
+        // let dst = unsafe { dev.alloc::<T>(elem_count) }.w()?;
+        // let softmax_lse = dev
+        //     .alloc_zeros::<f32>(batch_size * num_heads * seqlen_q)
+        //     .w()?;
 
-        let is_bf16 = if is_bf16 { 1 } else { 0 };
+        // let is_bf16 = if is_bf16 { 1 } else { 0 };
 
-        // Causal is the special case where window_size_right == 0 and window_size_left < 0.
-        // Local is the more general case where window_size_right >= 0 or window_size_left >= 0.
-        let mut is_causal = if window_size_left < 0 && window_size_right == 0 {
-            1
-        } else {
-            0
-        };
+        // // Causal is the special case where window_size_right == 0 and window_size_left < 0.
+        // // Local is the more general case where window_size_right >= 0 or window_size_left >= 0.
+        // let mut is_causal = if window_size_left < 0 && window_size_right == 0 {
+        //     1
+        // } else {
+        //     0
+        // };
 
-        if seqlen_q == 1 && !self.alibi_slopes.is_some() {
-            // is_causal = true is the same as is_causal = false, in this case
-            is_causal = 0;
-        }
+        // if seqlen_q == 1 && !self.alibi_slopes.is_some() {
+        //     // is_causal = true is the same as is_causal = false, in this case
+        //     is_causal = 0;
+        // }
 
-        if window_size_left < 0 && window_size_right >= 0 {
-            window_size_left = seqlens_k as i32;
-        }
-        if window_size_left >= 0 && window_size_right < 0 {
-            window_size_right = seqlens_k as i32;
-        }
+        // if window_size_left < 0 && window_size_right >= 0 {
+        //     window_size_left = seqlens_k as i32;
+        // }
+        // if window_size_left >= 0 && window_size_right < 0 {
+        //     window_size_right = seqlens_k as i32;
+        // }
 
-        let num_splits = utils::compute_num_splits(
-            batch_size,
-            num_heads,
-            head_size,
-            seqlens_k,
-            seqlen_q,
-            dev.ordinal(),
-        )?;
+        // let num_splits = utils::compute_num_splits(
+        //     batch_size,
+        //     num_heads,
+        //     head_size,
+        //     seqlens_k,
+        //     seqlen_q,
+        //     dev.ordinal(),
+        // )?;
 
-        let mut softcap = self.softcap.unwrap_or(0.0);
-        let (softmax_scale, scale_softmatx_log2) = if softcap > 0.0 {
-            softcap = self.softmax_scale / softcap;
-            (softcap, softcap * std::f32::consts::LOG2_E)
-        } else {
-            // Remove potential NaN
-            softcap = 0.0;
-            (
-                self.softmax_scale,
-                self.softmax_scale * std::f32::consts::LOG2_E,
-            )
-        };
+        // let mut softcap = self.softcap.unwrap_or(0.0);
+        // let (softmax_scale, scale_softmatx_log2) = if softcap > 0.0 {
+        //     softcap = self.softmax_scale / softcap;
+        //     (softcap, softcap * std::f32::consts::LOG2_E)
+        // } else {
+        //     // Remove potential NaN
+        //     softcap = 0.0;
+        //     (
+        //         self.softmax_scale,
+        //         self.softmax_scale * std::f32::consts::LOG2_E,
+        //     )
+        // };
 
-        unsafe {
-            let q_ptr = *q.device_ptr() as *const core::ffi::c_void;
-            let kc_ptr = *kc.device_ptr() as *const core::ffi::c_void;
-            let vc_ptr = *vc.device_ptr() as *const core::ffi::c_void;
-            let block_table_batch_stride = if let Some(layout) = block_table_layout {
-                layout.stride()[0] as u32
-            } else {
-                0
-            };
-            let dst_ptr = *dst.device_ptr() as *const core::ffi::c_void;
-            let softmax_lse_ptr = *softmax_lse.device_ptr() as *const core::ffi::c_void;
-            let (k_batch_stride, v_batch_stride) = block_table_layout
-                .as_ref()
-                .map(|_| (kc_stride[0] as u32, vc_stride[0] as u32))
-                .unwrap_or((0, 0));
+        // unsafe {
+        //     let q_ptr = *q.device_ptr() as *const core::ffi::c_void;
+        //     let kc_ptr = *kc.device_ptr() as *const core::ffi::c_void;
+        //     let vc_ptr = *vc.device_ptr() as *const core::ffi::c_void;
+        //     let block_table_batch_stride = if let Some(layout) = block_table_layout {
+        //         layout.stride()[0] as u32
+        //     } else {
+        //         0
+        //     };
+        //     let dst_ptr = *dst.device_ptr() as *const core::ffi::c_void;
+        //     let softmax_lse_ptr = *softmax_lse.device_ptr() as *const core::ffi::c_void;
+        //     let (k_batch_stride, v_batch_stride) = block_table_layout
+        //         .as_ref()
+        //         .map(|_| (kc_stride[0] as u32, vc_stride[0] as u32))
+        //         .unwrap_or((0, 0));
 
-            let o_stride = out_l.stride();
-            let o_rank = o_stride.len();
-            let (q_batch_stride, o_batch_stride) = if !seqlenq_ngroups_swapped {
-                (q_stride[0] as u32, o_stride[0] as u32)
-            } else {
-                (
-                    (q_stride[0] * seqlen_q) as u32,
-                    (o_stride[0] * seqlen_q) as u32,
-                )
-            };
-            ffi::run_mha(
-                q_ptr,
-                kc_ptr,
-                vc_ptr,
-                dst_ptr,
-                softmax_lse_ptr,
-                /* alibi_slopes_ptr */ alibi_slopes_ptr,
-                /* cu_seqlens_q_ptr */ std::ptr::null(),
-                /* cu_seqlens_k_ptr */ cu_seqlens_k_ptr,
-                /* is_seqlens_k_cumulative */ is_seqlens_k_cumulative,
-                /* q_batch_stride */ q_batch_stride,
-                /* k_batch_stride */ k_batch_stride,
-                /* v_batch_stride */ v_batch_stride,
-                /* o_batch_stride */ o_batch_stride,
-                /* alibi_slopes_batch_stride */ alibi_slopes_batch_stride as u32,
-                /* q_row_stride   */ q_stride[q_rank - 3] as u32,
-                /* k_row_stride   */ kc_stride[kc_rank - 3] as u32,
-                /* v_row_stride   */ vc_stride[vc_rank - 3] as u32,
-                /* o_row_stride   */ o_stride[o_rank - 3] as u32,
-                /* q_head_stride  */ q_stride[q_rank - 2] as u32,
-                /* k_head_stride  */ kc_stride[kc_rank - 2] as u32,
-                /* v_head_stride  */ vc_stride[vc_rank - 2] as u32,
-                /* o_head_stride  */ o_stride[o_rank - 2] as u32,
-                /* num_splits */ num_splits,
-                /* b */ batch_size as u32,
-                /* h */ num_heads as u32,
-                /* h_k */ num_heads_k as u32,
-                /* d */ head_size as u32,
-                /* d_rounded */ head_size_rounded as u32,
-                /* softmax_scale*/ softmax_scale,
-                /* scale_softmatx_log2 */ scale_softmatx_log2,
-                /* block_table */ block_table_ptr,
-                /* block_table_batch_stride */ block_table_batch_stride,
-                /* page_block_size */ page_block_size as i32,
-                /* seqused_k */ std::ptr::null(),
-                /* seqlen_q */ seqlen_q as u32,
-                /* seqlen_k */ seqlens_k as u32,
-                /* seqlen_q_rounded */ seqlen_q_rounded as u32,
-                /* seqlen_k_rounded */ seqlen_k_rounded as u32,
-                /* is_bf16 */ is_bf16,
-                /* is_causal */ is_causal,
-                /* window_size_left */ window_size_left,
-                /* window_size_right */ window_size_right,
-                /* softcap */ softcap,
-                /* unpadded_lse */ false,
-                /* force_split_kernel */ !block_table_ptr.is_null(),
-            )
-        }
+        //     let o_stride = out_l.stride();
+        //     let o_rank = o_stride.len();
+        //     let (q_batch_stride, o_batch_stride) = if !seqlenq_ngroups_swapped {
+        //         (q_stride[0] as u32, o_stride[0] as u32)
+        //     } else {
+        //         (
+        //             (q_stride[0] * seqlen_q) as u32,
+        //             (o_stride[0] * seqlen_q) as u32,
+        //         )
+        //     };
+        //     ffi::run_mha(
+        //         q_ptr,
+        //         kc_ptr,
+        //         vc_ptr,
+        //         dst_ptr,
+        //         softmax_lse_ptr,
+        //         /* alibi_slopes_ptr */ alibi_slopes_ptr,
+        //         /* cu_seqlens_q_ptr */ std::ptr::null(),
+        //         /* cu_seqlens_k_ptr */ cu_seqlens_k_ptr,
+        //         /* is_seqlens_k_cumulative */ is_seqlens_k_cumulative,
+        //         /* q_batch_stride */ q_batch_stride,
+        //         /* k_batch_stride */ k_batch_stride,
+        //         /* v_batch_stride */ v_batch_stride,
+        //         /* o_batch_stride */ o_batch_stride,
+        //         /* alibi_slopes_batch_stride */ alibi_slopes_batch_stride as u32,
+        //         /* q_row_stride   */ q_stride[q_rank - 3] as u32,
+        //         /* k_row_stride   */ kc_stride[kc_rank - 3] as u32,
+        //         /* v_row_stride   */ vc_stride[vc_rank - 3] as u32,
+        //         /* o_row_stride   */ o_stride[o_rank - 3] as u32,
+        //         /* q_head_stride  */ q_stride[q_rank - 2] as u32,
+        //         /* k_head_stride  */ kc_stride[kc_rank - 2] as u32,
+        //         /* v_head_stride  */ vc_stride[vc_rank - 2] as u32,
+        //         /* o_head_stride  */ o_stride[o_rank - 2] as u32,
+        //         /* num_splits */ num_splits,
+        //         /* b */ batch_size as u32,
+        //         /* h */ num_heads as u32,
+        //         /* h_k */ num_heads_k as u32,
+        //         /* d */ head_size as u32,
+        //         /* d_rounded */ head_size_rounded as u32,
+        //         /* softmax_scale*/ softmax_scale,
+        //         /* scale_softmatx_log2 */ scale_softmatx_log2,
+        //         /* block_table */ block_table_ptr,
+        //         /* block_table_batch_stride */ block_table_batch_stride,
+        //         /* page_block_size */ page_block_size as i32,
+        //         /* seqused_k */ std::ptr::null(),
+        //         /* seqlen_q */ seqlen_q as u32,
+        //         /* seqlen_k */ seqlens_k as u32,
+        //         /* seqlen_q_rounded */ seqlen_q_rounded as u32,
+        //         /* seqlen_k_rounded */ seqlen_k_rounded as u32,
+        //         /* is_bf16 */ is_bf16,
+        //         /* is_causal */ is_causal,
+        //         /* window_size_left */ window_size_left,
+        //         /* window_size_right */ window_size_right,
+        //         /* softcap */ softcap,
+        //         /* unpadded_lse */ false,
+        //         /* force_split_kernel */ !block_table_ptr.is_null(),
+        //     )
+        // }
 
-        let out_shape = if seqlenq_ngroups_swapped {
-            Shape::from((batch_size, 1, num_heads_k * seqlen_q, head_size_og))
-        } else {
-            out_shape
-        };
+        // let out_shape = if seqlenq_ngroups_swapped {
+        //     Shape::from((batch_size, 1, num_heads_k * seqlen_q, head_size_og))
+        // } else {
+        //     out_shape
+        // };
 
-        let dst = candle_core::CudaStorage::wrap_cuda_slice(dst, dev.clone());
+        // let dst = candle_core::CudaStorage::wrap_cuda_slice(dst, dev.clone());
         Ok((dst, out_shape))
     }
 }
