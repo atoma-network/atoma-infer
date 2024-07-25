@@ -729,7 +729,14 @@ impl FlashAttentionVarLen {
         }
 
         let max_num_blocks_per_sequence = if let Some(layout) = block_table_layout {
-            let (_b_sz, max_num_blocks_per_sequence) = layout.shape().dims2()?;
+            let (b_sz, max_num_blocks_per_sequence) = layout.shape().dims2()?;
+            if b_sz != batch_size {
+                candle_core::bail!(
+                    "shape mismatch of block_table (got {:?}) expected {:?})",
+                    layout.shape(),
+                    (batch_size, max_num_blocks_per_sequence)
+                )
+            }
             max_num_blocks_per_sequence
         } else {
             0
@@ -1518,7 +1525,14 @@ impl FlashAttentionKvCache {
         let (batch_size, seqlen_q, num_heads, head_size_og) = q_l.shape().dims4()?;
 
         let max_num_blocks_per_sequence = if let Some(layout) = block_table_layout {
-            let (_b_sz, max_num_blocks_per_sequence) = layout.shape().dims2()?;
+            let (b_sz, max_num_blocks_per_sequence) = layout.shape().dims2()?;
+            if b_sz != batch_size {
+                candle_core::bail!(
+                    "shape mismatch of block_table (got {:?}) expected {:?})",
+                    layout.shape(),
+                    (batch_size, max_num_blocks_per_sequence)
+                )
+            }
             max_num_blocks_per_sequence
         } else {
             0
