@@ -1,4 +1,4 @@
-use candle_core::{quantized, DType, Device, IndexOp, Result, Tensor};
+use candle_core::{DType, Device, IndexOp, Result, Tensor};
 use csrc::{
     copy_blocks, flash_attn_kv_cache_full, flash_attn_varlen_with_block_table,
     reshape_and_cache_flash, swap_blocks,
@@ -182,12 +182,7 @@ impl FlashAttention {
     }
 
     /// Splits the KV cache
-    pub fn split_kv_cache(
-        &self,
-        kv_cache: &Tensor,
-        num_kv_heads: usize,
-        head_size: usize,
-    ) -> Result<(Tensor, Tensor)> {
+    pub fn split_kv_cache(&self, kv_cache: &Tensor) -> Result<(Tensor, Tensor)> {
         if kv_cache.dims().len() != 5 {
             candle_core::bail!(
                 "KV cache must have rank 5 (got {})",
@@ -195,7 +190,7 @@ impl FlashAttention {
             )
         }
 
-        let (cache_size, num_blocks, block_size, num_kv_heads, head_dim) = kv_cache.dims5()?;
+        let (cache_size, _num_blocks, _block_size, num_kv_heads, head_dim) = kv_cache.dims5()?;
         if cache_size != 2 {
             candle_core::bail!("KV cache must have cache_size 2 (got {cache_size})")
         }
@@ -225,9 +220,8 @@ impl FlashAttention {
         dst: &mut Tensor,
         block_mapping: &HashMap<i64, i64>,
     ) -> Result<()> {
-        let (src_key, src_value) = self.split_kv_cache(src, self.num_kv_heads, self.head_dim)?;
-        let (mut dst_key, mut dst_value) =
-            self.split_kv_cache(dst, self.num_kv_heads, self.head_dim)?;
+        let (src_key, src_value) = self.split_kv_cache(src)?;
+        let (mut dst_key, mut dst_value) = self.split_kv_cache(dst)?;
         swap_blocks(&src_key, &mut dst_key, block_mapping)?;
         swap_blocks(&src_value, &mut dst_value, block_mapping)
     }
@@ -300,8 +294,8 @@ impl FlashAttention {
         let v = v.reshape(&[v_num_tokens, self.num_kv_heads, self.head_dim])?;
 
         // Reshape the input keys and values and store them in the cache.
-        let (k_cache, v_cache) = self.split_kv_cache(kv_cache, self.num_kv_heads, self.head_dim)?;
-        reshape_and_cache_flash(&q, &v, &k_cache, &v_cache, &attention_metadata.slot_mapping);
+        let (k_cache, v_cache) = self.split_kv_cache(kv_cache)?;
+        reshape_and_cache_flash(&q, &v, &k_cache, &v_cache, &attention_metadata.slot_mapping)?;
 
         let num_prefill_tokens = attention_metadata.num_prefill_tokens;
         let num_decoding_tokens = attention_metadata.num_decoding_tokens;
@@ -472,7 +466,7 @@ mod tests {
             FlashAttention::new(8, 4, 64, 1.0, None, None, DType::F32, device.clone()).unwrap();
 
         let kv_cache = Tensor::zeros((2, 10, 32, 4, 64), DType::F32, &device).unwrap();
-        let result = flash_attention.split_kv_cache(&kv_cache, 4, 64);
+        let result = flash_attention.split_kv_cache(&kv_cache);
 
         assert!(result.is_ok());
 
@@ -489,7 +483,7 @@ mod tests {
             FlashAttention::new(8, 4, 64, 1.0, None, None, DType::F32, device.clone()).unwrap();
 
         let kv_cache = Tensor::zeros((2, 10, 32, 4), DType::F32, &device).unwrap();
-        let result = flash_attention.split_kv_cache(&kv_cache, 4, 64);
+        let result = flash_attention.split_kv_cache(&kv_cache);
         assert!(result.is_err());
     }
 
@@ -527,8 +521,7 @@ mod tests {
 
         let attention_metadata = FlashAttentionMetadata {
             context_lengths: None,
-            slot_mapping: Tensor::arange(1i64, 15, &device)
-                .unwrap(),
+            slot_mapping: Tensor::arange(1i64, 15, &device).unwrap(),
             prefill_metadata: Some(FlashAttentionPrefillMetadata {
                 block_tables: Some(
                     Tensor::arange(0i64, 2, &device)
@@ -539,17 +532,12 @@ mod tests {
                 max_query_length: Some(3),
                 max_prefill_sequence_length: 3,
                 query_start_locations: Some(
-                    Tensor::from_vec(vec![0i64, 5], (2,), &device)
-                        .unwrap(),
+                    Tensor::from_vec(vec![0i64, 5], (2,), &device).unwrap(),
                 ),
                 sequence_start_locations: Some(
-                    Tensor::from_vec(vec![0i64, 5], (2,), &device)
-                        .unwrap(),
+                    Tensor::from_vec(vec![0i64, 5], (2,), &device).unwrap(),
                 ),
-                sequence_lengths: Some(
-                    Tensor::from_vec(vec![5i64, 5], (2,), &device)
-                        .unwrap(),
-                ),
+                sequence_lengths: Some(Tensor::from_vec(vec![5i64, 5], (2,), &device).unwrap()),
             }),
             decoding_metadata: Some(FlashAttentionDecodingMetadata {
                 block_tables: Some(
