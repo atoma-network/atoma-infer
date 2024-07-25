@@ -310,11 +310,11 @@ impl FlashAttention {
 
         // Query for decode
         // KV is not needed because it is already cached
-        let q = q.i(num_prefill_tokens..)?;
+        let decode_q = q.i(num_prefill_tokens..)?;
         // QKV for prefill
         let q = q.i(..num_prefill_tokens)?;
-        // let k = k.i(..num_prefill_tokens)?;
-        // let v = v.i(..num_prefill_tokens)?;
+        let k = k.i(..num_prefill_tokens)?;
+        let v = v.i(..num_prefill_tokens)?;
 
         let output = Tensor::zeros(q.shape(), q.dtype(), &self.device)?;
 
