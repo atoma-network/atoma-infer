@@ -386,7 +386,7 @@ impl FlashAttention {
                     None,
                     prefill_metadata.block_tables.as_ref(),
                 )?;
-                output.slice_assign(&[..num_prefill_tokens, ..output.dims()[1], ..output.dims()[2]], &out)?;
+                // output.slice_assign(&[..num_prefill_tokens, ..output.dims()[1], ..output.dims()[2]], &out)?;
             }
         }
 
