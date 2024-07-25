@@ -163,7 +163,7 @@ impl CausalSelfAttention {
         }
         if input_positions.dtype() != DType::I64 {
             candle_core::bail!(
-                "index_positions must be of dtype i64, got {:?}",
+                "input_positions must be of dtype i64, got {:?}",
                 input_positions.dtype()
             );
         }
@@ -537,7 +537,7 @@ mod tests {
         let mut kv_cache = kv_cache.iter_mut().collect();
 
         // prefill forward pass
-        let input_positions = Tensor::arange(0, tokens.len() as u32, &device)?.unsqueeze(0)?;
+        let input_positions = Tensor::arange(0, tokens.len() as i64, &device)?.unsqueeze(0)?;
         let input = Tensor::new(&tokens[..], &device)?.unsqueeze(0)?;
         let attention_metadata = FlashAttentionMetadata {
             context_lengths: Some(Tensor::from_vec(vec![tokens.len() as u32], (1,), &device)?),
