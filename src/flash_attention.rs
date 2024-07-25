@@ -410,7 +410,7 @@ impl FlashAttention {
             output.slice_assign(&[num_prefill_tokens.., 0.., 0..], &out.squeeze(1)?)?;
         }
 
-        output.reshape(q.shape())
+        output.reshape((q_num_tokens, self.num_heads * self.head_dim))
     }
 }
 
