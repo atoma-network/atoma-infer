@@ -628,9 +628,9 @@ impl FlashAttentionVarLen {
             None => candle_core::bail!("seqlens_k has to be contiguous"),
         };
 
-        let q = q.as_cuda_slice::<f16>()?;
-        let k = k.as_cuda_slice::<f16>()?;
-        let v = v.as_cuda_slice::<f16>()?;
+        let q = q.as_cuda_slice::<T>()?;
+        let k = k.as_cuda_slice::<T>()?;
+        let v = v.as_cuda_slice::<T>()?;
         let q = q.slice(q_l.start_offset()..);
         let k = k.slice(k_l.start_offset()..);
         let v = v.slice(v_l.start_offset()..);
@@ -1076,10 +1076,7 @@ impl candle_core::CustomOp3 for FlashAttentionVarLen {
     ) -> Result<(candle_core::CudaStorage, Shape)> {
         match q.dtype() {
             candle_core::DType::F16 => self.cuda_fwd_t::<f16>(q, q_l, k, k_l, v, v_l, false),
-            candle_core::DType::BF16 => {
-                panic!("FLAG");
-                self.cuda_fwd_t::<bf16>(q, q_l, k, k_l, v, v_l, true)
-            }
+            candle_core::DType::BF16 => self.cuda_fwd_t::<bf16>(q, q_l, k, k_l, v, v_l, true),
             dt => candle_core::bail!("flash-attn is only supported for f16/bf16 ({dt:?})"),
         }
     }
