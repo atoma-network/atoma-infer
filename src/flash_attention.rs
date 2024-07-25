@@ -312,7 +312,7 @@ impl FlashAttention {
         // KV is not needed because it is already cached
         let q = q.i(num_prefill_tokens..)?;
         // QKV for prefill
-        let q = q.i(..num_prefill_tokens)?;
+        // let q = q.i(..num_prefill_tokens)?;
         // let k = k.i(..num_prefill_tokens)?;
         // let v = v.i(..num_prefill_tokens)?;
 
