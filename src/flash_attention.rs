@@ -571,6 +571,7 @@ mod tests {
             .unwrap()
             .to_vec1::<bool>()
             .unwrap()
+            .iter()
             .any(|&x| x));
     }
 }
