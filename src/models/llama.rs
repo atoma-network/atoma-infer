@@ -407,25 +407,25 @@ impl Llama {
         let mut x = self.wte.forward(x)?;
         for (i, block) in self.blocks.iter_mut().enumerate() {
             x = block.forward(&x, input_positions, &kv_caches[i], &attention_metadata)?;
-        }
-        {
-            use hex_literal::hex;
-            use sha3::{Digest, Sha3_256};
-            // Create a SHA3-256 object
-            let mut hasher = Sha3_256::new();
-
-            // Write input message
-            hasher.update(
-                &x.flatten_all()?
-                    .to_vec1::<half::bf16>()?
-                    .iter()
-                    .flat_map(|v| v.to_be_bytes())
-                    .collect::<Vec<_>>(),
-            );
-
-            // Read hash digest and consume hasher
-            let x = hasher.finalize();
-            panic!("FLAG: {:?}", x);
+            {
+                use hex_literal::hex;
+                use sha3::{Digest, Sha3_256};
+                // Create a SHA3-256 object
+                let mut hasher = Sha3_256::new();
+    
+                // Write input message
+                hasher.update(
+                    &x.flatten_all()?
+                        .to_vec1::<half::bf16>()?
+                        .iter()
+                        .flat_map(|v| v.to_be_bytes())
+                        .collect::<Vec<_>>(),
+                );
+    
+                // Read hash digest and consume hasher
+                let x = hasher.finalize();
+                panic!("FLAG: {:?}", x);
+            }
         }
         let x = self.ln_f.forward(&x)?;
         let x = x.index_select(selected_token_indices, 1)?.contiguous()?;
