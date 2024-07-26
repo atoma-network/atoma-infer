@@ -277,6 +277,7 @@ impl CausalSelfAttention {
         let v_proj = linear(size_in, size_kv, vb.pp("v_proj"))?;
         let o_proj = linear(size_q, size_in, vb.pp("o_proj"))?;
         let head_dim = cfg.hidden_size / cfg.num_attention_heads;
+        panic!("FLAG: head_dim = {head_dim}");
         Ok(Self {
             q_proj,
             k_proj,
