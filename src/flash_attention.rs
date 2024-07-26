@@ -495,10 +495,10 @@ mod tests {
     fn test_forward() {
         let device = Device::new_cuda(0).unwrap();
         let flash_attention = FlashAttention {
-            num_heads: 8,
-            num_kv_heads: 4,
+            num_heads: 16,
+            num_kv_heads: 8,
             num_queries_per_kv: 2,
-            head_dim: 64,
+            head_dim: 32,
             softmax_scale: 1.0,
             alibi_slopes: None,
             sliding_window: None,
