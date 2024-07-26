@@ -233,6 +233,11 @@ impl CausalSelfAttention {
         let q = self.apply_rotary_embed(&q, input_positions)?;
         let k = self.apply_rotary_embed(&k, input_positions)?;
 
+        // transpose the matrices back to [batch_size, num_heads, sequence_length, head_dim]
+        let q = q.transpose(1, 2)?.squeeze(0)?;
+        let k = k.transpose(1, 2)?.squeeze(0)?;
+        let v = v.transpose(1, 2)?.squeeze(0)?;
+
         {
             use hex_literal::hex;
             use sha3::{Digest, Sha3_256};
@@ -242,16 +247,12 @@ impl CausalSelfAttention {
             // Write input message
             hasher.update(&q.flatten_all()?.to_vec1::<half::bf16>()?.iter().flat_map(|v| v.to_be_bytes()).collect::<Vec<_>>());
             hasher.update(&k.flatten_all()?.to_vec1::<half::bf16>()?.iter().flat_map(|v| v.to_be_bytes()).collect::<Vec<_>>());
+            hasher.update(&v.flatten_all()?.to_vec1::<half::bf16>()?.iter().flat_map(|v| v.to_be_bytes()).collect::<Vec<_>>());
 
             // Read hash digest and consume hasher
             let x = hasher.finalize();
             panic!("FLAG: {:?}", x);
         }
-
-        // transpose the matrices back to [batch_size, num_heads, sequence_length, head_dim]
-        let q = q.transpose(1, 2)?.squeeze(0)?;
-        let k = k.transpose(1, 2)?.squeeze(0)?;
-        let v = v.transpose(1, 2)?.squeeze(0)?;
 
         let o = self
             .attention
