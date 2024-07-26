@@ -278,13 +278,16 @@ impl FlashAttention {
         }
         if (q_num_heads, q_hidden_dim) != (self.num_heads, self.head_dim) {
             candle_core::bail!(
-                "query must have shape [{q_num_heads}, {q_hidden_dim}] (got [{self.num_heads}, {self.head_dim}])"
+                "query must have shape [{q_num_heads}, {q_hidden_dim}] (got [{}, {}])",
+                self.num_heads,
+                self.head_dim
             )
         }
         if (k_num_heads, k_hidden_dim) != (self.num_kv_heads, self.head_dim) {
             candle_core::bail!(
-                "key must have hidden size {} (got {k_hidden_size})",
-                self.num_kv_heads * self.head_dim
+                "key must have k_num_heads = {} and hidden dim {} (got {k_num_heads}, {k_hidden_dim})",
+                self.num_kv_heads,
+                self.head_dim
             )
         }
 
