@@ -1,7 +1,6 @@
 use candle_core::{DType, Device, Module, Result, Tensor};
 use candle_nn::{embedding, Embedding, VarBuilder};
 use candle_transformers::models::with_tracing::{linear_no_bias as linear, Linear, RmsNorm};
-use core::panic;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -180,9 +179,6 @@ impl CausalSelfAttention {
             .sin
             .index_select(&input_positions.flatten(0, 1)?, 0)?;
 
-        // Reshape cos and sin to match the input tensor shape, but only for the rotary dimension
-        panic!("FLAG: input.shape() = {:?}", x.shape());
-
         candle_nn::rotary_emb::rope(x, &cos, &sin)
     }
 
@@ -275,7 +271,7 @@ impl CausalSelfAttention {
         let v_proj = linear(size_in, size_kv, vb.pp("v_proj"))?;
         let o_proj = linear(size_q, size_in, vb.pp("o_proj"))?;
         let head_dim = cfg.hidden_size / cfg.num_attention_heads;
-        panic!("num_attention_heads = {}", cfg.num_attention_heads);
+
         Ok(Self {
             q_proj,
             k_proj,
