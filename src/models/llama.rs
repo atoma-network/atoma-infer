@@ -551,7 +551,7 @@ mod tests {
         let logits = llama_model.forward(
             &input,
             &input_positions,
-            &Tensor::new(vec![tokens.len() as u32 + 1], &device)?.reshape((1, 1))?,
+            &Tensor::new(vec![tokens.len() as u32 + 1], &device)?,
             kv_cache,
             attention_metadata,
         )?;
