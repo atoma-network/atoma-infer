@@ -235,13 +235,14 @@ impl CausalSelfAttention {
 
         let mut k = self.repeat_kv(k)?;
         let mut v = self.repeat_kv(v)?;
-        panic!("FLAG");
-
 
         // transpose the matrices back to [batch_size, num_heads, sequence_length, head_dim]
         let q = q.transpose(1, 2)?;
         let k = k.transpose(1, 2)?;
         let v = v.transpose(1, 2)?;
+
+        panic!("FLAG");
+
 
         let o = self
             .attention
