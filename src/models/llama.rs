@@ -556,8 +556,8 @@ mod tests {
             kv_cache,
             attention_metadata,
         )?;
-        panic!("FLAG");
         let logits = logits.squeeze(0)?;
+        panic!("FLAG");
         index_pos += tokens.len();
 
         let mut next_token = logits_processor.sample(&logits)?;
