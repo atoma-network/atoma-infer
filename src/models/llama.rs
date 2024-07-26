@@ -405,6 +405,7 @@ impl Llama {
             );
         }
         let mut x = self.wte.forward(x)?;
+        panic!("{:?}", x.flatten_all()?.to_vec1()?);
         for (i, block) in self.blocks.iter_mut().enumerate() {
             x = block.forward(&x, input_positions, &kv_caches[i], &attention_metadata)?;
         }
@@ -564,7 +565,7 @@ mod tests {
         tokens.push(next_token);
 
         if let Some(t) = tokenizer.next_token(next_token)? {
-            print!("Token<{t}>");
+            print!("{t}");
             std::io::stdout().flush()?;
         }
 
