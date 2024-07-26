@@ -112,6 +112,7 @@ impl Cache {
     pub fn new(config: &Config, device: &Device, dtype: DType) -> Result<Self> {
         // Precomputed frequency tensor for complex exponentials (cis)
         let n_elem = config.hidden_size / config.num_attention_heads;
+        panic!("FLAG: n_elem = {n_elem}");
         let theta: Vec<_> = (0..n_elem)
             .step_by(2)
             .map(|i| 1f32 / config.rope_theta.powf(i as f32 / n_elem as f32))
@@ -277,7 +278,7 @@ impl CausalSelfAttention {
         let v_proj = linear(size_in, size_kv, vb.pp("v_proj"))?;
         let o_proj = linear(size_q, size_in, vb.pp("o_proj"))?;
         let head_dim = cfg.hidden_size / cfg.num_attention_heads;
-        panic!("FLAG: head_dim = {head_dim}");
+
         Ok(Self {
             q_proj,
             k_proj,
