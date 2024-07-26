@@ -559,9 +559,9 @@ mod tests {
         let logits = logits.squeeze(0)?;
         index_pos += tokens.len();
 
+        let mut next_token = logits_processor.sample(&logits)?;
         panic!("FLAG");
 
-        let mut next_token = logits_processor.sample(&logits)?;
         token_generated += 1;
         tokens.push(next_token);
 
