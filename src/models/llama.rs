@@ -148,45 +148,43 @@ struct CausalSelfAttention {
 
 impl CausalSelfAttention {
     fn apply_rotary_embed(&self, x: &Tensor, input_positions: &Tensor) -> Result<Tensor> {
-        let _enter = self.span_rot.enter();
-        let (b_sz, num_heads, num_total_tokens, hidden_size) = x.dims4()?; // [1, num_heads, num_total_tokens, hidden_size]
-    
-        if b_sz != 1 {
-            candle_core::bail!("batch size must be 1, got {}", b_sz);
-        }
-        if input_positions.dims() != [1, num_total_tokens] {
-            candle_core::bail!(
-                "index_positions must be of shape [batch_size, sequence_length] = [{}, {}], got {:?}",
-                b_sz,
-                num_total_tokens,
-                input_positions.dims()
-            );
-        }
-        if input_positions.dtype() != DType::I64 {
-            candle_core::bail!(
-                "input_positions must be of dtype i64, got {:?}",
-                input_positions.dtype()
-            );
-        }
-    
-        // select input positions tokens
-        let cos = self
-            .cos_sin_cache
-            .cos
-            .index_select(&input_positions.flatten(0, 1)?, 0)?;
-        let sin = self
-            .cos_sin_cache
-            .sin
-            .index_select(&input_positions.flatten(0, 1)?, 0)?;
-    
-        // Reshape cos and sin to match the input tensor shape, but only for the rotary dimension
-        let cos = cos.reshape((1, 1, num_total_tokens, self.head_dim))?
-                   .expand((b_sz, num_heads, num_total_tokens, self.head_dim))?;
-        let sin = sin.reshape((1, 1, num_total_tokens, self.head_dim))?
-                   .expand((b_sz, num_heads, num_total_tokens, self.head_dim))?;
-    
-        candle_nn::rotary_emb::rope(x, &cos, &sin)
+    let _enter = self.span_rot.enter();
+    let (b_sz, num_heads, num_total_tokens, hidden_size) = x.dims4()?; // [1, num_heads, num_total_tokens, hidden_size]
+
+    if b_sz != 1 {
+        candle_core::bail!("batch size must be 1, got {}", b_sz);
     }
+    if input_positions.dims() != [1, num_total_tokens] {
+        candle_core::bail!(
+            "index_positions must be of shape [batch_size, sequence_length] = [{}, {}], got {:?}",
+            b_sz,
+            num_total_tokens,
+            input_positions.dims()
+        );
+    }
+    if input_positions.dtype() != DType::I64 {
+        candle_core::bail!(
+            "input_positions must be of dtype i64, got {:?}",
+            input_positions.dtype()
+        );
+    }
+
+    // select input positions tokens
+    let cos = self
+        .cos_sin_cache
+        .cos
+        .index_select(&input_positions.flatten(0, 1)?, 0)?;
+    let sin = self
+        .cos_sin_cache
+        .sin
+        .index_select(&input_positions.flatten(0, 1)?, 0)?;
+
+    // Reshape cos and sin to match the input tensor shape, but only for the rotary dimension
+    let cos = cos.reshape((num_total_tokens, self.head_dim))?;
+    let sin = sin.reshape((num_total_tokens, self.head_dim))?;  
+
+    candle_nn::rotary_emb::rope(x, &cos, &sin)
+}
 
     fn forward(
         &mut self,
