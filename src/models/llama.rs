@@ -233,6 +233,8 @@ impl CausalSelfAttention {
         let q = self.apply_rotary_embed(&q, input_positions)?;
         let k = self.apply_rotary_embed(&k, input_positions)?;
 
+        panic!("FLAG: q.shape() = {:?}, k.shape() = {:?}, v.shape() = {:?}", q.shape(), k.shape(), v.shape());
+
         let mut k = self.repeat_kv(k)?;
         let mut v = self.repeat_kv(v)?;
 
