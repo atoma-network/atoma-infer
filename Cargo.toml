@@ -14,12 +14,11 @@ csrc = { path = "csrc" }
 serde = { version = "1.0.204", features = ["derive"] }
 tracing = "0.1.40"
 
+hex-literal = "0.4.1"
+sha3 = "0.10.8"
+
 [dev-dependencies]
 candle-examples = { version = "0.6.0", features = ["cuda"] }
 hf-hub = "0.3.2"
 serde_json = "1.0.120"
 tokenizers = "0.19.1"
-
-hex-literal = "0.4.1"
-sha3 = "0.10.8"
-
