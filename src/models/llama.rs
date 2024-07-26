@@ -557,8 +557,9 @@ mod tests {
             attention_metadata,
         )?;
         let logits = logits.squeeze(0)?;
-        panic!("FLAG");
         index_pos += tokens.len();
+
+        panic!("FLAG");
 
         let mut next_token = logits_processor.sample(&logits)?;
         token_generated += 1;
