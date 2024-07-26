@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use crate::flash_attention::{FlashAttention, FlashAttentionMetadata};
 
 /// Saves a given `Tensor` to a file, with `filename`
-pub fn save_tensor_to_file(tensor: &Tensor, filename: &str) -> Result<(), candle::Error> {
+pub fn save_tensor_to_file(tensor: &Tensor, filename: &str) -> Result<()> {
     let json_output = serde_json::to_string(
         &tensor
             .to_device(&Device::Cpu)?
