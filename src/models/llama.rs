@@ -233,10 +233,10 @@ impl CausalSelfAttention {
         let q = self.apply_rotary_embed(&q, input_positions)?;
         let k = self.apply_rotary_embed(&k, input_positions)?;
 
-        panic!("FLAG");
-
         let mut k = self.repeat_kv(k)?;
         let mut v = self.repeat_kv(v)?;
+        panic!("FLAG");
+
 
         // transpose the matrices back to [batch_size, num_heads, sequence_length, head_dim]
         let q = q.transpose(1, 2)?;
