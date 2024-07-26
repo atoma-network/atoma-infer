@@ -556,7 +556,7 @@ mod tests {
             kv_cache,
             attention_metadata,
         )?;
-        let logits = logits.squeeze(0)?;
+        let logits = logits.squeeze(0)?.squeeze(0)?;
         index_pos += tokens.len();
 
         let mut next_token = logits_processor.sample(&logits)?;
