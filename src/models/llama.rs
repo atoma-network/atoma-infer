@@ -560,8 +560,6 @@ mod tests {
         index_pos += tokens.len();
 
         let mut next_token = logits_processor.sample(&logits)?;
-        panic!("FLAG");
-
         token_generated += 1;
         tokens.push(next_token);
 
