@@ -564,7 +564,7 @@ mod tests {
         tokens.push(next_token);
 
         if let Some(t) = tokenizer.next_token(next_token)? {
-            print!("{t}");
+            print!("Token<{t}>");
             std::io::stdout().flush()?;
         }
 
