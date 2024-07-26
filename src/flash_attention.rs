@@ -262,36 +262,31 @@ impl FlashAttention {
         kv_cache: &Tensor,
         attention_metadata: &FlashAttentionMetadata,
     ) -> Result<Tensor> {
-        let (q_num_tokens, q_hidden_size) = q.dims2()?;
-        let (k_num_tokens, k_hidden_size) = k.dims2()?;
-        let (v_num_tokens, v_hidden_size) = v.dims2()?;
+        let (q_num_tokens, q_num_heads, q_hidden_dim) = q.dims3()?;
+        let (k_num_tokens, k_num_heads, k_hidden_dim) = k.dims3()?;
+        let (v_num_tokens, v_num_heads, v_hidden_dim) = v.dims3()?;
 
         if q_num_tokens != k_num_tokens || q_num_tokens != v_num_tokens {
             candle_core::bail!(
                 "query, key, and value must have the same number of tokens (got {q_num_tokens}, {k_num_tokens}, {v_num_tokens})"
             )
         }
-        if k_hidden_size != v_hidden_size {
+        if (k_num_tokens, k_num_heads, k_hidden_dim) != (v_num_tokens, v_num_heads, v_hidden_dim) {
             candle_core::bail!(
-                "key and value must have the same hidden size (got {k_hidden_size}, {v_hidden_size})"
+                "key and value must have the same shape (got [{k_num_tokens}, {k_num_heads}, {k_hidden_dim}], [{v_num_tokens}, {v_num_heads}, {v_hidden_dim}])"
             )
         }
-        if q_hidden_size != self.num_heads * self.head_dim {
+        if (q_num_heads, q_hidden_dim) != (self.num_heads, self.head_dim) {
             candle_core::bail!(
-                "query must have hidden size {} (got {q_hidden_size})",
-                self.num_heads * self.head_dim
+                "query must have shape [{q_num_heads}, {q_hidden_dim}] (got [{self.num_heads}, {self.head_dim}])"
             )
         }
-        if k_hidden_size != self.num_kv_heads * self.head_dim {
+        if (k_num_heads, k_hidden_dim) != (self.num_kv_heads, self.head_dim) {
             candle_core::bail!(
                 "key must have hidden size {} (got {k_hidden_size})",
                 self.num_kv_heads * self.head_dim
             )
         }
-
-        let q = q.reshape(&[q_num_tokens, self.num_heads, self.head_dim])?;
-        let k = k.reshape(&[k_num_tokens, self.num_kv_heads, self.head_dim])?;
-        let v = v.reshape(&[v_num_tokens, self.num_kv_heads, self.head_dim])?;
 
         // Reshape the input keys and values and store them in the cache.
         let (k_cache, v_cache) = self.split_kv_cache(kv_cache)?;
