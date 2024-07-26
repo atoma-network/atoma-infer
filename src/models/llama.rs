@@ -405,7 +405,19 @@ impl Llama {
             );
         }
         let mut x = self.wte.forward(x)?;
-        panic!("{:?}", x.flatten_all()?.to_vec1()?);
+        {
+            use hex_literal::hex;
+            use sha3::{Digest, Sha3_256};
+            // Create a SHA3-256 object
+            let mut hasher = Sha3_256::new();
+
+            // Write input message
+            hasher.update(&x.flatten_all()?.to_vec1::<f32>()?.iter().flat_map(|v| v.to_be_bytes()).collect::<Vec<_>>());
+
+            // Read hash digest and consume hasher
+            let x = hasher.finalize();
+            panic!("FLAG: {:?}", x);
+        }
         for (i, block) in self.blocks.iter_mut().enumerate() {
             x = block.forward(&x, input_positions, &kv_caches[i], &attention_metadata)?;
         }
