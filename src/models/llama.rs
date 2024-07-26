@@ -183,6 +183,8 @@ impl CausalSelfAttention {
     let cos = cos.reshape((num_total_tokens, self.head_dim))?;
     let sin = sin.reshape((num_total_tokens, self.head_dim))?;  
 
+    panic!("FLAG");
+
     candle_nn::rotary_emb::rope(x, &cos, &sin)
 }
 
@@ -409,7 +411,7 @@ impl Llama {
         &mut self,
         x: &Tensor,
         input_positions: &Tensor,
-        selected_token_indices: &Tensor,
+        // selected_token_indices: &Tensor,
         kv_caches: Vec<&mut Tensor>,
         attention_metadata: FlashAttentionMetadata,
     ) -> Result<Tensor> {
@@ -424,7 +426,7 @@ impl Llama {
             x = block.forward(&x, input_positions, &kv_caches[i], &attention_metadata)?;
         }
         let x = self.ln_f.forward(&x)?;
-        let x = x.index_select(selected_token_indices, 1)?.contiguous()?;
+        // let x = x.index_select(selected_token_indices, 1)?.contiguous()?;
         let logits = self.lm_head.forward(&x)?;
         logits.to_dtype(DType::F32)
     }
@@ -573,13 +575,21 @@ mod tests {
         let logits = logits.squeeze(0)?;
         index_pos += tokens.len();
 
-        let next_token = logits_processor.sample(&logits)?;
+        let mut next_token = logits_processor.sample(&logits)?;
         token_generated += 1;
         tokens.push(next_token);
 
         if let Some(t) = tokenizer.next_token(next_token)? {
             print!("{t}");
             std::io::stdout().flush()?;
+        }
+
+        for index in 1..sample_len {
+            let context = [next_token];
+            let input = Tensor::new(&context[..], &device)?.unsqueeze(0)?;
+            let input_positions = Tensor::new(&[tokens.len() as i64], &device)?.unsqueeze(0)?;
+            let selected_token_indices = Tensor::new(&[tokens.len() as i64], &device)?.unsqueeze(0)?;
+            let logits = llama_model.forward(&input, &input_positions, selected_token_indices, kv_cache, attention_metadata)?;
         }
 
         // for index in 0..sample_len {
