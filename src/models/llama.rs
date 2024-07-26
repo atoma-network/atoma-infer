@@ -411,7 +411,7 @@ impl Llama {
         &mut self,
         x: &Tensor,
         input_positions: &Tensor,
-        // selected_token_indices: &Tensor,
+        selected_token_indices: &Tensor,
         kv_caches: Vec<&mut Tensor>,
         attention_metadata: FlashAttentionMetadata,
     ) -> Result<Tensor> {
@@ -426,7 +426,7 @@ impl Llama {
             x = block.forward(&x, input_positions, &kv_caches[i], &attention_metadata)?;
         }
         let x = self.ln_f.forward(&x)?;
-        // let x = x.index_select(selected_token_indices, 1)?.contiguous()?;
+        let x = x.index_select(selected_token_indices, 1)?.contiguous()?;
         let logits = self.lm_head.forward(&x)?;
         logits.to_dtype(DType::F32)
     }
