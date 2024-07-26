@@ -522,11 +522,11 @@ mod tests {
         // kv cache
         let num_blocks = 100;
         let block_size = 16;
-        let num_heads = config.num_attention_heads;
+        let num_key_value_heads = config.num_key_value_heads;
         let head_dim = config.hidden_size / config.num_attention_heads;
         let mut kv_cache = vec![
             Tensor::zeros(
-                (2, num_blocks, block_size, num_heads, head_dim),
+                (2, num_blocks, block_size, num_key_value_heads, head_dim),
                 dtype,
                 &device,
             )?;
