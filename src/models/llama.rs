@@ -584,13 +584,13 @@ mod tests {
             std::io::stdout().flush()?;
         }
 
-        for index in 1..sample_len {
-            let context = [next_token];
-            let input = Tensor::new(&context[..], &device)?.unsqueeze(0)?;
-            let input_positions = Tensor::new(&[tokens.len() as i64], &device)?.unsqueeze(0)?;
-            let selected_token_indices = Tensor::new(&[tokens.len() as i64], &device)?.unsqueeze(0)?;
-            let logits = llama_model.forward(&input, &input_positions, selected_token_indices, kv_cache, attention_metadata)?;
-        }
+        // for index in 1..sample_len {
+        //     let context = [next_token];
+        //     let input = Tensor::new(&context[..], &device)?.unsqueeze(0)?;
+        //     let input_positions = Tensor::new(&[tokens.len() as i64], &device)?.unsqueeze(0)?;
+        //     let selected_token_indices = Tensor::new(&[tokens.len() as i64], &device)?.unsqueeze(0)?;
+        //     let logits = llama_model.forward(&input, &input_positions, selected_token_indices, kv_cache, attention_metadata)?;
+        // }
 
         // for index in 0..sample_len {
         //     if index == 1 {
