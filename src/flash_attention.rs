@@ -559,7 +559,7 @@ mod tests {
 
         let result = flash_attention.forward(&q, &k, &v, &kv_cache, &attention_metadata);
 
-        assert!(result.is_ok());
+        // assert!(result.is_ok());
 
         let output = result.unwrap();
 
