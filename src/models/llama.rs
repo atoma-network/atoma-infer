@@ -411,8 +411,6 @@ impl Llama {
         let x = self.ln_f.forward(&x)?;
         let x = x.index_select(selected_token_indices, 1)?.contiguous()?;
         let logits = self.lm_head.forward(&x)?;
-        panic!("FLAG");
-
         logits.to_dtype(DType::F32)
     }
 
