@@ -414,7 +414,7 @@ impl Llama {
             // Write input message
             hasher.update(
                 &x.flatten_all()?
-                    .to_vec1::<f32>()?
+                    .to_vec1::<half::bf16>()?
                     .iter()
                     .flat_map(|v| v.to_be_bytes())
                     .collect::<Vec<_>>(),
