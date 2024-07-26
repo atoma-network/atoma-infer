@@ -241,12 +241,10 @@ impl CausalSelfAttention {
         let k = k.transpose(1, 2)?;
         let v = v.transpose(1, 2)?;
 
-        panic!("FLAG");
-
-
         let o = self
             .attention
             .forward(&q, &k, &v, kv_cache, attention_metadata)?;
+        panic!("FLAG");
 
         let o = o
             .transpose(1, 2)?
