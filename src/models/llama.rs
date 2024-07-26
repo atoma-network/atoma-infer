@@ -237,9 +237,6 @@ impl CausalSelfAttention {
         let q = q.transpose(1, 2)?.squeeze(0)?;
         let k = k.transpose(1, 2)?.squeeze(0)?;
         let v = v.transpose(1, 2)?.squeeze(0)?;
-        
-        let k = self.repeat_kv(k)?;
-        let v = self.repeat_kv(v)?;
 
         let o = self
             .attention
@@ -249,10 +246,6 @@ impl CausalSelfAttention {
         let out = self.o_proj.forward(&o)?;
 
         Ok(out)
-    }
-
-    fn repeat_kv(&self, x: Tensor) -> Result<Tensor> {
-        candle_transformers::utils::repeat_kv(x, self.num_attention_heads / self.num_key_value_heads)
     }
 
     fn load(vb: VarBuilder, cfg: &Config, dtype: DType, device: &Device) -> Result<Self> {
@@ -279,7 +272,7 @@ impl CausalSelfAttention {
             span_rot,
             attention: FlashAttention::new(
                 cfg.num_attention_heads,
-                cfg.num_attention_heads,
+                cfg.num_key_value_heads,
                 head_dim,
                 1f32 / (head_dim as f32).sqrt(),
                 None,
