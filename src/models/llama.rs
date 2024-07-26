@@ -123,6 +123,7 @@ impl Cache {
             .matmul(&theta.reshape((1, theta.elem_count()))?)?;
         let cos = idx_theta.cos()?.to_dtype(dtype)?;
         let sin = idx_theta.sin()?.to_dtype(dtype)?;
+        panic!("FLAG: cos.shape = {:?}, sin.shape = {:?}", cos.dims(), sin.dims());
         Ok(Self {
             masks: HashMap::new(),
             cos,
@@ -178,8 +179,6 @@ impl CausalSelfAttention {
             .cos_sin_cache
             .sin
             .index_select(&input_positions.flatten(0, 1)?, 0)?;
-
-        panic!("FLAG");
 
         // Reshape cos and sin to match the input tensor shape, but only for the rotary dimension
         let cos = cos.reshape((num_total_tokens, self.head_dim))?;
