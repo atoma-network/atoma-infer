@@ -233,9 +233,6 @@ impl CausalSelfAttention {
         let q = self.apply_rotary_embed(&q, input_positions)?;
         let k = self.apply_rotary_embed(&k, input_positions)?;
 
-        // let mut k = self.repeat_kv(k)?;
-        // let mut v = self.repeat_kv(v)?;
-
         // transpose the matrices back to [batch_size, num_heads, sequence_length, head_dim]
         let q = q.transpose(1, 2)?.squeeze(0)?;
         let k = k.transpose(1, 2)?.squeeze(0)?;
@@ -245,19 +242,10 @@ impl CausalSelfAttention {
             .attention
             .forward(&q, &k, &v, kv_cache, attention_metadata)?;
 
-        let o = o
-            .transpose(1, 2)?
-            .reshape(&[b_sz, num_total_tokens, hidden_size])?;
+        let o = o.unsqueeze(0)?;
         let out = self.o_proj.forward(&o)?;
 
         Ok(out)
-    }
-
-    fn repeat_kv(&self, x: Tensor) -> Result<Tensor> {
-        candle_transformers::utils::repeat_kv(
-            x,
-            self.num_attention_heads / self.num_key_value_heads,
-        )
     }
 
     fn load(vb: VarBuilder, cfg: &Config, dtype: DType, device: &Device) -> Result<Self> {
