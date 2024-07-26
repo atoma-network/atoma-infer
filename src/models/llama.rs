@@ -444,6 +444,7 @@ mod tests {
     use crate::flash_attention::FlashAttentionPrefillMetadata;
     use candle_transformers::generation::{LogitsProcessor, Sampling};
     use hf_hub::{api::sync::Api, Repo, RepoType};
+    use core::panic;
     use std::io::Write;
     use tokenizers::Tokenizer;
 
@@ -555,6 +556,7 @@ mod tests {
             kv_cache,
             attention_metadata,
         )?;
+        panic!("FLAG");
         let logits = logits.squeeze(0)?;
         index_pos += tokens.len();
 
