@@ -6,6 +6,21 @@ use std::collections::HashMap;
 
 use crate::flash_attention::{FlashAttention, FlashAttentionMetadata};
 
+/// Saves a given `Tensor` to a file, with `filename`
+pub fn save_tensor_to_file(tensor: &Tensor, filename: &str) -> Result<(), candle::Error> {
+    let json_output = serde_json::to_string(
+        &tensor
+            .to_device(&Device::Cpu)?
+            .flatten_all()?
+            .to_dtype(DType::F64)?
+            .to_vec1::<f64>()?,
+    )
+    .unwrap();
+    let mut file = File::create(PathBuf::from(filename))?;
+    file.write_all(json_output.as_bytes())?;
+    Ok(())
+}
+
 /// Maximum input sequence token length
 const MAX_SEQ_LEN: usize = 4096;
 
@@ -408,7 +423,7 @@ impl Llama {
         for (i, block) in self.blocks.iter_mut().enumerate() {
             x = block.forward(&x, input_positions, &kv_caches[i], &attention_metadata)?;
         }
-        x.save_safetensors("attn_output", "./attn_output.safetensors")?;
+       save_tensor_to_file(&x, "attn_output")?;
         let x = self.ln_f.forward(&x)?;
         let x = x.index_select(selected_token_indices, 1)?.contiguous()?;
         let logits = self.lm_head.forward(&x)?;
