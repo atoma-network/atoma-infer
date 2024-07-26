@@ -518,7 +518,7 @@ mod tests {
             .unwrap()
             .to_dtype(DType::BF16)
             .unwrap();
-        let kv_cache = Tensor::rand(1.0, 10.0, (2, 10, 32, 4, 64), &device)
+        let kv_cache = Tensor::rand(1.0, 10.0, (2, 10, 32, 8, 32), &device)
             .unwrap()
             .to_dtype(DType::BF16)
             .unwrap();
