@@ -278,7 +278,7 @@ impl FlashAttention {
         }
         if (q_num_heads, q_hidden_dim) != (self.num_heads, self.head_dim) {
             candle_core::bail!(
-                "query must have shape [{q_num_heads}, {q_hidden_dim}] (got [{}, {}])",
+                "query must have shape [{}, {}] (got [{q_num_heads}, {q_hidden_dim}])",
                 self.num_heads,
                 self.head_dim
             )
