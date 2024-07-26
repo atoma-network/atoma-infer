@@ -506,15 +506,15 @@ mod tests {
             device: device.clone(),
         };
 
-        let q = Tensor::rand(1.0, 10.0, (15, 512), &device)
+        let q = Tensor::rand(1.0, 10.0, (15, 16, 32), &device)
             .unwrap()
             .to_dtype(DType::BF16)
             .unwrap();
-        let k = Tensor::rand(1.0, 10.0, (15, 256), &device)
+        let k = Tensor::rand(1.0, 10.0, (15, 8, 32), &device)
             .unwrap()
             .to_dtype(DType::BF16)
             .unwrap();
-        let v = Tensor::rand(1.0, 10.0, (15, 256), &device)
+        let v = Tensor::rand(1.0, 10.0, (15, 8, 32), &device)
             .unwrap()
             .to_dtype(DType::BF16)
             .unwrap();
