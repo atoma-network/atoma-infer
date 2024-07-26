@@ -112,7 +112,6 @@ impl Cache {
     pub fn new(config: &Config, device: &Device, dtype: DType) -> Result<Self> {
         // Precomputed frequency tensor for complex exponentials (cis)
         let n_elem = config.hidden_size / config.num_attention_heads;
-        panic!("FLAG: n_elem = {n_elem}");
         let theta: Vec<_> = (0..n_elem)
             .step_by(2)
             .map(|i| 1f32 / config.rope_theta.powf(i as f32 / n_elem as f32))
@@ -182,9 +181,7 @@ impl CausalSelfAttention {
             .index_select(&input_positions.flatten(0, 1)?, 0)?;
 
         // Reshape cos and sin to match the input tensor shape, but only for the rotary dimension
-        panic!("FLAG: cos.shape = {:?}, sin.shape = {:?}, self.head_dim = {:?}", cos.dims(), sin.dims(), self.head_dim);
-        let cos = cos.reshape((num_total_tokens, self.head_dim))?;
-        let sin = sin.reshape((num_total_tokens, self.head_dim))?;
+        panic!("FLAG: input.shape() = {:?}", x.shape());
 
         candle_nn::rotary_emb::rope(x, &cos, &sin)
     }
