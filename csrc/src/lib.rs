@@ -995,6 +995,52 @@ impl FlashAttentionVarLen {
                 .map(|_| (k_stride[0] as u32, v_stride[0] as u32))
                 .unwrap_or((0, 0));
             // TODO: handle case where max_seqlen_q == 0, separately
+            println!("q_l.shape() = {:?}", q_l.shape());
+            println!("k_l.shape() = {:?}", k_l.shape());
+            println!("v_l.shape() = {:?}", v_l.shape());
+            println!("q_ptr = {:?}, ", q_ptr);
+            println!("k_ptr = {:?}, ", k_ptr);
+            println!("v_ptr = {:?}, ", v_ptr);
+            println!("dst_ptr = {:?}, ", dst_ptr);
+            println!("softmax_lse_ptr = {:?}, ", softmax_lse_ptr);
+            println!("alibi_slopes_ptr = {:?}, ", alibi_slopes_ptr);
+            println!("cu_seqlens_q_ptr = {:?}, ", seqlens_q_ptr);
+            println!("cu_seqlens_k_ptr = {:?}, ", seqlens_k_ptr);
+            println!("q_batch_stride = {q_batch_stride}, ");
+            println!("k_batch_stride = {k_batch_stride}, ");
+            println!("v_batch_stride = {v_batch_stride}, ");
+            println!("o_batch_stride = {o_batch_stride}, ");
+            println!("alibi_slopes_batch_stride = {alibi_slopes_batch_stride}, ");
+            println!("q_row_stride = {}, ", q_stride[q_rank - 3]);
+            println!("k_row_stride = {}, ", k_stride[k_rank - 3]);
+            println!("v_row_stride = {}, ", v_stride[v_rank - 3]);
+            println!("o_row_stride = {}, ", o_stride[o_rank - 3]);
+            println!("q_head_stride = {}, ", q_stride[q_rank - 2]);
+            println!("k_head_stride = {}, ", k_stride[k_rank - 2]);
+            println!("v_head_stride = {}, ", v_stride[v_rank-2]);
+            println!("o_head_stride = {}, ", o_stride[o_rank - 2]);
+            println!("num_splits = {num_splits}, ");
+            println!("b = {batch_size}, ");
+            println!("h = {num_heads}, ");
+            println!("h_k = {num_heads_k}, ");
+            println!("d = {head_size}, ");
+            println!("d_rounded = {head_size_rounded}, ");
+            println!("softmax_scale = {softmax_scale}, ");
+            println!("scale_softmatx_log2 = {scale_softmatx_log2}, ");
+            println!("block_table = {block_table_ptr:?}, ");
+            println!("block_table_batch_stride = {block_table_batch_stride}, ");
+            println!("page_block_size = {page_block_size}, ");
+            println!("seqused_k = {seqused_k:?}, ");
+            println!("seqlen_q = {}, ", self.max_seqlen_q);
+            println!("seqlen_k = {}, ", self.max_seqlen_k);
+            println!("seqlen_q_rounded = {seqlen_q_rounded}, ");
+            println!("seqlen_k_rounded = {seqlen_k_rounded}, ");
+            println!("is_bf16 = {is_bf16}, ");
+            println!("is_causal = {is_causal}, ");
+            println!("window_size_left = {window_size_left}, ");
+            println!("window_size_right = {window_size_right}, ");
+            println!("softcap = {softcap}, ");
+            println!("force_split = {}", !block_table_ptr.is_null());
             ffi::run_mha(
                 q_ptr,
                 k_ptr,
