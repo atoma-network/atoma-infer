@@ -278,7 +278,7 @@ impl FlashAttention {
         }
         if (q_num_heads, q_hidden_dim) != (self.num_heads, self.head_dim) {
             candle_core::bail!(
-                "query must have shape [{}, {}] (got [{q_num_heads}, {q_hidden_dim}])",
+                "query must have [num_head, hidden_dim] = [{}, {}] (got [{q_num_heads}, {q_hidden_dim}])",
                 self.num_heads,
                 self.head_dim
             )
@@ -316,7 +316,7 @@ impl FlashAttention {
         let k = k.i(..num_prefill_tokens)?;
         let v = v.i(..num_prefill_tokens)?;
 
-        if let Some(prefill_metadata) = &attention_metadata.prefill_metadata {
+        let output = if let Some(prefill_metadata) = &attention_metadata.prefill_metadata {
             if prefill_metadata
                 .block_tables
                 .as_ref()
@@ -348,7 +348,7 @@ impl FlashAttention {
                 output.slice_assign(
                     &[..num_prefill_tokens, ..output.dims()[1], ..output.dims()[2]],
                     &out,
-                )?;
+                )?
             } else {
                 // We support prefix enabled attention, in which a block table is provided.
                 let sequence_lengths = if let Some(sequence_lengths) =
@@ -390,11 +390,13 @@ impl FlashAttention {
                 output.slice_assign(
                     &[..num_prefill_tokens, ..output.dims()[1], ..output.dims()[2]],
                     &out,
-                )?;
+                )?
             }
-        }
+        } else { 
+            output
+        };
 
-        if let Some(decoding_metadata) = &attention_metadata.decoding_metadata {
+        let output = if let Some(decoding_metadata) = &attention_metadata.decoding_metadata {
             // Decoding inference forward pass
             let out = flash_attn_kv_cache_full(
                 &decode_q.unsqueeze(1)?, // in decoding phase, each batch sequence has length 1
@@ -408,8 +410,10 @@ impl FlashAttention {
                 decoding_metadata.sequence_lengths.as_ref(),
                 None,
             )?;
-            output.slice_assign(&[num_prefill_tokens.., 0.., 0..], &out.squeeze(1)?)?;
-        }
+            output.slice_assign(&[num_prefill_tokens.., 0.., 0..], &out.squeeze(1)?)?
+        } else { 
+            output
+        };
 
         output.reshape((q_num_tokens, self.num_heads * self.head_dim))
     }
@@ -419,6 +423,7 @@ impl FlashAttention {
 mod tests {
     use super::*;
     use candle_core::{DType, Device, Tensor};
+    use candle_transformers::models::stable_diffusion::attention;
 
     #[test]
     fn test_new() {
@@ -559,11 +564,11 @@ mod tests {
 
         let result = flash_attention.forward(&q, &k, &v, &kv_cache, &attention_metadata);
 
-        // assert!(result.is_ok());
+        assert!(result.is_ok());
 
         let output = result.unwrap();
 
-        assert_eq!(output.shape().dims(), &[15, 512]);
+        // All elements are strictly positive
         assert!(!output
             .eq(0.)
             .unwrap()
@@ -572,6 +577,95 @@ mod tests {
             .to_vec1::<u8>()
             .unwrap()
             .iter()
-            .any(|&x| x == 0));
+            .any(|&x| x == 1));
+    }
+
+    #[test]
+    fn test_forwared_with_varlen() {
+        let device = Device::new_cuda(0).unwrap();
+        let q = Tensor::arange(0u32, 48, &device)
+            .unwrap()
+            .to_dtype(DType::F16)
+            .unwrap()
+            .reshape((3, 2, 8))
+            .unwrap();
+        let k = (&q / 40.).unwrap();
+        let v = (&q / 50.).unwrap();
+        let q = (&q / 30.).unwrap();
+
+        let kv_cache = Tensor::zeros((2, 128, 16, 3, 8), DType::F16, &device).unwrap();
+        let flash_attention = FlashAttention {
+            num_heads: 3,
+            num_kv_heads: 3,
+            num_queries_per_kv: 1,
+            head_dim: 8,
+            softmax_scale: 0.5,
+            alibi_slopes: None,
+            sliding_window: None,
+            kv_cache_dtype: DType::F16,
+            device: device.clone(),
+        };
+
+        let attention_metadata = FlashAttentionMetadata {
+            slot_mapping: Tensor::arange(0i64, 2, &device).unwrap(),
+            context_lengths: None,
+            prefill_metadata: Some(FlashAttentionPrefillMetadata {
+                block_tables: None,
+                max_query_length: None,
+                max_prefill_sequence_length: 32,
+                query_start_locations: None,
+                sequence_start_locations: Some(Tensor::new(&[0u32, 2u32], &device).unwrap()),
+                sequence_lengths: Some(Tensor::from_vec(vec![2i64], (1,), &device).unwrap()),
+            }),
+            decoding_metadata: None,
+            num_prefill_tokens: 2,
+            num_decoding_tokens: 0,
+        };
+
+        let q = q.transpose(0, 1).unwrap();
+        let k = k.transpose(0, 1).unwrap();
+        let v = v.transpose(0, 1).unwrap();
+
+        let result = flash_attention
+            .forward(&q, &k, &v, &kv_cache, &attention_metadata)
+            .expect("Failed to compute attention")
+            .reshape((2, 3, 8))
+            .unwrap()
+            .transpose(0, 1)
+            .unwrap();
+        let result = result.to_dtype(DType::F32).unwrap();
+        assert_eq!(result.dims(), &[3, 2, 8]);
+
+        assert_eq!(
+            to_vec3_round(result, 4).unwrap(),
+            &[
+                [
+                    [0.0837, 0.1038, 0.1238, 0.1438, 0.1637, 0.1837, 0.2037, 0.2238],
+                    [0.0922, 0.1122, 0.1322, 0.1522, 0.1721, 0.1921, 0.2122, 0.2322]
+                ],
+                [
+                    [0.4204, 0.4404, 0.4604, 0.4805, 0.5005, 0.5205, 0.5405, 0.5605],
+                    [0.428, 0.448, 0.468, 0.488, 0.5083, 0.5283, 0.5483, 0.5684]
+                ],
+                [
+                    [0.7554, 0.7754, 0.7954, 0.8154, 0.8354, 0.8555, 0.8755, 0.8955],
+                    [0.7622, 0.7822, 0.8022, 0.8223, 0.8423, 0.8623, 0.8823, 0.9023]
+                ]
+            ]
+        );
+    }
+
+    fn to_vec3_round(t: Tensor, digits: i32) -> Result<Vec<Vec<Vec<f32>>>> {
+        let b = 10f32.powi(digits);
+        let t = t.to_vec3::<f32>()?;
+        let t = t
+            .iter()
+            .map(|t| {
+                t.iter()
+                    .map(|t| t.iter().map(|t| f32::round(t * b) / b).collect())
+                    .collect()
+            })
+            .collect();
+        Ok(t)
     }
 }
