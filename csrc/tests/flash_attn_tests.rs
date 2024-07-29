@@ -140,7 +140,6 @@ fn flash_attn_varlen() -> Result<()> {
 #[test]
 #[serial]
 fn flash_attn_varlen_with_block_table() -> Result<()> {
-    // Wait in order for CUDA state to sync
     let device = Device::new_cuda(0)?;
     let block_size = 16;
     let num_blocks = 2;
@@ -182,13 +181,8 @@ fn flash_attn_varlen_with_block_table() -> Result<()> {
     let v = (&q / 50.)?;
     let q = (&q / 30.)?;
 
-    let should_be_ys = {
-        // let q = q.transpose(0, 1)?;
-        // let k = k.transpose(0, 1)?;
-        // let v = v.transpose(0, 1)?;
-        csrc::flash_attn_varlen(&q, &k, &v, &seqlens_q, &seqlens_k, 32, 32, 0.5, false)?
-        // .transpose(0, 1)?
-    };
+    let should_be_ys =
+        csrc::flash_attn_varlen(&q, &k, &v, &seqlens_q, &seqlens_k, 32, 32, 0.5, false)?;
     let should_be_ys = should_be_ys.to_dtype(DType::F32)?;
 
     assert_eq!(should_be_ys.dims(), &[32, 2, 8]);

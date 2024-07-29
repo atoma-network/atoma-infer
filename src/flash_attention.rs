@@ -607,9 +607,7 @@ mod tests {
                 max_query_length: None,
                 max_prefill_sequence_length: 32,
                 query_start_locations: None,
-                sequence_start_locations: Some(
-                    Tensor::new(&[0u32, 2u32], &device)?.unwrap(),
-                ),
+                sequence_start_locations: Some(Tensor::new(&[0u32, 2u32], &device)?.unwrap()),
                 sequence_lengths: Some(Tensor::from_vec(vec![2i64], (1,), &device).unwrap()),
             }),
             decoding_metadata: None,
