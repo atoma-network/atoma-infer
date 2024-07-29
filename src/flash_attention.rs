@@ -579,12 +579,15 @@ mod tests {
     #[test]
     fn test_forwared_with_varlen() {
         let device = Device::new_cuda(0).unwrap();
-        let q = Tensor::arange(0u32, 48, &device)?
-            .to_dtype(DType::F16)?
-            .reshape((3, 2, 8))?;
-        let k = (&q / 40.)?;
-        let v = (&q / 50.)?;
-        let q = (&q / 30.)?;
+        let q = Tensor::arange(0u32, 48, &device)
+            .unwrap()
+            .to_dtype(DType::F16)
+            .unwrap()
+            .reshape((3, 2, 8))
+            .unwrap();
+        let k = (&q / 40.).unwrap();
+        let v = (&q / 50.).unwrap();
+        let q = (&q / 30.).unwrap();
 
         let kv_cache = Tensor::zeros((128, 16, 3, 8), DType::F16, &device).unwrap();
         let flash_attention = FlashAttention {
@@ -607,7 +610,7 @@ mod tests {
                 max_query_length: None,
                 max_prefill_sequence_length: 32,
                 query_start_locations: None,
-                sequence_start_locations: Some(Tensor::new(&[0u32, 2u32], &device)?.unwrap()),
+                sequence_start_locations: Some(Tensor::new(&[0u32, 2u32], &device).unwrap()),
                 sequence_lengths: Some(Tensor::from_vec(vec![2i64], (1,), &device).unwrap()),
             }),
             decoding_metadata: None,
@@ -628,7 +631,7 @@ mod tests {
         assert_eq!(result.dims(), &[3, 2, 8]);
 
         assert_eq!(
-            to_vec3_round(result, 4)?,
+            to_vec3_round(result, 4).unwrap(),
             &[
                 [
                     [0.0837, 0.1038, 0.1238, 0.1438, 0.1637, 0.1837, 0.2037, 0.2238],
@@ -644,5 +647,19 @@ mod tests {
                 ]
             ]
         );
+    }
+
+    fn to_vec3_round(t: Tensor, digits: i32) -> Result<Vec<Vec<Vec<f32>>>> {
+        let b = 10f32.powi(digits);
+        let t = t.to_vec3::<f32>()?;
+        let t = t
+            .iter()
+            .map(|t| {
+                t.iter()
+                    .map(|t| t.iter().map(|t| f32::round(t * b) / b).collect())
+                    .collect()
+            })
+            .collect();
+        Ok(t)
     }
 }
