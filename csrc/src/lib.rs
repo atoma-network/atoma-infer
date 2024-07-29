@@ -948,7 +948,7 @@ impl FlashAttentionVarLen {
                 dev.ordinal(),
             )?
         } else {
-            0
+            1
         };
 
         let mut softcap = self.softcap.unwrap_or(0.0);

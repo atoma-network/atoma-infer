@@ -253,7 +253,10 @@ impl CausalSelfAttention {
         let q = q.transpose(1, 2)?.squeeze(0)?;
         let k = k.transpose(1, 2)?.squeeze(0)?;
         let v = v.transpose(1, 2)?.squeeze(0)?;
-
+        
+        save_tensor_to_file(&q, "query")?;
+        save_tensor_to_file(&k, "key")?;
+        save_tensor_to_file(&v, "value")?;
         let o = self
             .attention
             .forward(&q, &k, &v, kv_cache, attention_metadata)?;
