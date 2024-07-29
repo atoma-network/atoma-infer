@@ -469,7 +469,7 @@ mod tests {
 
     #[test]
     fn test_llama_model() -> Result<()> {
-        let prompt = "Write a poem about the beauty of the moon.".to_string();
+        let prompt = "Hello world".to_string();
 
         let dtype = DType::BF16;
         let device = Device::new_cuda(0).unwrap();
