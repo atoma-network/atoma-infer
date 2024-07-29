@@ -254,44 +254,42 @@ impl FlashAttention {
     /// # Returns
     ///
     /// * `shape` - [num_tokens, num_heads * head_size]
-    fn forward(
-        self,
+    pub fn forward(
+        &self,
         q: &Tensor,
         k: &Tensor,
         v: &Tensor,
         kv_cache: &Tensor,
-        attention_metadata: FlashAttentionMetadata,
+        attention_metadata: &FlashAttentionMetadata,
     ) -> Result<Tensor> {
-        let (q_num_tokens, q_hidden_size) = q.dims2()?;
-        let (k_num_tokens, k_hidden_size) = k.dims2()?;
-        let (v_num_tokens, v_hidden_size) = v.dims2()?;
+        let (q_num_tokens, q_num_heads, q_hidden_dim) = q.dims3()?;
+        let (k_num_tokens, k_num_heads, k_hidden_dim) = k.dims3()?;
+        let (v_num_tokens, v_num_heads, v_hidden_dim) = v.dims3()?;
 
         if q_num_tokens != k_num_tokens || q_num_tokens != v_num_tokens {
             candle_core::bail!(
                 "query, key, and value must have the same number of tokens (got {q_num_tokens}, {k_num_tokens}, {v_num_tokens})"
             )
         }
-        if k_hidden_size != v_hidden_size {
+        if (k_num_tokens, k_num_heads, k_hidden_dim) != (v_num_tokens, v_num_heads, v_hidden_dim) {
             candle_core::bail!(
-                "key and value must have the same hidden size (got {k_hidden_size}, {v_hidden_size})"
+                "key and value must have the same shape (got [{k_num_tokens}, {k_num_heads}, {k_hidden_dim}], [{v_num_tokens}, {v_num_heads}, {v_hidden_dim}])"
             )
         }
-        if q_hidden_size != self.num_heads * self.head_dim {
+        if (q_num_heads, q_hidden_dim) != (self.num_heads, self.head_dim) {
             candle_core::bail!(
-                "query must have hidden size {} (got {q_hidden_size})",
-                self.num_heads * self.head_dim
+                "query must have shape [{}, {}] (got [{q_num_heads}, {q_hidden_dim}])",
+                self.num_heads,
+                self.head_dim
             )
         }
-        if k_hidden_size != self.num_kv_heads * self.head_dim {
+        if (k_num_heads, k_hidden_dim) != (self.num_kv_heads, self.head_dim) {
             candle_core::bail!(
-                "key must have hidden size {} (got {k_hidden_size})",
-                self.num_kv_heads * self.head_dim
+                "key must have k_num_heads = {} and hidden dim {} (got {k_num_heads}, {k_hidden_dim})",
+                self.num_kv_heads,
+                self.head_dim
             )
         }
-
-        let q = q.reshape(&[q_num_tokens, self.num_heads, self.head_dim])?;
-        let k = k.reshape(&[k_num_tokens, self.num_kv_heads, self.head_dim])?;
-        let v = v.reshape(&[v_num_tokens, self.num_kv_heads, self.head_dim])?;
 
         // Reshape the input keys and values and store them in the cache.
         let (k_cache, v_cache) = self.split_kv_cache(kv_cache)?;
@@ -382,7 +380,7 @@ impl FlashAttention {
                     self.alibi_slopes.as_ref(),
                     query_start_locations,
                     sequence_start_locations,
-                    prefill_metadata.max_query_length.unwrap_or(0),
+                    prefill_metadata.max_prefill_sequence_length,
                     max_sequence_length_k,
                     self.softmax_scale,
                     self.sliding_window,
@@ -498,10 +496,10 @@ mod tests {
     fn test_forward() {
         let device = Device::new_cuda(0).unwrap();
         let flash_attention = FlashAttention {
-            num_heads: 8,
-            num_kv_heads: 4,
+            num_heads: 16,
+            num_kv_heads: 8,
             num_queries_per_kv: 2,
-            head_dim: 64,
+            head_dim: 32,
             softmax_scale: 1.0,
             alibi_slopes: None,
             sliding_window: None,
@@ -509,19 +507,19 @@ mod tests {
             device: device.clone(),
         };
 
-        let q = Tensor::rand(1.0, 10.0, (15, 512), &device)
+        let q = Tensor::rand(1.0, 10.0, (15, 16, 32), &device)
             .unwrap()
             .to_dtype(DType::BF16)
             .unwrap();
-        let k = Tensor::rand(1.0, 10.0, (15, 256), &device)
+        let k = Tensor::rand(1.0, 10.0, (15, 8, 32), &device)
             .unwrap()
             .to_dtype(DType::BF16)
             .unwrap();
-        let v = Tensor::rand(1.0, 10.0, (15, 256), &device)
+        let v = Tensor::rand(1.0, 10.0, (15, 8, 32), &device)
             .unwrap()
             .to_dtype(DType::BF16)
             .unwrap();
-        let kv_cache = Tensor::rand(1.0, 10.0, (2, 10, 32, 4, 64), &device)
+        let kv_cache = Tensor::rand(1.0, 10.0, (2, 10, 32, 8, 32), &device)
             .unwrap()
             .to_dtype(DType::BF16)
             .unwrap();
@@ -560,10 +558,12 @@ mod tests {
             num_decoding_tokens: 5,
         };
 
-        let result = flash_attention.forward(&q, &k, &v, &kv_cache, attention_metadata);
+        let result = flash_attention.forward(&q, &k, &v, &kv_cache, &attention_metadata);
 
         // assert!(result.is_ok());
+
         let output = result.unwrap();
+
         assert_eq!(output.shape().dims(), &[15, 512]);
         assert!(!output
             .eq(0.)
