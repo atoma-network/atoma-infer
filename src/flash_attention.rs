@@ -278,7 +278,7 @@ impl FlashAttention {
         }
         if (q_num_heads, q_hidden_dim) != (self.num_heads, self.head_dim) {
             candle_core::bail!(
-                "query must have shape [{}, {}] (got [{q_num_heads}, {q_hidden_dim}])",
+                "query must have [num_head, hidden_dim] = [{}, {}] (got [{q_num_heads}, {q_hidden_dim}])",
                 self.num_heads,
                 self.head_dim
             )
@@ -560,7 +560,7 @@ mod tests {
 
         let result = flash_attention.forward(&q, &k, &v, &kv_cache, &attention_metadata);
 
-        // assert!(result.is_ok());
+        assert!(result.is_ok());
 
         let output = result.unwrap();
 
@@ -589,12 +589,12 @@ mod tests {
         let v = (&q / 50.).unwrap();
         let q = (&q / 30.).unwrap();
 
-        let kv_cache = Tensor::zeros((128, 16, 3, 8), DType::F16, &device).unwrap();
+        let kv_cache = Tensor::zeros((2, 128, 16, 3, 8), DType::F16, &device).unwrap();
         let flash_attention = FlashAttention {
-            num_heads: 4,
-            num_kv_heads: 4,
+            num_heads: 3,
+            num_kv_heads: 3,
             num_queries_per_kv: 1,
-            head_dim: 2,
+            head_dim: 8,
             softmax_scale: 0.5,
             alibi_slopes: None,
             sliding_window: None,
@@ -603,7 +603,7 @@ mod tests {
         };
 
         let attention_metadata = FlashAttentionMetadata {
-            slot_mapping: Tensor::arange(0u32, 2, &device).unwrap(),
+            slot_mapping: Tensor::arange(0i64, 2, &device).unwrap(),
             context_lengths: None,
             prefill_metadata: Some(FlashAttentionPrefillMetadata {
                 block_tables: None,
@@ -623,8 +623,10 @@ mod tests {
         let v = v.transpose(0, 1).unwrap();
 
         let result = flash_attention
-            .forward(&q, &k, &v, &kv_cache, attention_metadata)
+            .forward(&q, &k, &v, &kv_cache, &attention_metadata)
             .expect("Failed to compute attention")
+            .reshape((2, 3, 8))
+            .unwrap()
             .transpose(0, 1)
             .unwrap();
         let result = result.to_dtype(DType::F32).unwrap();
