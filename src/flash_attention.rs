@@ -93,7 +93,6 @@ impl FlashAttentionMetadata {
         max_query_length: usize,
         max_decoding_sequence_length: usize,
         max_prefill_sequence_length: usize,
-        cu_sequence_lengths: Tensor,
         sequence_start_locations: Tensor,
         sequence_lengths: Tensor,
         block_table: Tensor,
