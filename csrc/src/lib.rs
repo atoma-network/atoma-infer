@@ -1198,7 +1198,7 @@ impl FlashAttentionVarLen {
         let elem_count = out_shape.elem_count();
         let dst = unsafe { dev.alloc::<T>(elem_count) }.w()?;
         let softmax_lse = dev
-            .alloc_zeros::<f32>(batch_size * num_heads * self.max_seqlen_q)
+            .alloc_zeros::<f32>(total_q * num_heads)
             .w()?;
 
         let is_bf16 = if is_bf16 { 1 } else { 0 };
@@ -1367,7 +1367,7 @@ impl FlashAttentionVarLen {
                 /* window_size_left */ window_size_left,
                 /* window_size_right */ window_size_right,
                 /* softcap */ softcap,
-                /* unpadded_lse */ false,
+                /* unpadded_lse */ true,
                 /* force_split_kernel */ !block_table_ptr.is_null(),
             )
         }
