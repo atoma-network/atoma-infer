@@ -250,13 +250,10 @@ impl CausalSelfAttention {
         let k = self.apply_rotary_embed(&k, input_positions)?;
 
         // transpose the matrices back to [batch_size, num_heads, sequence_length, head_dim]
-        let q = q.transpose(1, 2)?.squeeze(0)?;
-        let k = k.transpose(1, 2)?.squeeze(0)?;
-        let v = v.transpose(1, 2)?.squeeze(0)?;
-        
-        save_tensor_to_file(&q, "query")?;
-        save_tensor_to_file(&k, "key")?;
-        save_tensor_to_file(&v, "value")?;
+        let q = q.transpose(1, 2)?.contiguous()?.squeeze(0)?;
+        let k = k.transpose(1, 2)?.contiguous()?.squeeze(0)?;
+        let v = v.transpose(1, 2)?.contiguous()?.squeeze(0)?;
+
         let o = self
             .attention
             .forward(&q, &k, &v, kv_cache, attention_metadata)?;
@@ -554,13 +551,9 @@ mod tests {
             num_decoding_tokens: 0,
             prefill_metadata: Some(FlashAttentionPrefillMetadata {
                 block_tables: None,
-                max_query_length: Some(tokens.len()),
+                max_query_length: None,
                 max_prefill_sequence_length: tokens.len(),
-                query_start_locations: Some(Tensor::from_vec(
-                    vec![0, tokens.len() as u32],
-                    (2,),
-                    &device,
-                )?),
+                query_start_locations: None,
                 sequence_start_locations: Some(Tensor::from_vec(
                     vec![0, tokens.len() as u32],
                     (2,),
