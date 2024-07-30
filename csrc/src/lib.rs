@@ -995,6 +995,8 @@ impl FlashAttentionVarLen {
                 .map(|_| (k_stride[0] as u32, v_stride[0] as u32))
                 .unwrap_or((0, 0));
             // TODO: handle case where max_seqlen_q == 0, separately
+            println!("seqlens_q_l.shape() = {:?}", seqlens_q_layout.shape());
+            println!("seqlens_k_l.shape() = {:?}", seqlens_k_layout.shape());
             println!("q_l.shape() = {:?}", q_l.shape());
             println!("k_l.shape() = {:?}", k_l.shape());
             println!("v_l.shape() = {:?}", v_l.shape());
