@@ -8,7 +8,7 @@ use crate::flash_attention::{FlashAttention, FlashAttentionMetadata};
 
 /// Saves a given `Tensor` to a file, with `filename`
 pub fn save_tensor_to_file(tensor: &Tensor, filename: &str) -> Result<()> {
-    use std::io::Write; 
+    use std::io::Write;
     let json_output = serde_json::to_string(
         &tensor
             .to_device(&Device::Cpu)?
@@ -237,13 +237,12 @@ impl CausalSelfAttention {
             ))?
             .transpose(1, 2)?
             .contiguous()?;
-        let mut v = v
-            .reshape((
-                b_sz,
-                num_total_tokens,
-                self.num_key_value_heads,
-                self.head_dim,
-            ))?;
+        let mut v = v.reshape((
+            b_sz,
+            num_total_tokens,
+            self.num_key_value_heads,
+            self.head_dim,
+        ))?;
 
         let q = self.apply_rotary_embed(&q, input_positions)?;
         let k = self.apply_rotary_embed(&k, input_positions)?;
