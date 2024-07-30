@@ -1,9 +1,9 @@
 use candle_core::{DType, Device, IndexOp, Result, Tensor};
 use csrc::{
     copy_blocks, flash_attn_kv_cache_full, flash_attn_varlen_with_block_table,
-    reshape_and_cache_flash, swap_blocks,
+    reshape_and_cache_flash, swap_blocks, flash_attn_varlen,
 };
-use std::collections::HashMap;
+use std::{collections::HashMap, intrinsics::pref_align_of};
 
 /// `FlashAttentionDecodingMetadata` - Structure wrapping the metadata
 /// required for running flash and paged attention kernels for decoding
@@ -331,19 +331,16 @@ impl FlashAttention {
                     .ok_or(candle_core::Error::Msg(
                     "Missing sequence start locations tensor for prefill inference".into(),
                 ))?;
-                let out = flash_attn_varlen_with_block_table(
+                let out = flash_attn_varlen(
                     &q,
                     &k,
                     &v,
-                    self.alibi_slopes.as_ref(),
                     sequence_start_locations,
                     sequence_start_locations,
                     prefill_metadata.max_prefill_sequence_length,
                     prefill_metadata.max_prefill_sequence_length,
                     self.softmax_scale,
-                    self.sliding_window,
-                    None,
-                    None,
+                    q_num_tokens > 1,
                 )?;
                 output.slice_assign(
                     &[..num_prefill_tokens, ..output.dims()[1], ..output.dims()[2]],
