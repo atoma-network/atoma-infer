@@ -808,8 +808,6 @@ impl FlashAttentionVarLen {
             println!("window_size_right = {window_size_right}, ");
             // println!("softcap = {softcap}, ");
             // println!("force_split = {}", !block_table_ptr.is_null());
-            panic!("FLAG");
-
             ffi::run_mha(
                 q_ptr,
                 k_ptr,
