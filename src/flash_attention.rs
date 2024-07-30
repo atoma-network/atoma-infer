@@ -1,9 +1,9 @@
 use candle_core::{DType, Device, IndexOp, Result, Tensor};
 use csrc::{
-    copy_blocks, flash_attn_kv_cache_full, flash_attn_varlen_with_block_table,
-    reshape_and_cache_flash, swap_blocks, flash_attn_varlen,
+    copy_blocks, flash_attn_kv_cache_full, flash_attn_varlen, flash_attn_varlen_with_block_table,
+    reshape_and_cache_flash, swap_blocks,
 };
-use std::{collections::HashMap, intrinsics::pref_align_of};
+use std::collections::HashMap;
 
 /// `FlashAttentionDecodingMetadata` - Structure wrapping the metadata
 /// required for running flash and paged attention kernels for decoding

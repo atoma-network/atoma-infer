@@ -1197,9 +1197,7 @@ impl FlashAttentionVarLen {
 
         let elem_count = out_shape.elem_count();
         let dst = unsafe { dev.alloc::<T>(elem_count) }.w()?;
-        let softmax_lse = dev
-            .alloc_zeros::<f32>(total_q * num_heads)
-            .w()?;
+        let softmax_lse = dev.alloc_zeros::<f32>(total_q * num_heads).w()?;
 
         let is_bf16 = if is_bf16 { 1 } else { 0 };
 
@@ -1299,7 +1297,7 @@ impl FlashAttentionVarLen {
             println!("o_row_stride = {}, ", o_stride[o_rank - 3]);
             println!("q_head_stride = {}, ", q_stride[q_rank - 2]);
             println!("k_head_stride = {}, ", k_stride[k_rank - 2]);
-            println!("v_head_stride = {}, ", v_stride[v_rank-2]);
+            println!("v_head_stride = {}, ", v_stride[v_rank - 2]);
             println!("o_head_stride = {}, ", o_stride[o_rank - 2]);
             println!("num_splits = {num_splits}, ");
             println!("b = {batch_size}, ");
