@@ -637,7 +637,7 @@ impl FlashAttentionVarLen {
 
         let nseqlens_q = seqlens_q_layout.shape().dims1()?;
         let batch_size = nseqlens_q - 1;
-        let (_total_q, num_heads, head_size_og) = q_l.shape().dims3()?;
+        let (total_q, num_heads, head_size_og) = q_l.shape().dims3()?;
 
         let (block_table_ptr, block_table_layout) = if let Some(block_table) = &self.block_table {
             let (block_table_storage, block_table_layout) = block_table.storage_and_layout();
@@ -918,7 +918,7 @@ impl FlashAttentionVarLen {
         let elem_count = out_shape.elem_count();
         let dst = unsafe { dev.alloc::<T>(elem_count) }.w()?;
         let softmax_lse = dev
-            .alloc_zeros::<f32>(batch_size * num_heads * self.max_seqlen_q)
+            .alloc_zeros::<f32>(total_q * num_heads)
             .w()?;
 
         let is_bf16 = if is_bf16 { 1 } else { 0 };
