@@ -582,17 +582,17 @@ struct FlashAttentionVarLen {
 
 impl FlashAttentionVarLen {
     fn cuda_fwd_t<
-        T: candle::cuda_backend::CudaDType + candle::cuda_backend::cudarc::driver::DeviceRepr,
+        T: candle_core::cuda_backend::CudaDType + candle_core::cuda_backend::cudarc::driver::DeviceRepr,
     >(
         &self,
-        q: &candle::CudaStorage,
+        q: &candle_core::CudaStorage,
         q_l: &Layout,
-        k: &candle::CudaStorage,
+        k: &candle_core::CudaStorage,
         k_l: &Layout,
-        v: &candle::CudaStorage,
+        v: &candle_core::CudaStorage,
         v_l: &Layout,
         is_bf16: bool,
-    ) -> Result<(candle::CudaStorage, Shape)> {
+    ) -> Result<(candle_core::CudaStorage, Shape)> {
         // https://github.com/Dao-AILab/flash-attention/blob/184b992dcb2a0890adaa19eb9b541c3e4f9d2a08/csrc/flash_attn/flash_api.cpp#L327
         let dev = q.device();
         let out_shape = q_l.shape().clone();
@@ -600,22 +600,22 @@ impl FlashAttentionVarLen {
 
         let (seqlens_q, seqlens_q_layout) = self.seqlens_q.storage_and_layout();
         let seqlens_q = match &*seqlens_q {
-            candle::Storage::Cuda(c) => c.as_cuda_slice::<u32>()?, // Should be i32!
-            _ => candle::bail!("seqlens_q must be a cuda tensor"),
+            candle_core::Storage::Cuda(c) => c.as_cuda_slice::<u32>()?, // Should be i32!
+            _ => candle_core::bail!("seqlens_q must be a cuda tensor"),
         };
         let seqlens_q = match seqlens_q_layout.contiguous_offsets() {
             Some((o1, o2)) => seqlens_q.slice(o1..o2),
-            None => candle::bail!("seqlens_q has to be contiguous"),
+            None => candle_core::bail!("seqlens_q has to be contiguous"),
         };
 
         let (seqlens_k, seqlens_k_layout) = self.seqlens_k.storage_and_layout();
         let seqlens_k = match &*seqlens_k {
-            candle::Storage::Cuda(c) => c.as_cuda_slice::<u32>()?, // Should be i32!
-            _ => candle::bail!("seqlens_k must be a cuda tensor"),
+            candle_core::Storage::Cuda(c) => c.as_cuda_slice::<u32>()?, // Should be i32!
+            _ => candle_core::bail!("seqlens_k must be a cuda tensor"),
         };
         let seqlens_k = match seqlens_k_layout.contiguous_offsets() {
             Some((o1, o2)) => seqlens_k.slice(o1..o2),
-            None => candle::bail!("seqlens_k has to be contiguous"),
+            None => candle_core::bail!("seqlens_k has to be contiguous"),
         };
 
         let q = q.as_cuda_slice::<f16>()?;
@@ -636,54 +636,54 @@ impl FlashAttentionVarLen {
         let o_rank = o_stride.len();
 
         if q_rank != 3 || k_rank != 3 || v_rank != 3 {
-            candle::bail!(
+            candle_core::bail!(
                 "flash-attn-varlen expects input tensors of rank 3 (q: {q_rank}, k: {k_rank}, v: {v_rank}"
             )
         }
         if q_stride[q_rank - 1] != 1 {
-            candle::bail!("the last dim of q must be contiguous {q_stride:?}")
+            candle_core::bail!("the last dim of q must be contiguous {q_stride:?}")
         }
         if k_stride[k_rank - 1] != 1 {
-            candle::bail!("the last dim of k must be contiguous {k_stride:?}")
+            candle_core::bail!("the last dim of k must be contiguous {k_stride:?}")
         }
         if v_stride[v_rank - 1] != 1 {
-            candle::bail!("the last dim of v must be contiguous {v_stride:?}")
+            candle_core::bail!("the last dim of v must be contiguous {v_stride:?}")
         }
 
         let (_total_q, num_heads, head_size_og) = q_l.shape().dims3()?;
         let (total_k, num_heads_k, _head_size_og) = k_l.shape().dims3()?;
         let expected_kv = (total_k, num_heads_k, head_size_og);
         if expected_kv != k_l.shape().dims3()? {
-            candle::bail!("shape mismatch q {:?} and k {:?}", q_l.shape(), k_l.shape())
+            candle_core::bail!("shape mismatch q {:?} and k {:?}", q_l.shape(), k_l.shape())
         }
         if expected_kv != v_l.shape().dims3()? {
-            candle::bail!("shape mismatch q {:?} and v {:?}", q_l.shape(), v_l.shape())
+            candle_core::bail!("shape mismatch q {:?} and v {:?}", q_l.shape(), v_l.shape())
         }
         if head_size_og > 256 {
-            candle::bail!("only supports head dimension at most 256 (got {head_size_og})")
+            candle_core::bail!("only supports head dimension at most 256 (got {head_size_og})")
         }
         if head_size_og % 8 != 0 {
             // TODO: Handle head sizes that are not a multiple of 8 via some padding.
-            candle::bail!("only supports head sizes that are a multiple of 8 (got {head_size_og})")
+            candle_core::bail!("only supports head sizes that are a multiple of 8 (got {head_size_og})")
         }
         if num_heads % num_heads_k != 0 {
-            candle::bail!("number of k/v heads {num_heads_k} must divide number of heads in query {num_heads}")
+            candle_core::bail!("number of k/v heads {num_heads_k} must divide number of heads in query {num_heads}")
         }
 
         let nseqlens_q = seqlens_q_layout.shape().dims1()?;
         if nseqlens_q < 2 {
-            candle::bail!("seqlens_q should have a len >= 2 {nseqlens_q}")
+            candle_core::bail!("seqlens_q should have a len >= 2 {nseqlens_q}")
         }
         let nseqlens_k = seqlens_k_layout.shape().dims1()?;
         if nseqlens_k != nseqlens_q {
-            candle::bail!("seqlens_q and seqlens_k should have the same number of elements {nseqlens_q} <> {nseqlens_k}")
+            candle_core::bail!("seqlens_q and seqlens_k should have the same number of elements {nseqlens_q} <> {nseqlens_k}")
         }
 
         let batch_size = nseqlens_q - 1;
 
         let alibi_slopes_ptr = if let Some(alibi_slopes) = &self.alibi_slopes {
             if alibi_slopes.dtype() != DType::F32 {
-                candle::bail!(
+                candle_core::bail!(
                     "DType mismatch alibi_slopes {:?}, expected {:?}",
                     alibi_slopes.dtype(),
                     DType::F32
@@ -693,7 +693,7 @@ impl FlashAttentionVarLen {
             let (alibi_slopes, alibi_slopes_layout) = alibi_slopes.storage_and_layout();
 
             if num_heads != alibi_slopes_layout.shape().dims1()? {
-                candle::bail!(
+                candle_core::bail!(
                     "shape mismatch alibi_slopes {:?}, expected {:?}",
                     alibi_slopes_layout.shape(),
                     (num_heads)
@@ -701,8 +701,8 @@ impl FlashAttentionVarLen {
             }
 
             let alibi_slopes = match &*alibi_slopes {
-                candle::Storage::Cuda(c) => c.as_cuda_slice::<f32>()?,
-                _ => candle::bail!("alibi_slopes must be a cuda tensor"),
+                candle_core::Storage::Cuda(c) => c.as_cuda_slice::<f32>()?,
+                _ => candle_core::bail!("alibi_slopes must be a cuda tensor"),
             };
 
             let alibi_slopes = alibi_slopes.slice(alibi_slopes_layout.start_offset()..);
@@ -819,11 +819,11 @@ impl FlashAttentionVarLen {
                 /* cu_seqlens_q_ptr */ seqlens_q_ptr,
                 /* cu_seqlens_k_ptr */ seqlens_k_ptr,
                 /* is_seqlens_k_cumulative */ true,
-                /* q_batch_stride */ q_batch_stride,
-                /* k_batch_stride */ k_batch_stride,
-                /* v_batch_stride */ v_batch_stride,
-                /* o_batch_stride */ o_batch_stride,
-                /* alibi_slopes_batch_stride */ alibi_slopes_batch_stride as u32,
+                /* q_batch_stride */ 0,
+                /* k_batch_stride */ 0,
+                /* v_batch_stride */ 0,
+                /* o_batch_stride */ 0,
+                /* alibi_slopes_batch_stride */ 0,
                 /* q_row_stride   */ q_stride[q_rank - 3] as u32,
                 /* k_row_stride   */ k_stride[k_rank - 3] as u32,
                 /* v_row_stride   */ v_stride[v_rank - 3] as u32,
@@ -852,13 +852,13 @@ impl FlashAttentionVarLen {
                 /* is_causal */ 1,
                 /* window_size_left */ window_size_left,
                 /* window_size_right */ window_size_right,
-                /* softcap */ softcap,
-                /* unpadded_lse */ 0.0,
+                /* softcap */ 0.0,
+                /* unpadded_lse */ true,
                 /* force_split_kernel */ false,
             )
         }
 
-        let dst = candle::CudaStorage::wrap_cuda_slice(dst, dev.clone());
+        let dst = candle_core::CudaStorage::wrap_cuda_slice(dst, dev.clone());
         Ok((dst, out_shape))
     }
 
