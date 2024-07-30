@@ -392,7 +392,7 @@ impl FlashAttention {
                     &out,
                 )?
             }
-        } else { 
+        } else {
             output
         };
 
@@ -411,7 +411,7 @@ impl FlashAttention {
                 None,
             )?;
             output.slice_assign(&[num_prefill_tokens.., 0.., 0..], &out.squeeze(1)?)?
-        } else { 
+        } else {
             output
         };
 
@@ -578,6 +578,13 @@ mod tests {
             .unwrap()
             .iter()
             .any(|&x| x == 1));
+    }
+
+    #[test]
+    fn test_varlen_attn_with_small_query() {
+        let device = Device::new_cuda(0).unwrap();
+        Tensor::from_file("tests/data/varlen_attn_with_small_query.pt", &device).unwrap();
+        let q = Tensor::new(&[0u32, 2u32], &device).unwrap();
     }
 
     #[test]
