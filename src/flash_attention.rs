@@ -82,6 +82,66 @@ pub struct FlashAttentionMetadata {
     pub num_decoding_tokens: usize,
 }
 
+impl FlashAttentionMetadata {
+    /// Constructor
+    pub fn new(
+        context_lengths: Tensor,
+        slot_mapping: Tensor,
+        query_start_locations: Tensor,
+        num_prefill_tokens: usize,
+        num_decoding_tokens: usize,
+        max_query_length: usize,
+        max_decoding_sequence_length: usize,
+        max_prefill_sequence_length: usize,
+        cu_sequence_lengths: Tensor,
+        sequence_start_locations: Tensor,
+        sequence_lengths: Tensor,
+        block_table: Tensor,
+    ) -> Result<Self> {
+        let prefill_block_tables = if num_prefill_tokens > 0 {
+            Some(block_table.i(..num_prefill_tokens)?)
+        } else {
+            None
+        };
+        let decoding_block_tables = if num_decoding_tokens > 0 {
+            Some(block_table.i(num_prefill_tokens..)?)
+        } else {
+            None
+        };
+        let prefill_metadata = if num_prefill_tokens > 0 {
+            Some(FlashAttentionPrefillMetadata {
+                block_tables: prefill_block_tables,
+                max_query_length: Some(max_query_length),
+                max_prefill_sequence_length,
+                query_start_locations: Some(query_start_locations.i(..num_prefill_tokens)?),
+                sequence_start_locations: Some(
+                    sequence_start_locations.i(..num_prefill_tokens + 1)?,
+                ), // cumulative sequence lengths, so has size `batch_size + 1`
+                sequence_lengths: Some(sequence_lengths.i(..num_prefill_tokens)?),
+            })
+        } else {
+            None
+        };
+        let decoding_metadata = if num_decoding_tokens > 0 {
+            Some(FlashAttentionDecodingMetadata {
+                block_tables: decoding_block_tables,
+                max_decoding_sequence_length,
+                sequence_lengths: Some(sequence_lengths.i(num_prefill_tokens..)?),
+            })
+        } else {
+            None
+        };
+        Ok(Self {
+            context_lengths: Some(context_lengths),
+            slot_mapping,
+            decoding_metadata,
+            prefill_metadata,
+            num_prefill_tokens,
+            num_decoding_tokens,
+        })
+    }
+}
+
 /// Flash attention
 ///
 /// It encapsulates the flash attention algorithm for fast attention computation.
@@ -392,7 +452,7 @@ impl FlashAttention {
                     &out,
                 )?
             }
-        } else { 
+        } else {
             output
         };
 
@@ -411,7 +471,7 @@ impl FlashAttention {
                 None,
             )?;
             output.slice_assign(&[num_prefill_tokens.., 0.., 0..], &out.squeeze(1)?)?
-        } else { 
+        } else {
             output
         };
 
