@@ -752,7 +752,7 @@ impl FlashAttentionVarLen {
         if window_size_left >= 0 && window_size_right < 0 {
             window_size_right = self.max_seqlen_k as i32;
         }
-
+        panic!("FLAG");
         unsafe {
             let q_ptr = *q.device_ptr() as *const core::ffi::c_void;
             let k_ptr = *k.device_ptr() as *const core::ffi::c_void;
