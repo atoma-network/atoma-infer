@@ -469,7 +469,7 @@ mod tests {
     fn test_llama_model() -> Result<()> {
         let prompt = "Hello world from Mars".to_string();
 
-        let dtype = DType::BF16;
+        let dtype = DType::F16;
         let device = Device::new_cuda(0).unwrap();
         let model_id = "TinyLlama/TinyLlama-1.1B-Chat-v1.0".to_string();
         let revision = "main".to_string();
