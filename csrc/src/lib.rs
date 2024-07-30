@@ -726,10 +726,10 @@ impl FlashAttentionVarLen {
             .map(|v| v as i32)
             .unwrap_or(-1);
 
-        let head_size = round_multiple(head_size_og, 8);
-        let head_size_rounded = round_multiple(head_size, 32);
-        let seqlen_q_rounded = round_multiple(self.max_seqlen_q, 128);
-        let seqlen_k_rounded = round_multiple(self.max_seqlen_k, 128);
+        let head_size = utils::round_multiple(head_size_og, 8);
+        let head_size_rounded = utils::round_multiple(head_size, 32);
+        let seqlen_q_rounded = utils::round_multiple(self.max_seqlen_q, 128);
+        let seqlen_k_rounded = utils::round_multiple(self.max_seqlen_k, 128);
 
         let elem_count = out_shape.elem_count();
         let dst = unsafe { dev.alloc::<f16>(elem_count) }.w()?;
@@ -787,7 +787,7 @@ impl FlashAttentionVarLen {
             println!("k_head_stride = {}, ", k_stride[k_rank - 2]);
             println!("v_head_stride = {}, ", v_stride[v_rank - 2]);
             println!("o_head_stride = {}, ", o_stride[o_rank - 2]);
-            println!("num_splits = {num_splits}, ");
+            println!("num_splits = {1}, ");
             println!("b = {batch_size}, ");
             println!("h = {num_heads}, ");
             println!("h_k = {num_heads_k}, ");
