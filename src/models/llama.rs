@@ -551,7 +551,7 @@ mod tests {
             prefill_metadata: Some(FlashAttentionPrefillMetadata {
                 block_tables: None,
                 max_query_length: None,
-                max_prefill_sequence_length: tokens.len(),
+                max_prefill_sequence_length: 128,
                 query_start_locations: None,
                 sequence_start_locations: Some(Tensor::from_vec(
                     vec![0, tokens.len() as u32],
