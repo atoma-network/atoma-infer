@@ -483,7 +483,6 @@ impl FlashAttention {
 mod tests {
     use super::*;
     use candle_core::{DType, Device, Tensor};
-    use candle_transformers::models::stable_diffusion::attention;
 
     #[test]
     fn test_new() {
