@@ -774,11 +774,11 @@ impl FlashAttentionVarLen {
             println!("alibi_slopes_ptr = {:?}, ", alibi_slopes_ptr);
             println!("cu_seqlens_q_ptr = {:?}, ", seqlens_q_ptr);
             println!("cu_seqlens_k_ptr = {:?}, ", seqlens_k_ptr);
-            println!("q_batch_stride = {0}, ");
-            println!("k_batch_stride = {0}, ");
-            println!("v_batch_stride = {0}, ");
-            println!("o_batch_stride = {0}, ");
-            println!("alibi_slopes_batch_stride = {0}, ");
+            println!("q_batch_stride = 0, ");
+            println!("k_batch_stride = 0, ");
+            println!("v_batch_stride = 0, ");
+            println!("o_batch_stride = 0, ");
+            println!("alibi_slopes_batch_stride = 0, ");
             println!("q_row_stride = {}, ", q_stride[q_rank - 3]);
             println!("k_row_stride = {}, ", k_stride[k_rank - 3]);
             println!("v_row_stride = {}, ", v_stride[v_rank - 3]);
@@ -787,7 +787,7 @@ impl FlashAttentionVarLen {
             println!("k_head_stride = {}, ", k_stride[k_rank - 2]);
             println!("v_head_stride = {}, ", v_stride[v_rank - 2]);
             println!("o_head_stride = {}, ", o_stride[o_rank - 2]);
-            println!("num_splits = {1}, ");
+            println!("num_splits = 1, ");
             println!("b = {batch_size}, ");
             println!("h = {num_heads}, ");
             println!("h_k = {num_heads_k}, ");
@@ -804,7 +804,7 @@ impl FlashAttentionVarLen {
             println!("seqlen_q_rounded = {seqlen_q_rounded}, ");
             println!("seqlen_k_rounded = {seqlen_k_rounded}, ");
             println!("is_bf16 = {is_bf16}, ");
-            println!("is_causal = {1}, ");
+            println!("is_causal = 1, ");
             println!("window_size_left = {window_size_left}, ");
             println!("window_size_right = {window_size_right}, ");
             // println!("softcap = {softcap}, ");
