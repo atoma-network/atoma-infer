@@ -592,7 +592,7 @@ mod tests {
             let selected_token_indices = Tensor::new(&[tokens.len() as u32 - 1], &device)?;
             let attention_metadata = FlashAttentionMetadata {
                 context_lengths: None,
-                slot_mapping: Tensor::new(&[], &device)?,
+                slot_mapping: Tensor::new(&[tokens.len() as u32 - 1], &device)?,
                 decoding_metadata: Some(FlashAttentionDecodingMetadata {
                     block_tables: Some(Tensor::new(&[(tokens.len() / block_size) as i64], &device)?),
                     max_decoding_sequence_length: 1,
