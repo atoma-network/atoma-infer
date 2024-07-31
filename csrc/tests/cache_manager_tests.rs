@@ -577,7 +577,7 @@ mod reshape_and_cache {
 
         let result =
             reshape_and_cache_flash_t::<f16>(&key, &value, &key_cache, &value_cache, &slot_mapping);
-        println!("{result:?}");
+
         assert!(result.is_ok());
     }
 
