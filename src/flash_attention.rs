@@ -418,8 +418,10 @@ impl FlashAttention {
 
 #[cfg(test)]
 mod tests {
+    use crate::models::llama::{load_tensor_from_file, save_tensor_to_file};
+
     use super::*;
-    use candle_core::{DType, Device, Tensor};
+    use candle_core::{DType, Device, Shape, Tensor};
     use candle_transformers::models::stable_diffusion::attention;
 
     #[test]
@@ -650,6 +652,71 @@ mod tests {
                 ]
             ]
         );
+    }
+
+    #[test]
+    fn test_forward_with_varlen_from_files() {
+        let device = Device::new_cuda(0).unwrap();
+
+        let k = load_tensor_from_file("k")
+            .unwrap()
+            .to_device(&device)
+            .unwrap()
+            .to_dtype(DType::BF16)
+            .unwrap()
+            .reshape((3, 4, 64))
+            .unwrap();
+        let v = load_tensor_from_file("v")
+            .unwrap()
+            .to_device(&device)
+            .unwrap()
+            .to_dtype(DType::BF16)
+            .unwrap()
+            .reshape((3, 4, 64))
+            .unwrap();
+
+        let q = load_tensor_from_file("q")
+            .unwrap()
+            .to_device(&device)
+            .unwrap()
+            .to_dtype(DType::BF16)
+            .unwrap()
+            .reshape((3, 32, 64))
+            .unwrap();
+
+        let kv_cache = Tensor::zeros((2, 100, 16, 4, 64), DType::BF16, &device).unwrap();
+        let flash_attention =
+            FlashAttention::new(32, 4, 64, 0.125, None, None, DType::BF16, device.clone()).unwrap();
+        let tokens = vec![1, 2, 3];
+
+        let attention_metadata = FlashAttentionMetadata {
+            context_lengths: Some(
+                Tensor::from_vec(vec![tokens.len() as u32], (1,), &device).unwrap(),
+            ),
+            slot_mapping: Tensor::arange(0, tokens.len() as i64, &device).unwrap(),
+            decoding_metadata: None,
+            num_prefill_tokens: tokens.len(),
+            num_decoding_tokens: 0,
+            prefill_metadata: Some(FlashAttentionPrefillMetadata {
+                block_tables: None,
+                max_query_length: Some(tokens.len()),
+                max_prefill_sequence_length: tokens.len(),
+                query_start_locations: Some(
+                    Tensor::from_vec(vec![0, tokens.len() as u32], (2,), &device).unwrap(),
+                ),
+                sequence_start_locations: Some(
+                    Tensor::from_vec(vec![0, tokens.len() as u32], (2,), &device).unwrap(),
+                ),
+                sequence_lengths: Some(
+                    Tensor::from_vec(vec![tokens.len() as u32], (1,), &device).unwrap(),
+                ),
+            }),
+        };
+
+        let result = flash_attention
+            .forward(&q, &k, &v, &kv_cache, &attention_metadata)
+            .expect("Failed to compute attention");
+        // save_tensor_to_file(&result, "result").unwrap();
     }
 
     fn to_vec3_round(t: Tensor, digits: i32) -> Result<Vec<Vec<Vec<f32>>>> {

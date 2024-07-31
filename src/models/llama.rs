@@ -6,6 +6,12 @@ use std::collections::HashMap;
 
 use crate::flash_attention::{FlashAttention, FlashAttentionMetadata};
 
+pub fn load_tensor_from_file(filename: &str) -> Result<Tensor> {
+    let file = std::fs::File::open(std::path::PathBuf::from(filename))?;
+    let tensor: Vec<f64> = serde_json::from_reader(file).unwrap();
+    Ok(Tensor::new(tensor.as_slice(), &Device::Cpu)?)
+}
+
 /// Saves a given `Tensor` to a file, with `filename`
 pub fn save_tensor_to_file(tensor: &Tensor, filename: &str) -> Result<()> {
     use std::io::Write;
@@ -273,7 +279,6 @@ impl CausalSelfAttention {
         let v_proj = linear(size_in, size_kv, vb.pp("v_proj"))?;
         let o_proj = linear(size_q, size_in, vb.pp("o_proj"))?;
         let head_dim = cfg.hidden_size / cfg.num_attention_heads;
-
         Ok(Self {
             q_proj,
             k_proj,
