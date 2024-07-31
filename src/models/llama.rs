@@ -8,7 +8,7 @@ use crate::flash_attention::{FlashAttention, FlashAttentionMetadata};
 
 /// Saves a given `Tensor` to a file, with `filename`
 pub fn save_tensor_to_file(tensor: &Tensor, filename: &str) -> Result<()> {
-    use std::io::Write; 
+    use std::io::Write;
     let json_output = serde_json::to_string(
         &tensor
             .to_device(&Device::Cpu)?
@@ -569,7 +569,7 @@ mod tests {
         let logits = llama_model.forward(
             &input,
             &input_positions,
-            &Tensor::new(vec![tokens.len() as u32 + 1], &device)?,
+            &Tensor::new(vec![tokens.len() as u32 - 1], &device)?,
             kv_cache,
             attention_metadata,
         )?;

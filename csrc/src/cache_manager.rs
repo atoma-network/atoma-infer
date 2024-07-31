@@ -474,13 +474,13 @@ fn reshape_and_cache_flash_t<
             kc_ptr,
             vc_ptr,
             slot_mapping_ptr,
+            block_stride as i64,
             num_tokens as i64,
             num_heads as i64,
             head_size as i64,
             block_size as i64,
             key_stride as i64,
             value_stride as i64,
-            block_stride as i64,
             dtype,
         )
     }
