@@ -581,7 +581,7 @@ mod tests {
         tokens.push(next_token);
 
         if let Some(t) = tokenizer.next_token(next_token)? {
-            print!("{t}");
+            print!("<<<{t}>>>");
             std::io::stdout().flush()?;
         }
 
@@ -594,7 +594,7 @@ mod tests {
                 context_lengths: None,
                 slot_mapping: Tensor::new(&[tokens.len() as i64 - 1], &device)?,
                 decoding_metadata: Some(FlashAttentionDecodingMetadata {
-                    block_tables: Some(Tensor::new(&[(tokens.len() / block_size) as i64], &device)?),
+                    block_tables: Some(Tensor::new(&[(tokens.len() / block_size) as i64], &device)?.reshape((1, 1))?),
                     max_decoding_sequence_length: 1,
                     sequence_lengths: Some(Tensor::new(&[tokens.len() as u32], &device)?),
                 }),
