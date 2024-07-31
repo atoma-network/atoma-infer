@@ -411,7 +411,7 @@ impl Llama {
         x: &Tensor,
         input_positions: &Tensor,
         selected_token_indices: &Tensor,
-        kv_caches: Vec<&mut Tensor>,
+        kv_caches: &Vec<&mut Tensor>,
         attention_metadata: FlashAttentionMetadata,
     ) -> Result<Tensor> {
         if x.dims()[0] != 1 {
@@ -570,7 +570,7 @@ mod tests {
             &input,
             &input_positions,
             &Tensor::new(vec![tokens.len() as u32 - 1], &device)?,
-            kv_cache,
+            &kv_cache,
             attention_metadata,
         )?;
         let logits = logits.squeeze(0)?.squeeze(0)?;
