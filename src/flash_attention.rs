@@ -392,7 +392,7 @@ impl FlashAttention {
                     &out,
                 )?
             }
-        } else { 
+        } else {
             output
         };
 
@@ -411,7 +411,7 @@ impl FlashAttention {
                 None,
             )?;
             output.slice_assign(&[num_prefill_tokens.., 0.., 0..], &out.squeeze(1)?)?
-        } else { 
+        } else {
             output
         };
 

@@ -585,55 +585,55 @@ mod tests {
             std::io::stdout().flush()?;
         }
 
-        // for index in 1..sample_len {
-        //     let context = [next_token];
-        //     let input = Tensor::new(&context[..], &device)?.unsqueeze(0)?;
-        //     let input_positions = Tensor::new(&[tokens.len() as i64], &device)?.unsqueeze(0)?;
-        //     let selected_token_indices = Tensor::new(&[tokens.len() as i64], &device)?.unsqueeze(0)?;
-        //     let logits = llama_model.forward(&input, &input_positions, selected_token_indices, kv_cache, attention_metadata)?;
-        // }
+        for index in 1..sample_len {
+            let context = [next_token];
+            let input = Tensor::new(&context[..], &device)?.unsqueeze(0)?;
+            let input_positions = Tensor::new(&[tokens.len() as i64 - 1], &device)?.unsqueeze(0)?;
+            let selected_token_indices = Tensor::new(&[tokens.len() as u32 - 1], &device)?;
+            let attention_metadata = FlashAttentionMetadata {
+                context_lengths: None,
+                slot_mapping: Tensor::new(&[], &device)?,
+                decoding_metadata: Some(FlashAttentionDecodingMetadata {
+                    block_tables: Some(Tensor::new(&[(tokens.len() / block_size) as i64])?),
+                    max_decoding_sequence_length: 1,
+                    sequence_lengths: Some(Tensor::new(&[tokens.len() as u32], &device)?),
+                }),
+                prefill_metadata: None,
+                num_prefill_tokens: 0,
+                num_decoding_tokens: 1,
+            };
+            let logits = llama_model.forward(
+                &input,
+                &input_positions,
+                selected_token_indices,
+                kv_cache,
+                attention_metadata,
+            )?;
 
-        // for index in 0..sample_len {
-        //     if index == 1 {
-        //         start_gen = std::time::Instant::now()
-        //     }
-        //     let ctxt = &tokens[tokens.len().saturating_sub(context_size)..];
-        //     let input = Tensor::new(ctxt, &device)?.unsqueeze(0)?;
-        //     let logits = llama.forward(&input, context_index, &mut cache)?;
-        //     let logits = logits.squeeze(0)?;
-        //     let logits = if args.repeat_penalty == 1. {
-        //         logits
-        //     } else {
-        //         let start_at = tokens.len();
-        //         candle_transformers::utils::apply_repeat_penalty(
-        //             &logits,
-        //             args.repeat_penalty,
-        //             &tokens[start_at..],
-        //         )?
-        //     };
-        //     index_pos += ctxt.len();
+            index_pos += 1;
 
-        //     let next_token = logits_processor.sample(&logits)?;
-        //     token_generated += 1;
-        //     tokens.push(next_token);
+            let next_token = logits_processor.sample(&logits)?;
+            token_generated += 1;
+            tokens.push(next_token);
 
-        //     if Some(next_token) == eos_token_id {
-        //         break;
-        //     }
-        //     if let Some(t) = tokenizer.next_token(next_token)? {
-        //         print!("{t}");
-        //         std::io::stdout().flush()?;
-        //     }
-        // }
-        // if let Some(rest) = tokenizer.decode_rest().map_err(E::msg)? {
-        //     print!("{rest}");
-        // }
-        // let dt = start_gen.elapsed();
-        // println!(
-        //     "\n\n{} tokens generated ({} token/s)\n",
-        //     token_generated,
-        //     (token_generated - 1) as f64 / dt.as_secs_f64(),
-        // );
+            if Some(next_token) == eos_token_id {
+                break;
+            }
+            if let Some(t) = tokenizer.next_token(next_token)? {
+                print!("{t}");
+                std::io::stdout().flush()?;
+            }
+        }
+
+        if let Some(rest) = tokenizer.decode_rest().map_err(E::msg)? {
+            print!("{rest}");
+        }
+        let dt = start_gen.elapsed();
+        println!(
+            "\n\n{} tokens generated ({} token/s)\n",
+            token_generated,
+            (token_generated - 1) as f64 / dt.as_secs_f64(),
+        );
 
         Ok(())
     }
