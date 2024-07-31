@@ -458,7 +458,7 @@ impl Llama {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::flash_attention::FlashAttentionPrefillMetadata;
+    use crate::flash_attention::{FlashAttentionDecodingMetadata, FlashAttentionPrefillMetadata};
     use candle_transformers::generation::{LogitsProcessor, Sampling};
     use core::panic;
     use hf_hub::{api::sync::Api, Repo, RepoType};
@@ -594,7 +594,7 @@ mod tests {
                 context_lengths: None,
                 slot_mapping: Tensor::new(&[], &device)?,
                 decoding_metadata: Some(FlashAttentionDecodingMetadata {
-                    block_tables: Some(Tensor::new(&[(tokens.len() / block_size) as i64])?),
+                    block_tables: Some(Tensor::new(&[(tokens.len() / block_size) as i64], &device)?),
                     max_decoding_sequence_length: 1,
                     sequence_lengths: Some(Tensor::new(&[tokens.len() as u32], &device)?),
                 }),
@@ -605,7 +605,7 @@ mod tests {
             let logits = llama_model.forward(
                 &input,
                 &input_positions,
-                selected_token_indices,
+                &selected_token_indices,
                 kv_cache,
                 attention_metadata,
             )?;
@@ -625,9 +625,10 @@ mod tests {
             }
         }
 
-        if let Some(rest) = tokenizer.decode_rest().map_err(E::msg)? {
+        if let Some(rest) = tokenizer.decode_rest().unwrap() {
             print!("{rest}");
         }
+
         let dt = start_gen.elapsed();
         println!(
             "\n\n{} tokens generated ({} token/s)\n",
