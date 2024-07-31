@@ -469,7 +469,7 @@ mod tests {
 
     #[test]
     fn test_llama_model() -> Result<()> {
-        let prompt = "Write a poem about the beauty of the moon.".to_string();
+        let prompt = "The capital of France is ".to_string();
 
         let dtype = DType::BF16;
         let device = Device::new_cuda(0).unwrap();
@@ -578,11 +578,10 @@ mod tests {
 
         let mut next_token = logits_processor.sample(&logits)?;
         token_generated += 1;
-        println!("FLAG: <<<{next_token}>>>");
         tokens.push(next_token);
 
         if let Some(t) = tokenizer.next_token(next_token)? {
-            print!("<<<{t}>>>");
+            print!("{t}");
             std::io::stdout().flush()?;
         }
 
