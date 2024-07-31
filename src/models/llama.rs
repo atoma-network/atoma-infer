@@ -606,7 +606,7 @@ mod tests {
                 &input,
                 &input_positions,
                 &selected_token_indices,
-                kv_cache,
+                &kv_cache,
                 attention_metadata,
             )?;
 
