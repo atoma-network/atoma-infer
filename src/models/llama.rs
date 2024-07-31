@@ -411,7 +411,7 @@ impl Llama {
         x: &Tensor,
         input_positions: &Tensor,
         selected_token_indices: &Tensor,
-        kv_caches: Vec<&mut Tensor>,
+        kv_caches: &Vec<&mut Tensor>,
         attention_metadata: FlashAttentionMetadata,
     ) -> Result<Tensor> {
         if x.dims()[0] != 1 {
@@ -458,7 +458,7 @@ impl Llama {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::flash_attention::FlashAttentionPrefillMetadata;
+    use crate::flash_attention::{FlashAttentionDecodingMetadata, FlashAttentionPrefillMetadata};
     use candle_transformers::generation::{LogitsProcessor, Sampling};
     use core::panic;
     use hf_hub::{api::sync::Api, Repo, RepoType};
@@ -469,7 +469,7 @@ mod tests {
 
     #[test]
     fn test_llama_model() -> Result<()> {
-        let prompt = "Write a poem about the beauty of the moon.".to_string();
+        let prompt = "The capital of France is ".to_string();
 
         let dtype = DType::BF16;
         let device = Device::new_cuda(0).unwrap();
@@ -570,7 +570,7 @@ mod tests {
             &input,
             &input_positions,
             &Tensor::new(vec![tokens.len() as u32 - 1], &device)?,
-            kv_cache,
+            &kv_cache,
             attention_metadata,
         )?;
         let logits = logits.squeeze(0)?.squeeze(0)?;
@@ -585,6 +585,7 @@ mod tests {
             std::io::stdout().flush()?;
         }
 
+        // decoding loop
         for index in 1..sample_len {
             let context = [next_token];
             let input = Tensor::new(&context[..], &device)?.unsqueeze(0)?;
@@ -592,9 +593,12 @@ mod tests {
             let selected_token_indices = Tensor::new(&[tokens.len() as u32 - 1], &device)?;
             let attention_metadata = FlashAttentionMetadata {
                 context_lengths: None,
-                slot_mapping: Tensor::new(&[], &device)?,
+                slot_mapping: Tensor::new(&[tokens.len() as i64 - 1], &device)?,
                 decoding_metadata: Some(FlashAttentionDecodingMetadata {
-                    block_tables: Some(Tensor::new(&[(tokens.len() / block_size) as i64])?),
+                    block_tables: Some(
+                        Tensor::new(&[(tokens.len() / block_size) as i64], &device)?
+                            .reshape((1, 1))?,
+                    ),
                     max_decoding_sequence_length: 1,
                     sequence_lengths: Some(Tensor::new(&[tokens.len() as u32], &device)?),
                 }),
@@ -602,13 +606,16 @@ mod tests {
                 num_prefill_tokens: 0,
                 num_decoding_tokens: 1,
             };
-            let logits = llama_model.forward(
-                &input,
-                &input_positions,
-                selected_token_indices,
-                kv_cache,
-                attention_metadata,
-            )?;
+            let logits = llama_model
+                .forward(
+                    &input,
+                    &input_positions,
+                    &selected_token_indices,
+                    &kv_cache,
+                    attention_metadata,
+                )?
+                .squeeze(0)?
+                .squeeze(0)?;
 
             index_pos += 1;
 
@@ -625,9 +632,10 @@ mod tests {
             }
         }
 
-        if let Some(rest) = tokenizer.decode_rest().map_err(E::msg)? {
+        if let Some(rest) = tokenizer.decode_rest().unwrap() {
             print!("{rest}");
         }
+
         let dt = start_gen.elapsed();
         println!(
             "\n\n{} tokens generated ({} token/s)\n",
