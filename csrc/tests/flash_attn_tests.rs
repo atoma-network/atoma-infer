@@ -244,3 +244,54 @@ fn flash_attn_kv_cache() -> Result<()> {
 
     Ok(())
 }
+
+#[test]
+#[serial]
+fn flash_attn_kv_cache_with_block_table() -> Result<()> {
+    let device = Device::new_cuda(0)?;
+    let block_size = 16;
+    let num_blocks = 2;
+    let q = Tensor::arange(0u32, 512, &device)?
+        .to_dtype(DType::F16)?
+        .reshape((32, 2, 8))?;
+    let k = (&q / 40.)?.reshape((num_blocks, block_size, 2, 8))?;
+    let v = (&q / 50.)?.reshape((num_blocks, block_size, 2, 8))?;
+    let q = (&q / 30.)?;
+
+    let seqlens_k = Tensor::new(&[32u32, 32u32], &device)?;
+
+    let ys = {
+        let block_table = Some(Tensor::arange(0i64, 4, &device)?.reshape((2, 2))?);
+        csrc::flash_attn_kv_cache_full(
+            &q,
+            &k,
+            &v,
+            None,
+            0.5,
+            None,
+            None,
+            block_table.as_ref(),
+            Some(&seqlens_k),
+            None,
+        )?
+    };
+    let ys = ys.to_dtype(DType::F32)?;
+
+    assert_eq!(ys.dims(), &[32, 2, 8]);
+
+    let q = Tensor::arange(0u32, 512, &device)?
+        .to_dtype(DType::F16)?
+        .reshape((32, 2, 8))?;
+    let k = (&q / 40.)?;
+    let v = (&q / 50.)?;
+    let q = (&q / 30.)?;
+
+    let should_be_ys =
+        csrc::flash_attn_varlen(&q, &k, &v, &seqlens_q, &seqlens_k, 32, 32, 0.5, false)?;
+    let should_be_ys = should_be_ys.to_dtype(DType::F32)?;
+
+    assert_eq!(should_be_ys.dims(), &[32, 2, 8]);
+    assert_eq!(to_vec3_round(ys, 10)?, to_vec3_round(should_be_ys, 10)?);
+
+    Ok(())
+}

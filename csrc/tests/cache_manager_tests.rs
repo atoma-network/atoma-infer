@@ -541,7 +541,6 @@ mod copy_blocks {
 mod reshape_and_cache {
     use candle_core::{DType, Device, Tensor};
     use csrc::cache_manager::reshape_and_cache_flash;
-    use half::{bf16, f16};
 
     fn create_random_tensor(shape: &[usize], device: &Device, dtype: DType) -> Tensor {
         Tensor::rand(0f32, 1f32, shape, device)
