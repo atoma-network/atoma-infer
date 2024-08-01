@@ -607,6 +607,7 @@ mod tests {
                 num_prefill_tokens: 0,
                 num_decoding_tokens: 1,
             };
+            println!("kv_cache = {:?}", kv_cache[0].flatten_all().unwrap().to_vec::<f32>().unwrap());
             let logits = llama_model
                 .forward(
                     &input,
