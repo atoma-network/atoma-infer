@@ -521,7 +521,7 @@ mod tests {
             LogitsProcessor::from_sampling(42, sampling)
         };
 
-        let sample_len = 2;
+        let sample_len = 10;
         let mut start_gen = std::time::Instant::now();
         let mut index_pos = 0;
         let mut token_generated = 0;
@@ -587,7 +587,7 @@ mod tests {
         }
 
         // decoding loop
-        for index in 1..10 {
+        for index in 1..sample_len {
             let input = Tensor::new(&[next_token], &device)?.unsqueeze(0)?;
             let input_positions = Tensor::new(&[tokens.len() as i64 - 1], &device)?.unsqueeze(0)?;
             let selected_token_indices = Tensor::new(&[0u32], &device)?;
