@@ -205,9 +205,9 @@ fn flash_attn_kv_cache() -> Result<()> {
     let seqlens_k = Tensor::new(&[2u32], &device)?;
 
     let ys = {
-        let q = q.transpose(0, 1)?;
-        let k = k.transpose(0, 1)?;
-        let v = v.transpose(0, 1)?;
+        let q = q.transpose(1, 2)?;
+        let k = k.transpose(1, 2)?;
+        let v = v.transpose(1, 2)?;
         csrc::flash_attn_kv_cache_full(
             &q,
             &k,
@@ -219,7 +219,7 @@ fn flash_attn_kv_cache() -> Result<()> {
             None,
             Some(&seqlens_k),
             None,
-        )?.transpose(0, 1)?
+        )?.transpose(1, 2)?
     };
     let ys = ys.to_dtype(DType::F32)?;
 
