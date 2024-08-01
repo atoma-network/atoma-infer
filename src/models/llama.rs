@@ -617,8 +617,6 @@ mod tests {
                 .squeeze(0)?
                 .squeeze(0)?;
             
-            println!("logits.shape() = {:?}", logits.shape());
-
             index_pos += 1;
 
             next_token = logits_processor.sample(&logits)?;
