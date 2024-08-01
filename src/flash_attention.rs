@@ -465,7 +465,7 @@ impl FlashAttention {
                     .flatten_all()?
                     .to_vec1::<u32>()
             );
-            pritnln!("block_tables = {:?}", decoding_metadata.block_tables.clone().unwrap().flatten_all()?.to_vec1::<i64>());
+            println!("block_tables = {:?}", decoding_metadata.block_tables.clone().unwrap().flatten_all()?.to_vec1::<i64>());
             let out = flash_attn_kv_cache_full(
                 &decode_q.unsqueeze(1)?, // in decoding phase, each batch sequence has length 1
                 &k_cache,
