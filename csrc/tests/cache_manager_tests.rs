@@ -199,7 +199,7 @@ mod swap_blocks {
         block_mapping.insert(0, 2);
         block_mapping.insert(1, 0);
 
-        csrc::swap_blocks(&src, &mut dst, block_mapping).unwrap();
+        csrc::swap_blocks(&src, &mut dst, &block_mapping).unwrap();
     }
 }
 
