@@ -587,10 +587,9 @@ mod tests {
 
         // decoding loop
         for index in 1..sample_len {
-            let context = [next_token];
-            let input = Tensor::new(&context[..], &device)?.unsqueeze(0)?;
+            let input = Tensor::new(&[next_token], &device)?.unsqueeze(0)?;
             let input_positions = Tensor::new(&[tokens.len() as i64 - 1], &device)?.unsqueeze(0)?;
-            let selected_token_indices = Tensor::new(&[tokens.len() as u32 - 1], &device)?;
+            let selected_token_indices = Tensor::new(&[0], &device)?;
             let attention_metadata = FlashAttentionMetadata {
                 context_lengths: None,
                 slot_mapping: Tensor::new(&[tokens.len() as i64 - 1], &device)?,
@@ -599,7 +598,7 @@ mod tests {
                         Tensor::new(&[(tokens.len() / block_size) as i64], &device)?
                             .reshape((1, 1))?,
                     ),
-                    max_decoding_sequence_length: 1,
+                    max_decoding_sequence_length: tokens.len(),
                     sequence_lengths: Some(Tensor::new(&[tokens.len() as u32], &device)?),
                 }),
                 prefill_metadata: None,
@@ -619,7 +618,7 @@ mod tests {
 
             index_pos += 1;
 
-            let next_token = logits_processor.sample(&logits)?;
+            next_token = logits_processor.sample(&logits)?;
             token_generated += 1;
             tokens.push(next_token);
 
