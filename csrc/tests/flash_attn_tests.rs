@@ -290,7 +290,7 @@ fn flash_attn_kv_cache_with_block_table() -> Result<()> {
     let v = (&q / 50.)?;
     let q = (&q / 30.)?;
 
-    let seqlens_k = Tensor::from_vec((0u32..=32).collect::<Vec<_>>(), (32,), &device)?;
+    let seqlens_k = Tensor::from_vec((0u32..=32).collect::<Vec<_>>(), (33,), &device)?;
 
     let should_be_ys =
         csrc::flash_attn_varlen(&q, &k, &v, &seqlens_k, &seqlens_k, 32, 32, 0.5, false)?;
