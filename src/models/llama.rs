@@ -594,7 +594,7 @@ mod tests {
             let num_blocks = (tokens.len() / block_size) as i64 + 1;
             let attention_metadata = FlashAttentionMetadata {
                 context_lengths: None,
-                slot_mapping: Tensor::new(&[tokens.len() as i64 - 1], &device)?,
+                slot_mapping: Tensor::new(&[tokens.len() as i64], &device)?,
                 decoding_metadata: Some(FlashAttentionDecodingMetadata {
                     block_tables: Some(
                         Tensor::arange(0, num_blocks, &device)?
