@@ -425,6 +425,7 @@ impl Llama {
             x = block.forward(&x, input_positions, &kv_caches[i], &attention_metadata)?;
         }
         save_tensor_to_file(&x, "attn_output")?;
+        panic!("x.dims() = {:?}", x.dims());
         let x = self.ln_f.forward(&x)?;
         let x = x.index_select(selected_token_indices, 1)?.contiguous()?;
         let logits = self.lm_head.forward(&x)?;
