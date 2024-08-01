@@ -465,7 +465,7 @@ impl FlashAttention {
                 decoding_metadata.block_tables.as_ref(),
                 decoding_metadata.sequence_lengths.as_ref(),
                 None,
-                true,
+                false,
             )?;
             output.slice_assign(&[num_prefill_tokens.., 0.., 0..], &out.squeeze(1)?)?
         } else {
