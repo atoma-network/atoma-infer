@@ -589,7 +589,7 @@ mod tests {
         for index in 1..sample_len {
             let input = Tensor::new(&[next_token], &device)?.unsqueeze(0)?;
             let input_positions = Tensor::new(&[tokens.len() as i64 - 1], &device)?.unsqueeze(0)?;
-            let selected_token_indices = Tensor::new(&[0], &device)?;
+            let selected_token_indices = Tensor::new(&[0u32], &device)?;
             let num_blocks = (tokens.len() / block_size) as i64 + 1;
             let attention_metadata = FlashAttentionMetadata {
                 context_lengths: None,
