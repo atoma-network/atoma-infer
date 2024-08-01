@@ -586,7 +586,7 @@ mod tests {
         }
 
         // decoding loop
-        for index in 1..200 {
+        for index in 1..sample_len {
             let input = Tensor::new(&[next_token], &device)?.unsqueeze(0)?;
             let input_positions = Tensor::new(&[tokens.len() as i64 - 1], &device)?.unsqueeze(0)?;
             let selected_token_indices = Tensor::new(&[0u32], &device)?;
@@ -616,6 +616,8 @@ mod tests {
                 )?
                 .squeeze(0)?
                 .squeeze(0)?;
+            
+            println!("logits.shape() = {:?}", logits.shape());
 
             index_pos += 1;
 
