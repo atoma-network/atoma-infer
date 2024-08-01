@@ -1469,7 +1469,6 @@ struct FlashAttentionKvCache {
     pub seqlens_k: Option<Tensor>,
     /// Softcap parameter, used in Grok and Gemma2 models
     pub softcap: Option<f32>,
-    pub causal: bool,
 }
 
 impl FlashAttentionKvCache {
@@ -1975,7 +1974,6 @@ pub fn flash_attn_kv_cache(
         softcap: None,
         block_table: None,
         seqlens_k: None,
-        causal,
     };
     q.apply_op3(k, v, op)
 }
@@ -2016,7 +2014,6 @@ pub fn flash_attn_kv_cache_windowed(
         softcap: None,
         block_table: None,
         seqlens_k: seqlens_k.cloned(),
-       causal: false,
     };
     q.apply_op3(k, v, op)
 }
@@ -2059,7 +2056,6 @@ pub fn flash_attn_kv_cache_alibi(
         softcap: None,
         block_table: None,
         seqlens_k: seqlens_k.cloned(),
-        causal: false,
     };
     q.apply_op3(k, v, op)
 }
@@ -2103,7 +2099,6 @@ pub fn flash_attn_kv_cache_alibi_windowed(
         block_table: None,
         seqlens_k: None,
         softcap: None,
-        causal: false,
     };
     q.apply_op3(k, v, op)
 }
@@ -2146,8 +2141,8 @@ pub fn flash_attn_kv_cache_full(
     softcap: Option<f32>,
     causal: bool,
 ) -> Result<Tensor> {
-    // let window_size_left = None;
-    // let window_size_right = if causal { Some(0) } else { None };
+    let window_size_left = None;
+    let window_size_right = if causal { Some(0) } else { None };
 
     let op = FlashAttentionKvCache {
         softmax_scale,
@@ -2157,7 +2152,6 @@ pub fn flash_attn_kv_cache_full(
         block_table: block_table.cloned(),
         seqlens_k: seqlens_k.cloned(),
         softcap,
-        causal,
     };
     q.apply_op3(k, v, op)
 }
