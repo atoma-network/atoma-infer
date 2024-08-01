@@ -263,7 +263,7 @@ fn flash_attn_kv_cache_with_block_table() -> Result<()> {
     let seqlens_k = Tensor::new(&[1u32; 32], &device)?;
 
     let ys = {
-        let block_table = Some(Tensor::arange(0i64, 4, &device)?.reshape((2, 2))?);
+        let block_table = Some(Tensor::arange(0i64, 64, &device)?.reshape((32, 2))?);
         csrc::flash_attn_kv_cache_full(
             &q,
             &k,
