@@ -1,4 +1,3 @@
-#![feature(f16)]
 use candle_core::{DType, Device, IndexOp, Result, Tensor};
 use std::collections::HashMap;
 
