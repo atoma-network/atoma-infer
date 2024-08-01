@@ -391,7 +391,7 @@ impl FlashAttention {
                     "Missing sequence start locations tensor for prefill inference".into(),
                 ))?;
                 println!("prefill_metadata.max_prefill_sequence_length = {}", prefill_metadata.max_prefill_sequence_length);
-                println!("causal = {}",, q_num_tokens > 1);
+                println!("causal = {}", q_num_tokens > 1);
                 println!("softmax_scale = {}", self.softmax_scale);
                 println!("sequence_start_locations = {:?}", sequence_start_locations.flatten_all()?.to_vec1::<i64>());
                 let out = flash_attn_varlen(
