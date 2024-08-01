@@ -460,6 +460,7 @@ impl FlashAttention {
                 "sequence_start_locations = {:?}",
                 decoding_metadata
                     .sequence_lengths
+                    .clone()
                     .unwrap()
                     .flatten_all()?
                     .to_vec1::<u32>()
