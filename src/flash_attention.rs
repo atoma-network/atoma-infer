@@ -720,9 +720,12 @@ mod tests {
             .unwrap()
             .reshape((3, 2, 8))
             .unwrap();
-        let q = Tensor::arange(0u32, 48, &device)?
-            .to_dtype(DType::F16).unwrap()
-            .reshape((1, 3, 2, 8)).unwrap();
+        let q = Tensor::arange(0u32, 48, &device)
+            .unwrap()
+            .to_dtype(DType::F16)
+            .unwrap()
+            .reshape((1, 3, 2, 8))
+            .unwrap();
         let k = (&q / 40.).unwrap();
         let v = (&q / 50.).unwrap();
         let q = (&q / 30.).unwrap();
