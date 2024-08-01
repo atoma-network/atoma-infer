@@ -390,10 +390,6 @@ impl FlashAttention {
                     .ok_or(candle_core::Error::Msg(
                     "Missing sequence start locations tensor for prefill inference".into(),
                 ))?;
-                println!("prefill_metadata.max_prefill_sequence_length = {}", prefill_metadata.max_prefill_sequence_length);
-                println!("causal = {}", q_num_tokens > 1);
-                println!("softmax_scale = {}", self.softmax_scale);
-                println!("sequence_start_locations = {:?}", sequence_start_locations.flatten_all()?.to_vec1::<i64>());
                 let out = flash_attn_varlen(
                     &q,
                     &k,
@@ -458,6 +454,10 @@ impl FlashAttention {
 
         let output = if let Some(decoding_metadata) = &attention_metadata.decoding_metadata {
             // Decoding inference forward pass
+            println!("prefill_metadata.max_prefill_sequence_length = {}", prefill_metadata.max_prefill_sequence_length);
+                println!("causal = {}", q_num_tokens > 1);
+                println!("softmax_scale = {}", self.softmax_scale);
+                println!("sequence_start_locations = {:?}", sequence_start_locations.flatten_all()?.to_vec1::<u32>());
             let out = flash_attn_kv_cache_full(
                 &decode_q.unsqueeze(1)?, // in decoding phase, each batch sequence has length 1
                 &k_cache,
