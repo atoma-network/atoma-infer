@@ -219,6 +219,7 @@ fn flash_attn_kv_cache() -> Result<()> {
             None,
             Some(&seqlens_k),
             None,
+            false,
         )?
         .transpose(1, 2)?
     };
@@ -274,6 +275,7 @@ fn flash_attn_kv_cache_with_block_table() -> Result<()> {
             block_table.as_ref(),
             Some(&seqlens_k),
             None,
+            false,
         )?
     };
     let ys = ys.to_dtype(DType::F32)?;
