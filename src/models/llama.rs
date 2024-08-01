@@ -545,7 +545,7 @@ mod tests {
         let input = Tensor::new(&tokens[..], &device)?.unsqueeze(0)?;
         let attention_metadata = FlashAttentionMetadata {
             context_lengths: Some(Tensor::from_vec(vec![tokens.len() as u32], (1,), &device)?),
-            slot_mapping: Tensor::new(&[tokens.len() as i64 - 1], &device)?,
+            slot_mapping: Tensor::arange(0, tokens.len() as i64, &device)?,
             decoding_metadata: None,
             num_prefill_tokens: tokens.len(),
             num_decoding_tokens: 0,
@@ -593,7 +593,7 @@ mod tests {
             let num_blocks = (tokens.len() / block_size) as i64 + 1;
             let attention_metadata = FlashAttentionMetadata {
                 context_lengths: None,
-                slot_mapping: Tensor::new(&[tokens.len() as i64], &device)?,
+                slot_mapping: Tensor::new(&[tokens.len() as i64 - 1], &device)?,
                 decoding_metadata: Some(FlashAttentionDecodingMetadata {
                     block_tables: Some(
                         Tensor::arange(0, num_blocks, &device)?
