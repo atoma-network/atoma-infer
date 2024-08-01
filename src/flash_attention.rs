@@ -711,6 +711,85 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_forward_with_varlen() {
+        let device = Device::new_cuda(0).unwrap();
+        let q = Tensor::arange(0u32, 48, &device)
+            .unwrap()
+            .to_dtype(DType::F16)
+            .unwrap()
+            .reshape((3, 2, 8))
+            .unwrap();
+        let q = Tensor::arange(0u32, 48, &device)?
+            .to_dtype(DType::F16)?
+            .reshape((1, 3, 2, 8))?;
+        let k = (&q / 40.)?;
+        let v = (&q / 50.)?;
+        let q = (&q / 30.)?;
+
+        let kv_cache = Tensor::zeros((2, 128, 16, 3, 8), DType::F16, &device).unwrap();
+        let flash_attention = FlashAttention {
+            num_heads: 3,
+            num_kv_heads: 3,
+            num_queries_per_kv: 1,
+            head_dim: 8,
+            softmax_scale: 0.5,
+            alibi_slopes: None,
+            sliding_window: None,
+            kv_cache_dtype: DType::F16,
+            device: device.clone(),
+        };
+
+        let seqlens_k = Tensor::new(&[2u32], &device)?;
+
+        let attention_metadata = FlashAttentionMetadata {
+            slot_mapping: Tensor::arange(0i64, 2, &device).unwrap(),
+            context_lengths: None,
+            prefill_metadata: None,
+            decoding_metadata: Some(FlashAttentionDecodingMetadata {
+                block_tables: None,
+                max_decoding_sequence_length: 3,
+                sequence_lengths: Some(seqlens_k),
+            }),
+            num_prefill_tokens: 0,
+            num_decoding_tokens: 1,
+        };
+
+        let q = q.transpose(1, 2).unwrap();
+        let k = k.transpose(1, 2).unwrap();
+        let v = v.transpose(1, 2).unwrap();
+
+        let result = flash_attention
+            .forward(&q, &k, &v, &kv_cache, &attention_metadata)
+            .expect("Failed to compute attention")
+            .reshape((2, 3, 8))
+            .unwrap()
+            .transpose(1, 2)
+            .unwrap()
+            .squeeze(0)
+            .unwrap();
+        let result = result.to_dtype(DType::F32).unwrap();
+        assert_eq!(result.dims(), &[3, 2, 8]);
+
+        assert_eq!(
+            to_vec3_round(result, 4).unwrap(),
+            &[
+                [
+                    [0.0837, 0.1038, 0.1238, 0.1438, 0.1637, 0.1837, 0.2037, 0.2238],
+                    [0.0922, 0.1122, 0.1322, 0.1522, 0.1721, 0.1921, 0.2122, 0.2322]
+                ],
+                [
+                    [0.4204, 0.4404, 0.4604, 0.4805, 0.5005, 0.5205, 0.5405, 0.5605],
+                    [0.428, 0.448, 0.468, 0.488, 0.5083, 0.5283, 0.5483, 0.5684]
+                ],
+                [
+                    [0.7554, 0.7754, 0.7954, 0.8154, 0.8354, 0.8555, 0.8755, 0.8955],
+                    [0.7622, 0.7822, 0.8022, 0.8223, 0.8423, 0.8623, 0.8823, 0.9023]
+                ]
+            ]
+        );
+    }
+
     fn to_vec3_round(t: Tensor, digits: i32) -> Result<Vec<Vec<Vec<f32>>>> {
         let b = 10f32.powi(digits);
         let t = t.to_vec3::<f32>()?;
