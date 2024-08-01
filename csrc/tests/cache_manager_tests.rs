@@ -576,7 +576,7 @@ mod reshape_and_cache {
             Tensor::from_slice(&[0i64, 1, 2, 3, 4, 5, 6, 7, 8, 9], (num_tokens,), &device).unwrap();
 
         let result =
-            reshape_and_cache_flash::<f16>(&key, &value, &key_cache, &value_cache, &slot_mapping);
+            reshape_and_cache_flash(&key, &value, &key_cache, &value_cache, &slot_mapping);
 
         assert!(result.is_ok());
     }
@@ -605,7 +605,7 @@ mod reshape_and_cache {
         let slot_mapping =
             Tensor::from_slice(&[0i64, 1, 2, 3, 4, 5, 6, 7, 8, 9], (num_tokens,), &device).unwrap();
 
-        let result = reshape_and_cache_flash::<bf16>(
+        let result = reshape_and_cache_flash(
             &key,
             &value,
             &key_cache,
@@ -640,7 +640,7 @@ mod reshape_and_cache {
             Tensor::from_slice(&[0i64, 1, 2, 3, 4, 5, 6, 7, 8, 9], (num_tokens,), &device).unwrap();
 
         let result =
-            reshape_and_cache_flash::<f32>(&key, &value, &key_cache, &value_cache, &slot_mapping);
+            reshape_and_cache_flash(&key, &value, &key_cache, &value_cache, &slot_mapping);
         assert!(result.is_err());
     }
 
@@ -669,7 +669,7 @@ mod reshape_and_cache {
             Tensor::from_slice(&[0i64, 1, 2, 3, 4, 5, 6, 7, 8, 9], (num_tokens,), &device).unwrap();
 
         let result =
-            reshape_and_cache_flash::<f16>(&key, &value, &key_cache, &value_cache, &slot_mapping);
+            reshape_and_cache_flash(&key, &value, &key_cache, &value_cache, &slot_mapping);
         assert!(result.is_err());
     }
 
@@ -699,7 +699,7 @@ mod reshape_and_cache {
                 .unwrap();
 
         let result =
-            reshape_and_cache_flash::<f16>(&key, &value, &key_cache, &value_cache, &slot_mapping);
+            reshape_and_cache_flash(&key, &value, &key_cache, &value_cache, &slot_mapping);
         assert!(result.is_err());
     }
 }
