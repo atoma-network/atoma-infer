@@ -290,7 +290,7 @@ fn flash_attn_kv_cache_with_block_table() -> Result<()> {
     let q = (&q / 30.)?;
 
     let should_be_ys =
-        csrc::flash_attn_varlen(&q, &k, &v, &seqlens_q, &seqlens_k, 32, 32, 0.5, false)?;
+        csrc::flash_attn_varlen(&q, &k, &v, &seqlens_k, &seqlens_k, 32, 32, 0.5, false)?;
     let should_be_ys = should_be_ys.to_dtype(DType::F32)?;
 
     assert_eq!(should_be_ys.dims(), &[32, 2, 8]);
