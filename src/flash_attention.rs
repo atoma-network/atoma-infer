@@ -403,7 +403,7 @@ impl FlashAttention {
                     prefill_metadata.max_prefill_sequence_length,
                     prefill_metadata.max_prefill_sequence_length,
                     self.softmax_scale,
-                    false,
+                    q_num_tokens > 1,
                 )?;
                 output.slice_assign(
                     &[..num_prefill_tokens, ..output.dims()[1], ..output.dims()[2]],
@@ -469,6 +469,7 @@ impl FlashAttention {
                 decoding_metadata.block_tables.as_ref(),
                 decoding_metadata.sequence_lengths.as_ref(),
                 None,
+                true,
             )?;
             output.slice_assign(&[num_prefill_tokens.., 0.., 0..], &out.squeeze(1)?)?
         } else {

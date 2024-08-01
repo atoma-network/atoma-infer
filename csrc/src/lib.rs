@@ -2139,7 +2139,11 @@ pub fn flash_attn_kv_cache_full(
     block_table: Option<&Tensor>,
     seqlens_k: Option<&Tensor>,
     softcap: Option<f32>,
+    causal: bool,
 ) -> Result<Tensor> {
+    let window_size_left = None;
+    let window_size_right = if causal { Some(0) } else { None };
+    
     let op = FlashAttentionKvCache {
         softmax_scale,
         alibi_slopes: alibi_slopes.cloned(),
