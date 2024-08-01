@@ -260,7 +260,7 @@ fn flash_attn_kv_cache_with_block_table() -> Result<()> {
     let v = (&q / 50.)?.reshape((num_blocks, block_size, 2, 8))?;
     let q = (&q / 30.)?;
 
-    let seqlens_k = Tensor::new(&vec![1; 32], &device)?;
+    let seqlens_k = Tensor::new(&[1; 32], &device)?;
 
     let ys = {
         let block_table = Some(Tensor::arange(0i64, 4, &device)?.reshape((2, 2))?);
@@ -290,7 +290,7 @@ fn flash_attn_kv_cache_with_block_table() -> Result<()> {
     let v = (&q / 50.)?;
     let q = (&q / 30.)?;
 
-    let seqlens_k = Tensor::new(&(0..=32).collect::<Vec<_>>(), &device)?;
+    let seqlens_k = Tensor::from_vec((0..=32).collect::<Vec<_>>(), &device)?;
 
     let should_be_ys =
         csrc::flash_attn_varlen(&q, &k, &v, &seqlens_k, &seqlens_k, 32, 32, 0.5, false)?;
