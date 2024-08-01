@@ -454,10 +454,16 @@ impl FlashAttention {
 
         let output = if let Some(decoding_metadata) = &attention_metadata.decoding_metadata {
             // Decoding inference forward pass
-            println!("prefill_metadata.max_prefill_sequence_length = {}", prefill_metadata.max_prefill_sequence_length);
-                println!("causal = {}", q_num_tokens > 1);
-                println!("softmax_scale = {}", self.softmax_scale);
-                println!("sequence_start_locations = {:?}", decoding_metadata.sequence_lengths.unwrap().flatten_all()?.to_vec1::<u32>());
+            println!("causal = {}", q_num_tokens > 1);
+            println!("softmax_scale = {}", self.softmax_scale);
+            println!(
+                "sequence_start_locations = {:?}",
+                decoding_metadata
+                    .sequence_lengths
+                    .unwrap()
+                    .flatten_all()?
+                    .to_vec1::<u32>()
+            );
             let out = flash_attn_kv_cache_full(
                 &decode_q.unsqueeze(1)?, // in decoding phase, each batch sequence has length 1
                 &k_cache,

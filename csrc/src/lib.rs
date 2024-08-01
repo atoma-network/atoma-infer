@@ -1621,7 +1621,7 @@ impl FlashAttentionKvCache {
             && head_size_og % 8 == 0
             && self.alibi_slopes.is_none();
         let seqlenq_ngroups_swapped = false; // TODO: remove this
-        // Faster to transpose q from (b, 1, (nheads_kv ngroups), d) to (b, ngroups, nheads_kv, d) in this case
+                                             // Faster to transpose q from (b, 1, (nheads_kv ngroups), d) to (b, ngroups, nheads_kv, d) in this case
         let (q_l, out_l, out_shape, seqlen_q, num_heads) = if seqlenq_ngroups_swapped {
             let ngroups = num_heads / num_heads_k;
             let new_shape = Shape::from((batch_size, ngroups, num_heads_k, head_size_og));
@@ -2143,7 +2143,7 @@ pub fn flash_attn_kv_cache_full(
 ) -> Result<Tensor> {
     let window_size_left = None;
     let window_size_right = if causal { Some(0) } else { None };
-    
+
     let op = FlashAttentionKvCache {
         softmax_scale,
         alibi_slopes: alibi_slopes.cloned(),

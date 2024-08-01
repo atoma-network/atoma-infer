@@ -219,7 +219,8 @@ fn flash_attn_kv_cache() -> Result<()> {
             None,
             Some(&seqlens_k),
             None,
-        )?.transpose(1, 2)?
+        )?
+        .transpose(1, 2)?
     };
     let ys = ys.to_dtype(DType::F32)?;
 
