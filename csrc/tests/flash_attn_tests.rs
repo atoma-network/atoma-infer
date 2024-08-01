@@ -295,7 +295,18 @@ fn flash_attn_kv_cache_with_block_table() -> Result<()> {
     let should_be_ys = {
         let block_table = Some(Tensor::arange(0i64, 64, &device)?.reshape((32, 2))?);
         csrc::flash_attn_varlen_with_block_table(
-            &q, &k, &v, None, &seqlens_k, &seqlens_k, 32, 32, 0.5, None, None, block_table.as_ref(),
+            &q,
+            &k,
+            &v,
+            None,
+            &seqlens_k,
+            &seqlens_k,
+            32,
+            32,
+            0.5,
+            None,
+            None,
+            block_table.as_ref(),
         )?
     };
     let should_be_ys = should_be_ys.to_dtype(DType::F32)?;
