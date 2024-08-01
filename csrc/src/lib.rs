@@ -1620,7 +1620,7 @@ impl FlashAttentionKvCache {
             && self.window_size_right.is_none()
             && head_size_og % 8 == 0
             && self.alibi_slopes.is_none();
-        let seqlenq_ngroups_swapped = false; // TODO: remove this
+        // let seqlenq_ngroups_swapped = false; // TODO: remove this
         // Faster to transpose q from (b, 1, (nheads_kv ngroups), d) to (b, ngroups, nheads_kv, d) in this case
         let (q_l, out_l, out_shape, seqlen_q, num_heads) = if seqlenq_ngroups_swapped {
             let ngroups = num_heads / num_heads_k;
