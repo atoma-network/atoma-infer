@@ -255,7 +255,7 @@ fn flash_attn_kv_cache_with_block_table() -> Result<()> {
     let num_blocks = 2;
     let q = Tensor::arange(0u32, 512, &device)?
         .to_dtype(DType::F16)?
-        .reshape((32, 1, 2, 8))?;
+        .reshape((1, 32, 2, 8))?;
     let k = (&q / 40.)?.reshape((num_blocks, block_size, 2, 8))?;
     let v = (&q / 50.)?.reshape((num_blocks, block_size, 2, 8))?;
     let q = (&q / 30.)?;
@@ -280,8 +280,8 @@ fn flash_attn_kv_cache_with_block_table() -> Result<()> {
     };
     let ys = ys.to_dtype(DType::F32)?;
 
-    assert_eq!(ys.dims(), &[32, 1, 2, 8]);
-    let ys = ys.squeeze(1)?;
+    assert_eq!(ys.dims(), &[1, 32, 2, 8]);
+    let ys = ys.squeeze(0)?;
 
     let q = Tensor::arange(0u32, 512, &device)?
         .to_dtype(DType::F16)?
