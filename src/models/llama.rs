@@ -607,6 +607,7 @@ mod tests {
                 num_prefill_tokens: 0,
                 num_decoding_tokens: 1,
             };
+            use candle_core::IndexOp;
             println!("kv_cache = {:?}", kv_cache[0].i(..16).unwrap().flatten_all().unwrap().to_vec1::<half::bf16>().unwrap());
             let logits = llama_model
                 .forward(
