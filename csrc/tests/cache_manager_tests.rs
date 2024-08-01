@@ -541,7 +541,7 @@ mod copy_blocks {
 #[cfg(test)]
 mod reshape_and_cache {
     use candle_core::{DType, Device, Tensor};
-    use csrc::cache_manager::reshape_and_cache_flash_t;
+    use csrc::cache_manager::reshape_and_cache_flash;
     use half::{bf16, f16};
 
     fn create_random_tensor(shape: &[usize], device: &Device, dtype: DType) -> Tensor {
@@ -576,7 +576,7 @@ mod reshape_and_cache {
             Tensor::from_slice(&[0i64, 1, 2, 3, 4, 5, 6, 7, 8, 9], (num_tokens,), &device).unwrap();
 
         let result =
-            reshape_and_cache_flash_t::<f16>(&key, &value, &key_cache, &value_cache, &slot_mapping);
+            reshape_and_cache_flash::<f16>(&key, &value, &key_cache, &value_cache, &slot_mapping);
 
         assert!(result.is_ok());
     }
@@ -605,7 +605,7 @@ mod reshape_and_cache {
         let slot_mapping =
             Tensor::from_slice(&[0i64, 1, 2, 3, 4, 5, 6, 7, 8, 9], (num_tokens,), &device).unwrap();
 
-        let result = reshape_and_cache_flash_t::<bf16>(
+        let result = reshape_and_cache_flash::<bf16>(
             &key,
             &value,
             &key_cache,
@@ -640,7 +640,7 @@ mod reshape_and_cache {
             Tensor::from_slice(&[0i64, 1, 2, 3, 4, 5, 6, 7, 8, 9], (num_tokens,), &device).unwrap();
 
         let result =
-            reshape_and_cache_flash_t::<f32>(&key, &value, &key_cache, &value_cache, &slot_mapping);
+            reshape_and_cache_flash::<f32>(&key, &value, &key_cache, &value_cache, &slot_mapping);
         assert!(result.is_err());
     }
 
@@ -669,7 +669,7 @@ mod reshape_and_cache {
             Tensor::from_slice(&[0i64, 1, 2, 3, 4, 5, 6, 7, 8, 9], (num_tokens,), &device).unwrap();
 
         let result =
-            reshape_and_cache_flash_t::<f16>(&key, &value, &key_cache, &value_cache, &slot_mapping);
+            reshape_and_cache_flash::<f16>(&key, &value, &key_cache, &value_cache, &slot_mapping);
         assert!(result.is_err());
     }
 
@@ -699,7 +699,7 @@ mod reshape_and_cache {
                 .unwrap();
 
         let result =
-            reshape_and_cache_flash_t::<f16>(&key, &value, &key_cache, &value_cache, &slot_mapping);
+            reshape_and_cache_flash::<f16>(&key, &value, &key_cache, &value_cache, &slot_mapping);
         assert!(result.is_err());
     }
 }
