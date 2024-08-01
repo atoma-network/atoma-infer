@@ -919,7 +919,6 @@ impl FlashAttentionVarLen {
         let dst = unsafe { dev.alloc::<T>(elem_count) }.w()?;
         let softmax_lse = dev.alloc_zeros::<f32>(total_q * num_heads).w()?;
 
-
         let is_bf16 = if is_bf16 { 1 } else { 0 };
 
         // Causal is the special case where window_size_right == 0 and window_size_left < 0.
@@ -1622,7 +1621,7 @@ impl FlashAttentionKvCache {
             && head_size_og % 8 == 0
             && self.alibi_slopes.is_none();
         let seqlenq_ngroups_swapped = false; // TODO: remove this
-        // Faster to transpose q from (b, 1, (nheads_kv ngroups), d) to (b, ngroups, nheads_kv, d) in this case
+                                             // Faster to transpose q from (b, 1, (nheads_kv ngroups), d) to (b, ngroups, nheads_kv, d) in this case
         let (q_l, out_l, out_shape, seqlen_q, num_heads) = if seqlenq_ngroups_swapped {
             let ngroups = num_heads / num_heads_k;
             let new_shape = Shape::from((batch_size, ngroups, num_heads_k, head_size_og));

@@ -590,13 +590,13 @@ mod tests {
             let input = Tensor::new(&[next_token], &device)?.unsqueeze(0)?;
             let input_positions = Tensor::new(&[tokens.len() as i64 - 1], &device)?.unsqueeze(0)?;
             let selected_token_indices = Tensor::new(&[0], &device)?;
+            let num_blocks = (tokens.len() / block_size) as i64 + 1;
             let attention_metadata = FlashAttentionMetadata {
                 context_lengths: None,
                 slot_mapping: Tensor::new(&[tokens.len() as i64 - 1], &device)?,
                 decoding_metadata: Some(FlashAttentionDecodingMetadata {
                     block_tables: Some(
-                        Tensor::new(&[(tokens.len() / block_size) as i64], &device)?
-                            .reshape((1, 1))?,
+                        Tensor::arange(0, num_blocks, &device)?.reshape((1, num_blocks))?,
                     ),
                     max_decoding_sequence_length: tokens.len(),
                     sequence_lengths: Some(Tensor::new(&[tokens.len() as u32], &device)?),

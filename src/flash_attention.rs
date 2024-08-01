@@ -1,7 +1,7 @@
 use candle_core::{DType, Device, IndexOp, Result, Tensor};
 use csrc::{
-    copy_blocks, flash_attn_kv_cache_full, flash_attn_varlen_with_block_table,
-    reshape_and_cache_flash, swap_blocks, flash_attn_varlen,
+    copy_blocks, flash_attn_kv_cache_full, flash_attn_varlen, flash_attn_varlen_with_block_table,
+    reshape_and_cache_flash, swap_blocks,
 };
 use std::collections::HashMap;
 
