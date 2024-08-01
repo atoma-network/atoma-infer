@@ -286,8 +286,8 @@ fn flash_attn_kv_cache_with_block_table() -> Result<()> {
     let q = Tensor::arange(0u32, 512, &device)?
         .to_dtype(DType::F16)?
         .reshape((32, 2, 8))?;
-    let k = (&q / 40.)?;
-    let v = (&q / 50.)?;
+    let k = (&q / 40.)?.reshape((num_blocks, block_size, 2, 8))?;
+    let v = (&q / 50.)?.reshape((num_blocks, block_size, 2, 8))?;
     let q = (&q / 30.)?;
 
     let seqlens_k = Tensor::from_vec((0u32..=32).collect::<Vec<_>>(), (33,), &device)?;
