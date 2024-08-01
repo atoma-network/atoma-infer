@@ -712,7 +712,7 @@ mod tests {
     }
 
     #[test]
-    fn test_forward_with_varlen() {
+    fn test_forward_with_kv_cache() {
         let device = Device::new_cuda(0).unwrap();
         let q = Tensor::arange(0u32, 48, &device)
             .unwrap()
@@ -721,11 +721,11 @@ mod tests {
             .reshape((3, 2, 8))
             .unwrap();
         let q = Tensor::arange(0u32, 48, &device)?
-            .to_dtype(DType::F16)?
-            .reshape((1, 3, 2, 8))?;
-        let k = (&q / 40.)?;
-        let v = (&q / 50.)?;
-        let q = (&q / 30.)?;
+            .to_dtype(DType::F16).unwrap()
+            .reshape((1, 3, 2, 8)).unwrap();
+        let k = (&q / 40.).unwrap();
+        let v = (&q / 50.).unwrap();
+        let q = (&q / 30.).unwrap();
 
         let kv_cache = Tensor::zeros((2, 128, 16, 3, 8), DType::F16, &device).unwrap();
         let flash_attention = FlashAttention {
@@ -740,7 +740,7 @@ mod tests {
             device: device.clone(),
         };
 
-        let seqlens_k = Tensor::new(&[2u32], &device)?;
+        let seqlens_k = Tensor::new(&[2u32], &device).unwrap();
 
         let attention_metadata = FlashAttentionMetadata {
             slot_mapping: Tensor::arange(0i64, 2, &device).unwrap(),
