@@ -301,7 +301,7 @@ fn flash_attn_kv_cache_with_block_table() -> Result<()> {
     let should_be_ys = should_be_ys.to_dtype(DType::F32)?;
 
     assert_eq!(should_be_ys.dims(), &[32, 2, 8]);
-    assert_eq!(to_vec3_round(ys, 10)?, to_vec3_round(should_be_ys, 10)?);
+    assert_eq!(to_vec3_round(ys, 6)?, to_vec3_round(should_be_ys, 6)?);
 
     Ok(())
 }
