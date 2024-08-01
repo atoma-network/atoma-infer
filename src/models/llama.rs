@@ -599,7 +599,7 @@ mod tests {
                         Tensor::arange(0, num_blocks, &device)?.reshape((1, num_blocks as usize))?,
                     ),
                     max_decoding_sequence_length: tokens.len(),
-                    sequence_lengths: Some(Tensor::new(&[tokens.len() as u32], &device)?),
+                    sequence_lengths: Some(Tensor::new(&[tokens.len() as i64], &device)?),
                 }),
                 prefill_metadata: None,
                 num_prefill_tokens: 0,
