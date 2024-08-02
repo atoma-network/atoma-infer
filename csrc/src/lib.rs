@@ -1788,7 +1788,7 @@ impl FlashAttentionKvCache {
             0
         };
 
-        if seqlen_q == 1 && !self.alibi_slopes.is_some() {
+        if seqlen_q == 1 && self.alibi_slopes.is_none() {
             // is_causal = true is the same as is_causal = false, in this case
             is_causal = 0;
         }
