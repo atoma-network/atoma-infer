@@ -2153,7 +2153,7 @@ pub fn flash_attn_kv_cache_full(
         seqlens_k: seqlens_k.cloned(),
         softcap,
     };
-    q.apply_op3(k, v, op)
+    q.apply_op3(k, v, op) // == cuda_fwd_t::<T>(q, q_l, kc, kc_l, vc, vc_l, is_bf16)
 }
 
 pub(crate) mod utils {

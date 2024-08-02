@@ -243,16 +243,15 @@ impl CausalSelfAttention {
                 num_total_tokens,
                 self.num_key_value_heads,
                 self.head_dim,
-            ))?
-            .transpose(1, 2)?;
+            ))?;
 
         let q = self.apply_rotary_embed(&q, input_positions)?;
         let k = self.apply_rotary_embed(&k, input_positions)?;
 
-        // transpose the matrices back to [num_heads, sequence_length, head_dim]
-        let q = q.transpose(1, 2)?.squeeze(0)?;
-        let k = k.transpose(1, 2)?.squeeze(0)?;
-        let v = v.transpose(1, 2)?.squeeze(0)?;
+        // transpose the matrices back to [sequence_length, num_heads, head_dim]
+        let q = q.transpose(1, 2)?.squeeze(0)?.contiguous()?;
+        let k = k.transpose(1, 2)?.squeeze(0)?.contiguous()?;
+        let v = v.squeeze(0)?;
 
         let o = self
             .attention
@@ -607,19 +606,6 @@ mod tests {
                 num_prefill_tokens: 0,
                 num_decoding_tokens: 1,
             };
-            use candle_core::IndexOp;
-            println!(
-                "kv_cache = {:?}",
-                kv_cache[0]
-                    .i(0)
-                    .unwrap()
-                    .i(..16)
-                    .unwrap()
-                    .flatten_all()
-                    .unwrap()
-                    .to_vec1::<half::bf16>()
-                    .unwrap()
-            );
             let logits = llama_model
                 .forward(
                     &input,
