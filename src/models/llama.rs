@@ -6,21 +6,6 @@ use std::collections::HashMap;
 
 use crate::flash_attention::{FlashAttention, FlashAttentionMetadata};
 
-/// Saves a given `Tensor` to a file, with `filename`
-pub fn save_tensor_to_file(tensor: &Tensor, filename: &str) -> Result<()> {
-    use std::io::Write;
-    let vec = &tensor
-        .to_device(&Device::Cpu)?
-        .flatten_all()?
-        .to_dtype(DType::F64)?
-        .to_vec1::<f64>()?;
-    let mut file =
-        std::fs::File::create(std::path::PathBuf::from(&format!("{}.tensor", filename,)))?;
-    file.write_all(format!("{:?}\n", tensor.dims()).as_bytes())?;
-    file.write_all(format!("{:?}", vec).as_bytes())?;
-    Ok(())
-}
-
 /// Maximum input sequence token length
 const MAX_SEQ_LEN: usize = 4096;
 

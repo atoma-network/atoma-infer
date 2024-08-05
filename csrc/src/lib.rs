@@ -1620,8 +1620,6 @@ impl FlashAttentionKvCache {
             && self.window_size_right.is_none()
             && head_size_og % 8 == 0
             && self.alibi_slopes.is_none();
-        let seqlenq_ngroups_swapped = false; // TODO: remove this
-                                             // Faster to transpose q from (b, 1, (nheads_kv ngroups), d) to (b, ngroups, nheads_kv, d) in this case
         let (q_l, out_l, out_shape, seqlen_q, num_heads) = if seqlenq_ngroups_swapped {
             let ngroups = num_heads / num_heads_k;
             let new_shape = Shape::from((batch_size, ngroups, num_heads_k, head_size_og));
@@ -2153,7 +2151,7 @@ pub fn flash_attn_kv_cache_full(
         seqlens_k: seqlens_k.cloned(),
         softcap,
     };
-    q.apply_op3(k, v, op) // == cuda_fwd_t::<T>(q, q_l, kc, kc_l, vc, vc_l, is_bf16)
+    q.apply_op3(k, v, op)
 }
 
 pub(crate) mod utils {
