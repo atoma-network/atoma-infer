@@ -9,16 +9,15 @@ use crate::flash_attention::{FlashAttention, FlashAttentionMetadata};
 /// Saves a given `Tensor` to a file, with `filename`
 pub fn save_tensor_to_file(tensor: &Tensor, filename: &str) -> Result<()> {
     use std::io::Write;
-    let json_output = serde_json::to_string(
-        &tensor
-            .to_device(&Device::Cpu)?
-            .flatten_all()?
-            .to_dtype(DType::F64)?
-            .to_vec1::<f64>()?,
-    )
-    .unwrap();
-    let mut file = std::fs::File::create(std::path::PathBuf::from(filename))?;
-    file.write_all(json_output.as_bytes())?;
+    let vec = &tensor
+        .to_device(&Device::Cpu)?
+        .flatten_all()?
+        .to_dtype(DType::F64)?
+        .to_vec1::<f64>()?;
+    let mut file =
+        std::fs::File::create(std::path::PathBuf::from(&format!("{}.tensor", filename,)))?;
+    file.write_all(format!("{:?}\n", tensor.dims()).as_bytes())?;
+    file.write_all(format!("{:?}", vec).as_bytes())?;
     Ok(())
 }
 
@@ -237,13 +236,12 @@ impl CausalSelfAttention {
             ))?
             .transpose(1, 2)?
             .contiguous()?;
-        let mut v = v
-            .reshape((
-                b_sz,
-                num_total_tokens,
-                self.num_key_value_heads,
-                self.head_dim,
-            ))?;
+        let v = v.reshape((
+            b_sz,
+            num_total_tokens,
+            self.num_key_value_heads,
+            self.head_dim,
+        ))?;
 
         let q = self.apply_rotary_embed(&q, input_positions)?;
         let k = self.apply_rotary_embed(&k, input_positions)?;
@@ -423,9 +421,7 @@ impl Llama {
         for (i, block) in self.blocks.iter_mut().enumerate() {
             x = block.forward(&x, input_positions, &kv_caches[i], &attention_metadata)?;
         }
-        save_tensor_to_file(&x, "attn_output")?;
         let x = self.ln_f.forward(&x)?;
-        println!("x.shape() = {:?}", x.dims());
         let x = x.index_select(selected_token_indices, 1)?.contiguous()?;
         let logits = self.lm_head.forward(&x)?;
         logits.to_dtype(DType::F32)
@@ -530,15 +526,17 @@ mod tests {
         let block_size = 16;
         let num_key_value_heads = config.num_key_value_heads;
         let head_dim = config.hidden_size / config.num_attention_heads;
-        let mut kv_cache = vec![
+        let mut kv_cache = std::iter::repeat_with(|| {
             Tensor::zeros(
                 (2, num_blocks, block_size, num_key_value_heads, head_dim),
                 dtype,
                 &device,
-            )?;
-            config.num_hidden_layers as usize
-        ];
-        let mut kv_cache = kv_cache.iter_mut().collect();
+            )
+        })
+        .take(config.num_hidden_layers)
+        .collect::<Result<Vec<_>>>()?;
+
+        let kv_cache = kv_cache.iter_mut().collect();
 
         // prefill forward pass
         let input_positions = Tensor::arange(0, tokens.len() as i64, &device)?.unsqueeze(0)?;
