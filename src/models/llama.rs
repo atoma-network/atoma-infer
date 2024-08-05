@@ -406,12 +406,12 @@ impl Llama {
         logits.to_dtype(DType::F32)
     }
 
-    pub fn load(vb: VarBuilder, cfg: &Config) -> Result<Self> {
+    pub fn load(vb: VarBuilder, cfg: &Config, dtype: DType, device: &Device) -> Result<Self> {
         let wte = embedding(cfg.vocab_size, cfg.hidden_size, vb.pp("model.embed_tokens"))?;
         let lm_head = linear(cfg.hidden_size, cfg.vocab_size, vb.pp("lm_head"))?;
         let ln_f = RmsNorm::new(cfg.hidden_size, cfg.rms_norm_eps, vb.pp("model.norm"))?;
         let blocks: Vec<_> = (0..cfg.num_hidden_layers)
-            .map(|i| Block::load(vb.pp(&format!("model.layers.{i}")), cfg).unwrap())
+            .map(|i| Block::load(vb.pp(&format!("model.layers.{i}")), cfg, dtype, device).unwrap())
             .collect();
 
         Ok(Self {
@@ -467,7 +467,7 @@ mod tests {
             .expect("Failed to get model.safetensors")];
         let mut llama_model = {
             let vb = unsafe { VarBuilder::from_mmaped_safetensors(&filenames, dtype, &device)? };
-            Llama::load(vb, &config).expect("Failed to load the model")
+            Llama::load(vb, &config, dtype, &device).expect("Failed to load the model")
         };
         let tokenizer =
             Tokenizer::from_file(tokenizer_filename).expect("Failed to load the tokenizer");
@@ -492,6 +492,7 @@ mod tests {
         };
 
         let sample_len = 32;
+        let start_gen = std::time::Instant::now();
         let mut index_pos = 0;
         let mut token_generated = 0;
 
