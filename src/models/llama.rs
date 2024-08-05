@@ -411,7 +411,7 @@ impl Llama {
         let lm_head = linear(cfg.hidden_size, cfg.vocab_size, vb.pp("lm_head"))?;
         let ln_f = RmsNorm::new(cfg.hidden_size, cfg.rms_norm_eps, vb.pp("model.norm"))?;
         let blocks: Vec<_> = (0..cfg.num_hidden_layers)
-            .map(|i| Block::load(vb.pp(&format!("model.layers.{i}")), cfg, dtype, device).unwrap())
+            .map(|i| Block::load(vb.pp(&format!("model.layers.{i}")), cfg).unwrap())
             .collect();
 
         Ok(Self {
@@ -494,6 +494,7 @@ mod tests {
 
         let sample_len = 32;
         let mut start_gen = std::time::Instant::now();
+        let mut index_pos = 0;
         let mut token_generated = 0;
 
         // kv cache

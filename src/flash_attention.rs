@@ -460,8 +460,6 @@ impl FlashAttention {
                 &v_cache,
                 self.alibi_slopes.as_ref(),
                 self.softmax_scale,
-                self.sliding_window,
-                None,
                 decoding_metadata.block_tables.as_ref(),
                 decoding_metadata.sequence_lengths.as_ref(),
                 None,
