@@ -120,10 +120,7 @@ impl Cache {
         let cos = idx_theta.cos()?.to_dtype(dtype)?;
         let sin = idx_theta.sin()?.to_dtype(dtype)?;
 
-        Ok(Self {
-            cos,
-            sin,
-        })
+        Ok(Self { cos, sin })
     }
 }
 
@@ -418,7 +415,7 @@ impl Llama {
             blocks,
             ln_f,
             lm_head,
-            cfg: cfg.clone()
+            cfg: cfg.clone(),
         })
     }
 
@@ -492,7 +489,6 @@ mod tests {
 
         let sample_len = 32;
         let start_gen = std::time::Instant::now();
-        let mut index_pos = 0;
         let mut token_generated = 0;
 
         // kv cache
@@ -500,7 +496,7 @@ mod tests {
         let block_size = 16;
         let num_key_value_heads = config.num_key_value_heads;
         let head_dim = config.hidden_size / config.num_attention_heads;
-        let mut kv_cache = std::iter::repeat_with(|| {
+        let mut kv_caches = std::iter::repeat_with(|| {
             Tensor::zeros(
                 (2, num_blocks, block_size, num_key_value_heads, head_dim),
                 dtype,
@@ -510,7 +506,7 @@ mod tests {
         .take(config.num_hidden_layers)
         .collect::<Result<Vec<_>>>()?;
 
-        let kv_cache = kv_cache.iter_mut().collect();
+        let kv_caches = kv_caches.iter_mut().collect();
 
         // prefill forward pass
         let input_positions = Tensor::arange(0, tokens.len() as i64, &device)?.unsqueeze(0)?;
@@ -542,11 +538,10 @@ mod tests {
             &input,
             &input_positions,
             &Tensor::new(vec![tokens.len() as u32 - 1], &device)?,
-            &kv_cache,
+            &kv_caches,
             attention_metadata,
         )?;
         let logits = logits.squeeze(0)?.squeeze(0)?;
-        index_pos += tokens.len();
 
         let mut next_token = logits_processor.sample(&logits)?;
         token_generated += 1;
@@ -583,13 +578,277 @@ mod tests {
                     &input,
                     &input_positions,
                     &selected_token_indices,
-                    &kv_cache,
+                    &kv_caches,
                     attention_metadata,
                 )?
-                .squeeze(0)?
                 .squeeze(0)?;
 
-            index_pos += 1;
+            next_token = logits_processor.sample(&logits)?;
+            token_generated += 1;
+            tokens.push(next_token);
+
+            if Some(next_token) == eos_token_id {
+                break;
+            }
+            if let Some(t) = tokenizer.next_token(next_token)? {
+                print!("{t}");
+                std::io::stdout().flush()?;
+            }
+        }
+
+        if let Some(rest) = tokenizer.decode_rest().unwrap() {
+            print!("{rest}");
+        }
+
+        let dt = start_gen.elapsed();
+        println!(
+            "\n\n{} tokens generated ({} token/s)\n",
+            token_generated,
+            (token_generated - 1) as f64 / dt.as_secs_f64(),
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_llama_model_batch() -> Result<()> {
+        let prompts = vec![
+            "The capital of France is ".to_string(),
+            "Modern music is especially focused on ".to_string(),
+            "How many countries do exist ? ".to_string(),
+            "Sailing requires advanced techniques on ".to_string(),
+            "What are the best places to surf ? ".to_string(),
+            "How many letters does the word 'Algarve' has ? ".to_string(),
+            "Zero knowledge cryptography regards ".to_string(),
+            "What is a large language model ? ".to_string(),
+            "What is the best way to learn a new language ? ".to_string(),
+            "Healthy food is vital for ".to_string(),
+        ];
+
+        let dtype = DType::BF16;
+        let device = Device::new_cuda(0).unwrap();
+        let model_id = "TinyLlama/TinyLlama-1.1B-Chat-v1.0".to_string();
+        let revision = "main".to_string();
+        let api = Api::new().expect("Failed to create the HF API");
+
+        println!("loading the model weights from {model_id}");
+        let api = api.repo(Repo::with_revision(model_id, RepoType::Model, revision));
+
+        let tokenizer_filename = api
+            .get("tokenizer.json")
+            .expect("Failed to get tokenizer.json");
+        let config_filename = api.get("config.json").expect("Failed to get config.json");
+        let config: LlamaConfig = serde_json::from_slice(
+            &std::fs::read(config_filename).expect("Failed to read config.json"),
+        )
+        .expect("Failed to deserialize config.json");
+        let config = config.into_config();
+
+        let filenames = vec![api
+            .get("model.safetensors")
+            .expect("Failed to get model.safetensors")];
+        let mut llama_model = {
+            let vb = unsafe { VarBuilder::from_mmaped_safetensors(&filenames, dtype, &device)? };
+            Llama::load(vb, &config, dtype, &device).expect("Failed to load the model")
+        };
+        let tokenizer =
+            Tokenizer::from_file(tokenizer_filename).expect("Failed to load the tokenizer");
+        let eos_token_id = config
+            .eos_token_id
+            .or_else(|| tokenizer.token_to_id(EOS_TOKEN));
+
+        let mut tokens = prompts
+            .iter()
+            .map(|prompt| {
+                tokenizer
+                    .encode(prompt.clone(), true)
+                    .expect("Failed to encode the prompt")
+                    .get_ids()
+                    .to_vec()
+            })
+            .collect::<Vec<_>>();
+
+        let mut tokenizer = candle_examples::token_output_stream::TokenOutputStream::new(tokenizer);
+        println!("starting the inference loop");
+        print!("{prompt}");
+
+        let mut logits_processor = {
+            let temperature = 0.8;
+            let sampling = Sampling::All { temperature };
+            LogitsProcessor::from_sampling(42, sampling)
+        };
+
+        let sample_len = 64;
+        let start_gen = std::time::Instant::now();
+        let mut token_generated = 0;
+
+        // KV cache
+        let num_blocks = 100;
+        let block_size = 16;
+        let num_key_value_heads = config.num_key_value_heads;
+        let head_dim = config.hidden_size / config.num_attention_heads;
+        let mut kv_caches = std::iter::repeat_with(|| {
+            Tensor::zeros(
+                (2, num_blocks, block_size, num_key_value_heads, head_dim),
+                dtype,
+                &device,
+            )
+        })
+        .take(config.num_hidden_layers)
+        .collect::<Result<Vec<_>>>()?;
+
+        let kv_caches = kv_caches.iter_mut().collect();
+
+        let num_prefill_tokens = tokens.iter().map(|ts| ts.len()).sum::<usize>();
+        let max_tokens_len = tokens.iter().map(|ts| ts.len()).max().unwrap();
+        let token_size_allocation = max_tokens_len + 64 + 1;
+
+        // prefill forward pass
+        let input_positions = Tensor::from_vec(
+            tokens
+                .iter()
+                .map(|ts| (0..(ts.len() as i64)))
+                .collect::<Vec<_>>(),
+            (1,),
+            &device,
+        )?;
+        let input = Tensor::new(&tokens.iter().flatten(), &device)?.unsqueeze(0)?;
+        let attention_metadata = FlashAttentionMetadata {
+            context_lengths: Some(Tensor::from_vec(
+                tokens.iter().map(|ts| ts.len() as u32).collect::<Vec<_>>(),
+                (1,),
+                &device,
+            )?),
+            slot_mapping: Tensor::from_vec(
+                tokens.iter().enumerate().map(|(i, ts)| {
+                    (i * token_size_allocation)..(i * token_size_allocation + ts.len())
+                }),
+                (1,),
+                &device,
+            )?, // [0, .., num_tokens]
+            decoding_metadata: None,
+            num_prefill_tokens: tokens.iter().map(|ts| ts.len()).sum::<usize>(),
+            num_decoding_tokens: 0,
+            prefill_metadata: Some(FlashAttentionPrefillMetadata {
+                block_tables: None,
+                max_query_length: Some(max_tokens_len),
+                max_prefill_sequence_length: max_tokens_len,
+                query_start_locations: Some(Tensor::from_vec(
+                    vec![0]
+                        .iter()
+                        .chain(tokens.iter().map(|ts| ts.len()).collect()),
+                    (tokens.len() + 1,),
+                    &device,
+                )?),
+                sequence_start_locations: Some(Tensor::from_vec(
+                    vec![0]
+                        .iter()
+                        .chain(tokens.iter().map(|ts| ts.len()).collect()),
+                    (tokens.len() + 1,),
+                    &device,
+                )?),
+                sequence_lengths: Some(Tensor::from_vec(
+                    tokens.iter().map(|ts| ts.len()).collect(),
+                    (tokens.len(),),
+                    &device,
+                )?),
+            }),
+        };
+
+        let selected_token_indices = Tensor::from_vec(
+            tokens.iter().map(|ts| ts.len() - 1).collect(),
+            (tokens.len(),),
+            &device,
+        )?;
+        let logits = llama_model.forward(
+            &input,
+            &input_positions,
+            &selected_token_indices,
+            &kv_caches,
+            attention_metadata,
+        )?;
+        assert!(logits.shape(), (1, 10, 32_000));
+        let logits = logits.squeeze(0)?.squeeze(0)?;
+
+        (0..10).for_each(|i| {
+            let next_token = logits_processor.sample(&logits.i(i))?;
+            if let Some(t) = tokenizer.next_token(next_token)? {
+                print!("{t}");
+                std::io::stdout().flush()?;
+            }
+            tokens[i].push(next_token);
+        });
+        token_generated += 10;
+
+        let mut next_tokens = tokens
+            .iter()
+            .map(|ts| *ts.last().unwrap())
+            .collect::<Vec<_>>();
+
+        // round division
+        let total_num_blocks_per_sequence =
+            ((token_size_allocation + block_size - 1) / block_size) as i64;
+
+        // decoding loop
+        for _ in 1..sample_len {
+            let input = Tensor::from_vec(next_tokens, (1,), &device)?;
+            let input_positions =
+                Tensor::from_vec(&tokens.iter().map(|ts| ts.len() - 1).collect(), &device)?;
+            let selected_token_indices = Tensor::new(&(0..10), &device)?;
+            let max_decoding_sequence_length = tokens.iter().map(|ts| ts.len()).max().unwrap();
+            let num_blocks_per_sequence = tokens
+                .iter()
+                .map(|ts| (ts.len() / block_size) as i64 + 1)
+                .collect::<Vec<_>>();
+            let max_num_blocks = *num_blocks_per_sequence.iter().max().unwrap() as usize;
+            let attention_metadata = FlashAttentionMetadata {
+                context_lengths: None,
+                slot_mapping: Tensor::new(
+                    &tokens
+                        .iter()
+                        .enumerate()
+                        .map(|(i, ts)| i * token_size_allocation + ts.len() - 1),
+                    &device,
+                )?,
+                decoding_metadata: Some(FlashAttentionDecodingMetadata {
+                    block_tables: Some(
+                        Tensor::from_vec(
+                            (0i64..10)
+                                .map(|i| {
+                                    {
+                                        ((i * total_num_blocks_per_sequence)
+                                            ..(i * total_num_blocks_per_sequence
+                                                + num_blocks_per_sequence[i]))
+                                            .collect::<Vec<_>>()
+                                            .extend([0i64].repeat(
+                                                max_num_blocks - num_blocks_per_sequence[i],
+                                            )) // pad to max_num_blocks
+                                    }
+                                })
+                                .collect(),
+                            &device,
+                        )?
+                        .reshape((10, max_num_blocks))?,
+                    ),
+                    max_decoding_sequence_length: max_decoding_sequence_length,
+                    sequence_lengths: Some(Tensor::new(
+                        &tokens.iter().map(|ts| ts.len()),
+                        &device,
+                    )?),
+                }),
+                prefill_metadata: None,
+                num_prefill_tokens: 0,
+                num_decoding_tokens: 10,
+            };
+            let logits = llama_model
+                .forward(
+                    &input,
+                    &input_positions,
+                    &selected_token_indices,
+                    &kv_caches,
+                    attention_metadata,
+                )?
+                .squeeze(0)?;
 
             next_token = logits_processor.sample(&logits)?;
             token_generated += 1;
