@@ -465,7 +465,6 @@ mod tests {
         let filenames = vec![api
             .get("model.safetensors")
             .expect("Failed to get model.safetensors")];
-        let cache = Cache::new(&config, &device, dtype)?;
         let mut llama_model = {
             let vb = unsafe { VarBuilder::from_mmaped_safetensors(&filenames, dtype, &device)? };
             Llama::load(vb, &config).expect("Failed to load the model")
@@ -493,7 +492,6 @@ mod tests {
         };
 
         let sample_len = 32;
-        let mut start_gen = std::time::Instant::now();
         let mut index_pos = 0;
         let mut token_generated = 0;
 
