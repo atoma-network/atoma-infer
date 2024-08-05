@@ -1620,7 +1620,7 @@ impl FlashAttentionKvCache {
             && self.window_size_right.is_none()
             && head_size_og % 8 == 0
             && self.alibi_slopes.is_none();
-        // let seqlenq_ngroups_swapped = false; // TODO: remove this
+        let seqlenq_ngroups_swapped = false; // TODO: remove this
         let (q_l, out_l, out_shape, seqlen_q, num_heads) = if seqlenq_ngroups_swapped {
             let ngroups = num_heads / num_heads_k;
             let new_shape = Shape::from((batch_size, ngroups, num_heads_k, head_size_og));
