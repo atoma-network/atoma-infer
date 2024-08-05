@@ -1614,7 +1614,7 @@ impl FlashAttentionKvCache {
             candle_core::bail!("page_block_size must be a multiple of 16, got {page_block_size}")
         }
 
-        let seqlenq_ngroups_swapped = seqlen_q == 1
+        let _seqlenq_ngroups_swapped = seqlen_q == 1
             && num_heads > num_heads_k
             && self.window_size_left.is_none()
             && self.window_size_right.is_none()
