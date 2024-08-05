@@ -2133,8 +2133,6 @@ pub fn flash_attn_kv_cache_full(
     v: &Tensor,
     alibi_slopes: Option<&Tensor>,
     softmax_scale: f32,
-    window_size_left: Option<usize>,
-    window_size_right: Option<usize>,
     block_table: Option<&Tensor>,
     seqlens_k: Option<&Tensor>,
     softcap: Option<f32>,

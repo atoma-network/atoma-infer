@@ -66,7 +66,7 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn config_7b_v1(use_flash_attn: bool) -> Self {
+    pub fn config_7b_v1() -> Self {
         Self {
             hidden_size: 4096,
             intermediate_size: 11008,
@@ -81,7 +81,7 @@ impl Config {
         }
     }
 
-    pub fn config_7b_v2(use_flash_attn: bool) -> Self {
+    pub fn config_7b_v2() -> Self {
         Self {
             hidden_size: 4096,
             intermediate_size: 11008,
@@ -100,10 +100,8 @@ impl Config {
 #[derive(Clone, Debug)]
 /// Cache for Llama model
 pub struct Cache {
-    masks: HashMap<usize, Tensor>,
     cos: Tensor,
     sin: Tensor,
-    device: Device,
 }
 
 impl Cache {
@@ -124,10 +122,8 @@ impl Cache {
         let sin = idx_theta.sin()?.to_dtype(dtype)?;
 
         Ok(Self {
-            masks: HashMap::new(),
             cos,
             sin,
-            device: device.clone(),
         })
     }
 }
@@ -149,7 +145,7 @@ struct CausalSelfAttention {
 impl CausalSelfAttention {
     fn apply_rotary_embed(&self, x: &Tensor, input_positions: &Tensor) -> Result<Tensor> {
         let _enter = self.span_rot.enter();
-        let (b_sz, num_heads, num_total_tokens, hidden_size) = x.dims4()?; // [1, num_heads, num_total_tokens, hidden_size]
+        let (b_sz, _num_heads, num_total_tokens, _hidden_size) = x.dims4()?; // [1, num_heads, num_total_tokens, hidden_size]
 
         if b_sz != 1 {
             candle_core::bail!("batch size must be 1, got {}", b_sz);
@@ -189,7 +185,7 @@ impl CausalSelfAttention {
         kv_cache: &Tensor,
         attention_metadata: &FlashAttentionMetadata,
     ) -> Result<Tensor> {
-        let (batch_size, num_total_tokens, hidden_size) = x.dims3()?;
+        let (_batch_size, num_total_tokens, _hidden_size) = x.dims3()?;
         let b_sz = 1;
         if x.dims()[0] != b_sz {
             candle_core::bail!(
@@ -368,8 +364,6 @@ pub struct Llama {
     ln_f: RmsNorm,
     lm_head: Linear,
     cfg: Config,
-    dtype: DType,
-    device: Device,
 }
 
 impl Llama {
@@ -412,7 +406,7 @@ impl Llama {
         logits.to_dtype(DType::F32)
     }
 
-    pub fn load(vb: VarBuilder, cfg: &Config, dtype: DType, device: &Device) -> Result<Self> {
+    pub fn load(vb: VarBuilder, cfg: &Config) -> Result<Self> {
         let wte = embedding(cfg.vocab_size, cfg.hidden_size, vb.pp("model.embed_tokens"))?;
         let lm_head = linear(cfg.hidden_size, cfg.vocab_size, vb.pp("lm_head"))?;
         let ln_f = RmsNorm::new(cfg.hidden_size, cfg.rms_norm_eps, vb.pp("model.norm"))?;
@@ -425,9 +419,7 @@ impl Llama {
             blocks,
             ln_f,
             lm_head,
-            cfg: cfg.clone(),
-            dtype: dtype,
-            device: device.clone(),
+            cfg: cfg.clone()
         })
     }
 
@@ -441,7 +433,6 @@ mod tests {
     use super::*;
     use crate::flash_attention::{FlashAttentionDecodingMetadata, FlashAttentionPrefillMetadata};
     use candle_transformers::generation::{LogitsProcessor, Sampling};
-    use core::panic;
     use hf_hub::{api::sync::Api, Repo, RepoType};
     use std::io::Write;
     use tokenizers::Tokenizer;
@@ -477,7 +468,7 @@ mod tests {
         let cache = Cache::new(&config, &device, dtype)?;
         let mut llama_model = {
             let vb = unsafe { VarBuilder::from_mmaped_safetensors(&filenames, dtype, &device)? };
-            Llama::load(vb, &config, dtype, &device).expect("Failed to load the model")
+            Llama::load(vb, &config).expect("Failed to load the model")
         };
         let tokenizer =
             Tokenizer::from_file(tokenizer_filename).expect("Failed to load the tokenizer");
@@ -503,7 +494,6 @@ mod tests {
 
         let sample_len = 32;
         let mut start_gen = std::time::Instant::now();
-        let mut index_pos = 0;
         let mut token_generated = 0;
 
         // kv cache
@@ -569,7 +559,7 @@ mod tests {
         }
 
         // decoding loop
-        for index in 1..sample_len {
+        for _ in 1..sample_len {
             let input = Tensor::new(&[next_token], &device)?.unsqueeze(0)?;
             let input_positions = Tensor::new(&[tokens.len() as i64 - 1], &device)?.unsqueeze(0)?;
             let selected_token_indices = Tensor::new(&[0u32], &device)?;
