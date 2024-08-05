@@ -492,7 +492,7 @@ mod tests {
 
         let sample_len = 32;
         let start_gen = std::time::Instant::now();
-        let index_pos = 0;
+        let mut index_pos = 0;
         let mut token_generated = 0;
 
         // kv cache
