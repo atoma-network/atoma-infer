@@ -719,7 +719,7 @@ mod tests {
             (1,),
             &device,
         )?;
-        let input = Tensor::new(&tokens.iter().flatten(), &device)?.unsqueeze(0)?;
+        let input = Tensor::new(&tokens.iter().flatten().collect(), &device)?.unsqueeze(0)?;
         let attention_metadata = FlashAttentionMetadata {
             context_lengths: Some(Tensor::from_vec(
                 tokens.iter().map(|ts| ts.len() as u32).collect::<Vec<_>>(),
@@ -727,9 +727,13 @@ mod tests {
                 &device,
             )?),
             slot_mapping: Tensor::from_vec(
-                tokens.iter().enumerate().flat_map(|(i, ts)| {
-                    (i * token_size_allocation)..(i * token_size_allocation + ts.len())
-                }),
+                tokens
+                    .iter()
+                    .enumerate()
+                    .flat_map(|(i, ts)| {
+                        (i * token_size_allocation)..(i * token_size_allocation + ts.len())
+                    })
+                    .collect(),
                 (1,),
                 &device,
             )?, // [0, .., num_tokens]
@@ -743,7 +747,8 @@ mod tests {
                 query_start_locations: Some(Tensor::from_vec(
                     vec![0]
                         .iter()
-                        .chain(tokens.iter().map(|ts| ts.len()).collect()),
+                        .chain(tokens.iter().map(|ts| ts.len()).collect())
+                        .collect(),
                     (tokens.len() + 1,),
                     &device,
                 )?),
@@ -763,7 +768,7 @@ mod tests {
         };
 
         let selected_token_indices = Tensor::from_vec(
-            tokens.iter().map(|ts| ts.len() as u32- 1).collect(),
+            tokens.iter().map(|ts| ts.len() as u32 - 1).collect(),
             (tokens.len(),),
             &device,
         )?;
@@ -774,11 +779,13 @@ mod tests {
             &kv_caches,
             attention_metadata,
         )?;
-        assert_eq!(logits.shape(), (1, 10, 32_000));
+        assert_eq!(logits.dims()[0], 1);
+        assert_eq!(logits.dims()[1], 10);
+        assert_eq!(logits.dims()[2], 32_000);
         let logits = logits.squeeze(0)?.squeeze(0)?;
 
         (0..10).for_each(|i| {
-            let next_token = logits_processor.sample(&logits.i(i))?;
+            let next_token = logits_processor.sample(&logits.i(i).unwrap()).unwrap();
             if let Some(t) = tokenizers[i].next_token(next_token).unwrap() {
                 print!("{t}");
                 std::io::stdout().flush().unwrap();
@@ -803,8 +810,8 @@ mod tests {
         for _ in 1..sample_len {
             let input = Tensor::from_vec(next_tokens, (1,), &device)?;
             let input_positions =
-                Tensor::from_vec(&tokens.iter().map(|ts| ts.len() - 1).collect(), &device)?;
-            let selected_token_indices = Tensor::new(&(0u32..10u32), &device)?;
+                Tensor::from_vec(&tokens.iter().map(|ts| ts.len() - 1).collect(), (1, ), &device)?;
+            let selected_token_indices = Tensor::new(&(0u32..10u32).collect(), &device)?;
             let max_decoding_sequence_length = tokens.iter().map(|ts| ts.len()).max().unwrap();
             let num_blocks_per_sequence = tokens
                 .iter()
@@ -832,7 +839,8 @@ mod tests {
                                                 + num_blocks_per_sequence[i as usize]))
                                             .collect::<Vec<_>>()
                                             .extend([0i64].repeat(
-                                                max_num_blocks - num_blocks_per_sequence[i as usize],
+                                                max_num_blocks
+                                                    - num_blocks_per_sequence[i as usize] as usize,
                                             )) // pad to max_num_blocks
                                     }
                                 })
@@ -840,7 +848,7 @@ mod tests {
                             (num_running_sequences, max_num_blocks),
                             &device,
                         )?
-                        .reshape((10, max_num_blocks))?,
+                        .reshape((num_running_sequences, max_num_blocks))?,
                     ),
                     max_decoding_sequence_length: max_decoding_sequence_length,
                     sequence_lengths: Some(Tensor::new(
