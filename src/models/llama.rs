@@ -887,7 +887,7 @@ mod tests {
                 .collect::<Vec<_>>();
         }
 
-        finished_sequences.extend(tokens.iter());
+        finished_sequences.extend(tokens);
 
         for i in 0..10 {
             if let Some(rest) = tokenizers[i].decode_rest().unwrap() {
