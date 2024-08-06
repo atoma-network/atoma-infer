@@ -861,6 +861,7 @@ mod tests {
                 .map(|i| (tokens[*i].len() / block_size) as i64 + 1)
                 .collect::<Vec<_>>();
             println!("num_blocks_per_sequence: {:?}", num_blocks_per_sequence);
+            println!("active_indices: {:?}", active_indices);
             let max_num_blocks = *num_blocks_per_sequence.iter().max().unwrap() as usize;
 
             let slot_mapping = Tensor::from_vec(
