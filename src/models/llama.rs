@@ -707,7 +707,7 @@ mod tests {
         .take(config.num_hidden_layers)
         .collect::<Result<Vec<_>>>()?;
 
-        let kv_caches = kv_caches.iter_mut().collect();
+        let kv_caches: Vec<_> = kv_caches.iter_mut().collect();
 
         let num_prefill_tokens = tokens.iter().map(|ts| ts.len()).sum::<usize>();
         let max_tokens_len = tokens.iter().map(|ts| ts.len()).max().unwrap();
