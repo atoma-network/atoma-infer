@@ -759,7 +759,7 @@ mod tests {
             (tokens.len() + 1,),
             &device,
         )?);
-        let sequence_start_locs = Some(Tensor::from_vec(
+        let sequence_start_locations = Some(Tensor::from_vec(
             sequence_start_locs,
             (tokens.len() + 1,),
             &device,
