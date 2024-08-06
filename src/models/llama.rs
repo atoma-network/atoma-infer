@@ -722,7 +722,7 @@ mod tests {
             (1, num_prefill_tokens),
             &device,
         )?;
-        // let input = Tensor::from_vec(tokens.clone().into_iter().flatten().collect(), (1,), &device)?;
+        let input = Tensor::from_vec(tokens.clone().into_iter().flatten().collect(), (1, num_prefill_tokens), &device)?;
         // let attention_metadata = FlashAttentionMetadata {
         //     context_lengths: Some(Tensor::from_vec(
         //         tokens.iter().map(|ts| ts.len() as u32).collect::<Vec<_>>(),
