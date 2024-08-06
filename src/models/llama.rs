@@ -830,10 +830,10 @@ mod tests {
 
         // decoding loop
         for _ in 1..sample_len {
-            let input = Tensor::from_vec(next_tokens, (1,), &device)?;
+            let input = Tensor::from_vec(next_tokens, (1, next_tokens.len()), &device)?;
             let input_positions = Tensor::from_vec(
                 tokens.iter().map(|ts| ts.len() as i64 - 1).collect(),
-                (1,),
+                (1, num_running_sequences),
                 &device,
             )?;
             let selected_token_indices = Tensor::from_vec((0u32..num_running_sequences as u32).collect(), (num_running_sequences,), &device)?;
