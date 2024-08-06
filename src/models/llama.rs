@@ -877,7 +877,8 @@ mod tests {
                 decoding_metadata: Some(FlashAttentionDecodingMetadata {
                     block_tables: Some(Tensor::from_vec(
                         active_indices
-                            .flat_map(|i| {
+                            .iter()
+                            .flat_map(|&i| {
                                 {
                                     let mut range = ((i as i64 * total_num_blocks_per_sequence)
                                         ..(i as i64 * total_num_blocks_per_sequence
