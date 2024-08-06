@@ -674,7 +674,9 @@ mod tests {
         .take(10)
         .collect::<Vec<_>>();
         println!("starting the inference loop");
-        print!("{prompt}");
+        for prompt in prompts.iter() {
+            println!("{prompt}");
+        }
 
         let mut logits_processor = {
             let temperature = 0.8;
@@ -771,7 +773,7 @@ mod tests {
             &kv_caches,
             attention_metadata,
         )?;
-        assert!(logits.shape(), (1, 10, 32_000));
+        assert_eq!(logits.shape(), (1, 10, 32_000));
         let logits = logits.squeeze(0)?.squeeze(0)?;
 
         (0..10).for_each(|i| {
