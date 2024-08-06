@@ -769,21 +769,21 @@ mod tests {
             (tokens.len(),),
             &device,
         )?);
-        // let attention_metadata = FlashAttentionMetadata {
-        //     context_lengths,
-        //     slot_mapping, // [0, .., num_tokens]
-        //     decoding_metadata: None,
-        //     num_prefill_tokens,
-        //     num_decoding_tokens: 0,
-        //     prefill_metadata: Some(FlashAttentionPrefillMetadata {
-        //         block_tables: None,
-        //         max_query_length: Some(max_tokens_len),
-        //         max_prefill_sequence_length: max_tokens_len,
-        //         query_start_locations,
-        //         sequence_start_locations,
-        //         sequence_lengths,
-        //     }),
-        // };
+        let attention_metadata = FlashAttentionMetadata {
+            context_lengths,
+            slot_mapping,
+            decoding_metadata: None,
+            num_prefill_tokens,
+            num_decoding_tokens: 0,
+            prefill_metadata: Some(FlashAttentionPrefillMetadata {
+                block_tables: None,
+                max_query_length: Some(max_tokens_len),
+                max_prefill_sequence_length: max_tokens_len,
+                query_start_locations,
+                sequence_start_locations,
+                sequence_lengths,
+            }),
+        };
 
         // let selected_token_indices = Tensor::from_vec(
         //     tokens.iter().map(|ts| ts.len() as u32 - 1).collect(),
