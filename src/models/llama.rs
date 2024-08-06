@@ -735,7 +735,7 @@ mod tests {
                             ..((i * token_size_allocation + ts.len()) as i64)
                     })
                     .collect(),
-                (1,),
+                (num_prefill_tokens,),
                 &device,
             )?, // [0, .., num_tokens]
             decoding_metadata: None,
@@ -825,13 +825,13 @@ mod tests {
             let max_num_blocks = *num_blocks_per_sequence.iter().max().unwrap() as usize;
             let attention_metadata = FlashAttentionMetadata {
                 context_lengths: None,
-                slot_mapping: Tensor::new(
-                    &tokens
+                slot_mapping: Tensor::from_vec(
+                    tokens
                         .iter()
                         .enumerate()
                         .map(|(i, ts)| (i * token_size_allocation + ts.len()) as i64 - 1)
-                        .collect::<Vec<_>>()
-                        .clone(),
+                        .collect::<Vec<_>>(),
+                        (num_running_sequences,),
                     &device,
                 )?,
                 decoding_metadata: Some(FlashAttentionDecodingMetadata {
