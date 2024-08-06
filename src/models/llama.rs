@@ -668,7 +668,11 @@ mod tests {
             })
             .collect::<Vec<_>>();
 
-        let mut tokenizer = candle_examples::token_output_stream::TokenOutputStream::new(tokenizer);
+        let mut tokenizers = std::iter::repeat_with(|| {
+            candle_examples::token_output_stream::TokenOutputStream::new(tokenizer.clone())
+        })
+        .take(10)
+        .collect::<Vec<_>>();
         println!("starting the inference loop");
         print!("{prompt}");
 
@@ -772,7 +776,7 @@ mod tests {
 
         (0..10).for_each(|i| {
             let next_token = logits_processor.sample(&logits.i(i))?;
-            if let Some(t) = tokenizer.next_token(next_token)? {
+            if let Some(t) = tokenizers[i].next_token(next_token)? {
                 print!("{t}");
                 std::io::stdout().flush()?;
             }
@@ -788,6 +792,9 @@ mod tests {
         // round division
         let total_num_blocks_per_sequence =
             ((token_size_allocation + block_size - 1) / block_size) as i64;
+
+        let num_running_sequences = tokens.len();
+        let mut finished_sequences = Vec::with_capacity(10);
 
         // decoding loop
         for _ in 1..sample_len {
@@ -850,21 +857,40 @@ mod tests {
                 )?
                 .squeeze(0)?;
 
-            next_token = logits_processor.sample(&logits)?;
-            token_generated += 1;
-            tokens.push(next_token);
+            (0..10).for_each(|i| {
+                let next_token = logits_processor.sample(&logits.i(i))?;
+                if let Some(t) = tokenizers[i].next_token(next_token)? {
+                    print!("{t}");
+                    std::io::stdout().flush()?;
+                }
 
-            if Some(next_token) == eos_token_id {
-                break;
-            }
-            if let Some(t) = tokenizer.next_token(next_token)? {
-                print!("{t}");
-                std::io::stdout().flush()?;
-            }
+                tokens[i].push(next_token);
+
+                // update finished sequences, in case a sequence is finished
+                if Some(next_token) == eos_token_id {
+                    finished_sequences.push(tokens[i]);
+                    tokens.remove(i);
+                }
+
+                if let Some(t) = tokenizers[i].next_token(next_token)? {
+                    print!("{t}");
+                    std::io::stdout().flush()?;
+                }
+            });
+            token_generated += 10;
+
+            next_tokens = tokens
+                .iter()
+                .map(|ts| *ts.last().unwrap())
+                .collect::<Vec<_>>();
         }
 
-        if let Some(rest) = tokenizer.decode_rest().unwrap() {
-            print!("{rest}");
+        finished_sequences.extend(tokens.iter());
+
+        for _ in 0..10 {
+            if let Some(rest) = tokenizers[i].decode_rest().unwrap() {
+                print!("{rest}");
+            }
         }
 
         let dt = start_gen.elapsed();
