@@ -803,11 +803,12 @@ mod tests {
         assert_eq!(logits.dims()[2], 32_000);
         let logits = logits.squeeze(0)?.squeeze(0)?;
 
+        let mut sentences = prompts.clone();
+
         (0..10).for_each(|i| {
             let next_token = logits_processor.sample(&logits.i(i).unwrap()).unwrap();
             if let Some(t) = tokenizers[i].next_token(next_token).unwrap() {
-                println!("{t}");
-                std::io::stdout().flush().unwrap();
+                sentences[i].push_str(&t);
             }
             tokens[i].push(next_token);
         });
@@ -818,8 +819,8 @@ mod tests {
             .map(|ts| *ts.last().unwrap())
             .collect::<Vec<_>>();
 
-        println!("next_tokens: {:?}", next_tokens);
-
+        println!("sentences: {:?}", sentences);
+        
         // round division
         let total_num_blocks_per_sequence =
             ((token_size_allocation + block_size - 1) / block_size) as i64;
