@@ -428,11 +428,11 @@ impl Llama {
 mod tests {
     use super::*;
     use crate::flash_attention::{FlashAttentionDecodingMetadata, FlashAttentionPrefillMetadata};
+    use candle_core::IndexOp;
     use candle_transformers::generation::{LogitsProcessor, Sampling};
     use hf_hub::{api::sync::Api, Repo, RepoType};
     use std::io::Write;
     use tokenizers::Tokenizer;
-    use candle_core::IndexOp;
 
     const EOS_TOKEN: &str = "</s>";
 
@@ -836,14 +836,14 @@ mod tests {
                                     }
                                 })
                                 .collect(),
-                                ()
-                            &device,
+                                (num_running_sequences, max_num_blocks),
+                            () & device,
                         )?
                         .reshape((10, max_num_blocks))?,
                     ),
                     max_decoding_sequence_length: max_decoding_sequence_length,
                     sequence_lengths: Some(Tensor::new(
-                        &tokens.iter().map(|ts| ts.len() as u32),
+                        &tokens.iter().map(|ts| ts.len() as u32).collect(),
                         &device,
                     )?),
                 }),
@@ -862,7 +862,7 @@ mod tests {
                 .squeeze(0)?;
 
             (0..10).for_each(|i| {
-                let next_token = logits_processor.sample(&logits.i(i)).unwrap();
+                let next_token = logits_processor.sample(&logits.i(i).unwrap()).unwrap();
                 if let Some(t) = tokenizers[i].next_token(next_token).unwrap() {
                     print!("{t}");
                     std::io::stdout().flush().unwrap();
