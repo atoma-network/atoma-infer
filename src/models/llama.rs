@@ -719,7 +719,7 @@ mod tests {
             (1,),
             &device,
         )?;
-        let input = Tensor::new(&tokens.iter().flatten().collect(), &device)?.unsqueeze(0)?;
+        let input = Tensor::from_vec(&tokens.iter().flatten().collect(), (1,), &device)?;
         let attention_metadata = FlashAttentionMetadata {
             context_lengths: Some(Tensor::from_vec(
                 tokens.iter().map(|ts| ts.len() as u32).collect::<Vec<_>>(),
@@ -816,7 +816,7 @@ mod tests {
                 (1,),
                 &device,
             )?;
-            let selected_token_indices = Tensor::new(&(0u32..10u32).collect(), &device)?;
+            let selected_token_indices = Tensor::from_vec(&(0u32..num_running_sequences as u32).collect(), (num_running_sequences,), &device)?;
             let max_decoding_sequence_length = tokens.iter().map(|ts| ts.len()).max().unwrap();
             let num_blocks_per_sequence = tokens
                 .iter()
