@@ -827,60 +827,79 @@ mod tests {
         let mut finished_sequences = Vec::with_capacity(10);
 
         let mut stopped_sequences = vec![false; 10];
+        let mut active_indices: Vec<usize> = (0..10).collect();
 
         // decoding loop
         for _ in 1..sample_len {
-            let input = Tensor::from_vec(next_tokens, (1, num_running_sequences), &device)?;
-            let input_positions = Tensor::from_vec(
-                tokens.iter().map(|ts| ts.len() as i64 - 1).collect(),
-                (1, num_running_sequences),
+            let num_active = active_indices.len();
+            if num_active == 0 {
+                break; // All sequences have finished
+            }
+
+            let input = Tensor::from_vec(
+                active_indices
+                    .iter()
+                    .map(|&i| *tokens[i].last().unwrap())
+                    .collect(),
+                (1, num_active),
                 &device,
             )?;
-            let selected_token_indices = Tensor::from_vec((0u32..num_running_sequences as u32).collect(), (num_running_sequences,), &device)?;
-            let max_decoding_sequence_length = tokens.iter().map(|ts| ts.len()).max().unwrap();
-            let num_blocks_per_sequence = tokens
+            let input_positions = Tensor::from_vec(
+                active_indices
+                    .iter()
+                    .map(|&i| tokens[i].len() as i64 - 1)
+                    .collect(),
+                (1, num_active),
+                &device,
+            )?;
+            let selected_token_indices =
+                Tensor::from_vec((0..num_active as u32).collect(), (num_active,), &device)?;
+            let max_decoding_sequence_length = active_indices
                 .iter()
-                .map(|ts| (ts.len() / block_size) as i64 + 1)
+                .map(|i| tokens[*i].len())
+                .max()
+                .unwrap();
+            let num_blocks_per_sequence = active_indices
+                .iter()
+                .map(|i| (tokens[*i].len() / block_size) as i64 + 1)
                 .collect::<Vec<_>>();
             let max_num_blocks = *num_blocks_per_sequence.iter().max().unwrap() as usize;
             let attention_metadata = FlashAttentionMetadata {
                 context_lengths: None,
                 slot_mapping: Tensor::from_vec(
-                    tokens
+                    active_indices
                         .iter()
-                        .enumerate()
-                        .map(|(i, ts)| (i * token_size_allocation + ts.len()) as i64 - 1)
+                        .map(|i| (i * token_size_allocation + tokens[*i].len()) as i64 - 1)
                         .collect::<Vec<_>>(),
                     (num_running_sequences,),
                     &device,
                 )?,
                 decoding_metadata: Some(FlashAttentionDecodingMetadata {
-                    block_tables: Some(
-                        Tensor::from_vec(
-                            (0i64..(num_running_sequences as i64))
-                                .flat_map(|i| {
-                                    {
-                                        let mut range = ((i * total_num_blocks_per_sequence)
-                                            ..(i * total_num_blocks_per_sequence
-                                                + num_blocks_per_sequence[i as usize]))
-                                            .collect::<Vec<_>>();
-                                        range.extend([0i64].repeat(
-                                            max_num_blocks
-                                                - num_blocks_per_sequence[i as usize] as usize,
-                                        )); // pad to max_num_blocks
-                                        range
-                                    }
-                                })
-                                .collect(),
-                            (num_running_sequences, max_num_blocks),
-                            &device,
-                        )?
-                        .reshape((num_running_sequences, max_num_blocks))?,
-                    ),
+                    block_tables: Some(Tensor::from_vec(
+                        active_indices
+                            .flat_map(|i| {
+                                {
+                                    let mut range = ((i as i64 * total_num_blocks_per_sequence)
+                                        ..(i as i64 * total_num_blocks_per_sequence
+                                            + num_blocks_per_sequence[i]))
+                                        .collect::<Vec<_>>();
+                                    range.extend([0i64].repeat(
+                                        max_num_blocks - num_blocks_per_sequence[i] as usize,
+                                    )); // pad to max_num_blocks
+                                    range
+                                }
+                            })
+                            .collect(),
+                        (active_indices.len(), max_num_blocks),
+                        &device,
+                    )?),
                     max_decoding_sequence_length: max_decoding_sequence_length,
                     sequence_lengths: Some(Tensor::from_vec(
-                        tokens.iter().map(|ts| ts.len() as u32).collect::<Vec<_>>(),
-                        (tokens.len(),),
+                        active_indices
+                            .iter()
+                            .map(|i| tokens[*i].len() as u32)
+                            .collect::<Vec<_>>(),
+                        (active_indices.len(),),
                         &device,
                     )?),
                 }),
@@ -898,31 +917,26 @@ mod tests {
                 )?
                 .squeeze(0)?;
 
-            for i in 0..10 {
-                if stopped_sequences[i] {
-                    continue;
-                }
-                let next_token = logits_processor.sample(&logits.i(i).unwrap()).unwrap();
-                if let Some(t) = tokenizers[i].next_token(next_token).unwrap() {
-                    sentences[i].push_str(&t);
+            let mut new_active_indices = Vec::new();
+            next_tokens = Vec::new();
+            for idx in active_indices.iter() {
+                let next_token = logits_processor.sample(&logits.i(idx).unwrap()).unwrap();
+                if let Some(t) = tokenizers[idx].next_token(next_token).unwrap() {
+                    sentences[idx].push_str(&t);
                 }
 
-                tokens[i].push(next_token);
+                tokens[idx].push(next_token);
+                next_tokens.push(next_token);
 
-                // update finished sequences, in case a sequence is finished
-                if Some(next_token) == eos_token_id {
-                    finished_sequences.push(tokens[i].clone());
-                    stopped_sequences[i] = true;
+                if Some(next_token) != eos_token_id {
+                    new_active_indices.push(idx);
+                } else {
+                    finished_sequences.push(tokens[idx].clone());
                 }
             }
-            token_generated += num_running_sequences;
 
-            next_tokens = tokens
-                .iter()
-                .map(|ts| *ts.last().unwrap())
-                .collect::<Vec<_>>();
-
-            num_running_sequences = tokens.len();
+            active_indices = new_active_indices;
+            token_generated += num_active;
         }
 
         finished_sequences.extend(tokens);
