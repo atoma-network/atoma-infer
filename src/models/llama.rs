@@ -731,7 +731,8 @@ mod tests {
                     .iter()
                     .enumerate()
                     .flat_map(|(i, ts)| {
-                        ((i * token_size_allocation) as i64)..((i * token_size_allocation + ts.len()) as i64)
+                        ((i * token_size_allocation) as i64)
+                            ..((i * token_size_allocation + ts.len()) as i64)
                     })
                     .collect(),
                 (1,),
@@ -809,8 +810,11 @@ mod tests {
         // decoding loop
         for _ in 1..sample_len {
             let input = Tensor::from_vec(next_tokens, (1,), &device)?;
-            let input_positions =
-                Tensor::from_vec(&tokens.iter().map(|ts| ts.len() - 1).collect(), (1, ), &device)?;
+            let input_positions = Tensor::from_vec(
+                &tokens.iter().map(|ts| ts.len() - 1).collect(),
+                (1,),
+                &device,
+            )?;
             let selected_token_indices = Tensor::new(&(0u32..10u32).collect(), &device)?;
             let max_decoding_sequence_length = tokens.iter().map(|ts| ts.len()).max().unwrap();
             let num_blocks_per_sequence = tokens
@@ -834,14 +838,15 @@ mod tests {
                             (0i64..(num_running_sequences as i64))
                                 .flat_map(|i| {
                                     {
-                                        ((i * total_num_blocks_per_sequence)
+                                        let mut range = ((i * total_num_blocks_per_sequence)
                                             ..(i * total_num_blocks_per_sequence
                                                 + num_blocks_per_sequence[i as usize]))
-                                            .collect::<Vec<_>>()
-                                            .extend([0i64].repeat(
-                                                max_num_blocks
-                                                    - num_blocks_per_sequence[i as usize] as usize,
-                                            )) // pad to max_num_blocks
+                                            .collect::<Vec<_>>();
+                                        range.extend([0i64].repeat(
+                                            max_num_blocks
+                                                - num_blocks_per_sequence[i as usize] as usize,
+                                        )); // pad to max_num_blocks
+                                        range
                                     }
                                 })
                                 .collect(),
