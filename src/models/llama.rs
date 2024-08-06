@@ -823,9 +823,9 @@ mod tests {
             ((token_size_allocation + block_size - 1) / block_size) as i64;
 
         let mut num_running_sequences = tokens.len();
-        let mut finished_sequences = Vec::with_capacity(10);
+        // let mut finished_sequences = Vec::with_capacity(10);
 
-        // decoding loop
+        // // decoding loop
         // for _ in 1..sample_len {
         //     let input = Tensor::from_vec(next_tokens, (1,), &device)?;
         //     let input_positions = Tensor::from_vec(
