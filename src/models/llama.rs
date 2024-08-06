@@ -719,7 +719,7 @@ mod tests {
                 .iter()
                 .flat_map(|ts| (0..(ts.len() as i64)))
                 .collect::<Vec<_>>(),
-            (1,),
+            (1, num_prefill_tokens),
             &device,
         )?;
         // let input = Tensor::from_vec(tokens.clone().into_iter().flatten().collect(), (1,), &device)?;
