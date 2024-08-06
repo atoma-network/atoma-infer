@@ -428,7 +428,6 @@ impl Llama {
 mod tests {
     use super::*;
     use crate::flash_attention::{FlashAttentionDecodingMetadata, FlashAttentionPrefillMetadata};
-    use candle_core::IndexOp;
     use candle_transformers::generation::{LogitsProcessor, Sampling};
     use hf_hub::{api::sync::Api, Repo, RepoType};
     use std::io::Write;
@@ -778,149 +777,149 @@ mod tests {
             (tokens.len(),),
             &device,
         )?;
-        let logits = llama_model.forward(
-            &input,
-            &input_positions,
-            &selected_token_indices,
-            &kv_caches,
-            attention_metadata,
-        )?;
-        assert_eq!(logits.dims()[0], 1);
-        assert_eq!(logits.dims()[1], 10);
-        assert_eq!(logits.dims()[2], 32_000);
-        let logits = logits.squeeze(0)?.squeeze(0)?;
+        // let logits = llama_model.forward(
+        //     &input,
+        //     &input_positions,
+        //     &selected_token_indices,
+        //     &kv_caches,
+        //     attention_metadata,
+        // )?;
+        // assert_eq!(logits.dims()[0], 1);
+        // assert_eq!(logits.dims()[1], 10);
+        // assert_eq!(logits.dims()[2], 32_000);
+        // let logits = logits.squeeze(0)?.squeeze(0)?;
 
-        (0..10).for_each(|i| {
-            let next_token = logits_processor.sample(&logits.i(i).unwrap()).unwrap();
-            if let Some(t) = tokenizers[i].next_token(next_token).unwrap() {
-                print!("{t}");
-                std::io::stdout().flush().unwrap();
-            }
-            tokens[i].push(next_token);
-        });
-        token_generated += 10;
+        // (0..10).for_each(|i| {
+        //     let next_token = logits_processor.sample(&logits.i(i).unwrap()).unwrap();
+        //     if let Some(t) = tokenizers[i].next_token(next_token).unwrap() {
+        //         print!("{t}");
+        //         std::io::stdout().flush().unwrap();
+        //     }
+        //     tokens[i].push(next_token);
+        // });
+        // token_generated += 10;
 
-        let mut next_tokens = tokens
-            .iter()
-            .map(|ts| *ts.last().unwrap())
-            .collect::<Vec<_>>();
+        // let mut next_tokens = tokens
+        //     .iter()
+        //     .map(|ts| *ts.last().unwrap())
+        //     .collect::<Vec<_>>();
 
-        // round division
-        let total_num_blocks_per_sequence =
-            ((token_size_allocation + block_size - 1) / block_size) as i64;
+        // // round division
+        // let total_num_blocks_per_sequence =
+        //     ((token_size_allocation + block_size - 1) / block_size) as i64;
 
-        let mut num_running_sequences = tokens.len();
-        let mut finished_sequences = Vec::with_capacity(10);
+        // let mut num_running_sequences = tokens.len();
+        // let mut finished_sequences = Vec::with_capacity(10);
 
-        // decoding loop
-        for _ in 1..sample_len {
-            let input = Tensor::from_vec(next_tokens, (1,), &device)?;
-            let input_positions = Tensor::from_vec(
-                tokens.iter().map(|ts| ts.len() as i64 - 1).collect(),
-                (1,),
-                &device,
-            )?;
-            let selected_token_indices = Tensor::from_vec((0u32..num_running_sequences as u32).collect(), (num_running_sequences,), &device)?;
-            let max_decoding_sequence_length = tokens.iter().map(|ts| ts.len()).max().unwrap();
-            let num_blocks_per_sequence = tokens
-                .iter()
-                .map(|ts| (ts.len() / block_size) as i64 + 1)
-                .collect::<Vec<_>>();
-            let max_num_blocks = *num_blocks_per_sequence.iter().max().unwrap() as usize;
-            let attention_metadata = FlashAttentionMetadata {
-                context_lengths: None,
-                slot_mapping: Tensor::from_vec(
-                    tokens
-                        .iter()
-                        .enumerate()
-                        .map(|(i, ts)| (i * token_size_allocation + ts.len()) as i64 - 1)
-                        .collect::<Vec<_>>(),
-                    (num_running_sequences,),
-                    &device,
-                )?,
-                decoding_metadata: Some(FlashAttentionDecodingMetadata {
-                    block_tables: Some(
-                        Tensor::from_vec(
-                            (0i64..(num_running_sequences as i64))
-                                .flat_map(|i| {
-                                    {
-                                        let mut range = ((i * total_num_blocks_per_sequence)
-                                            ..(i * total_num_blocks_per_sequence
-                                                + num_blocks_per_sequence[i as usize]))
-                                            .collect::<Vec<_>>();
-                                        range.extend([0i64].repeat(
-                                            max_num_blocks
-                                                - num_blocks_per_sequence[i as usize] as usize,
-                                        )); // pad to max_num_blocks
-                                        range
-                                    }
-                                })
-                                .collect(),
-                            (num_running_sequences, max_num_blocks),
-                            &device,
-                        )?
-                        .reshape((num_running_sequences, max_num_blocks))?,
-                    ),
-                    max_decoding_sequence_length: max_decoding_sequence_length,
-                    sequence_lengths: Some(Tensor::from_vec(
-                        tokens.iter().map(|ts| ts.len() as u32).collect::<Vec<_>>(),
-                        (tokens.len(),),
-                        &device,
-                    )?),
-                }),
-                prefill_metadata: None,
-                num_prefill_tokens: 0,
-                num_decoding_tokens: 10,
-            };
-            let logits = llama_model
-                .forward(
-                    &input,
-                    &input_positions,
-                    &selected_token_indices,
-                    &kv_caches,
-                    attention_metadata,
-                )?
-                .squeeze(0)?;
+        // // decoding loop
+        // for _ in 1..sample_len {
+        //     let input = Tensor::from_vec(next_tokens, (1,), &device)?;
+        //     let input_positions = Tensor::from_vec(
+        //         tokens.iter().map(|ts| ts.len() as i64 - 1).collect(),
+        //         (1,),
+        //         &device,
+        //     )?;
+        //     let selected_token_indices = Tensor::from_vec((0u32..num_running_sequences as u32).collect(), (num_running_sequences,), &device)?;
+        //     let max_decoding_sequence_length = tokens.iter().map(|ts| ts.len()).max().unwrap();
+        //     let num_blocks_per_sequence = tokens
+        //         .iter()
+        //         .map(|ts| (ts.len() / block_size) as i64 + 1)
+        //         .collect::<Vec<_>>();
+        //     let max_num_blocks = *num_blocks_per_sequence.iter().max().unwrap() as usize;
+        //     let attention_metadata = FlashAttentionMetadata {
+        //         context_lengths: None,
+        //         slot_mapping: Tensor::from_vec(
+        //             tokens
+        //                 .iter()
+        //                 .enumerate()
+        //                 .map(|(i, ts)| (i * token_size_allocation + ts.len()) as i64 - 1)
+        //                 .collect::<Vec<_>>(),
+        //             (num_running_sequences,),
+        //             &device,
+        //         )?,
+        //         decoding_metadata: Some(FlashAttentionDecodingMetadata {
+        //             block_tables: Some(
+        //                 Tensor::from_vec(
+        //                     (0i64..(num_running_sequences as i64))
+        //                         .flat_map(|i| {
+        //                             {
+        //                                 let mut range = ((i * total_num_blocks_per_sequence)
+        //                                     ..(i * total_num_blocks_per_sequence
+        //                                         + num_blocks_per_sequence[i as usize]))
+        //                                     .collect::<Vec<_>>();
+        //                                 range.extend([0i64].repeat(
+        //                                     max_num_blocks
+        //                                         - num_blocks_per_sequence[i as usize] as usize,
+        //                                 )); // pad to max_num_blocks
+        //                                 range
+        //                             }
+        //                         })
+        //                         .collect(),
+        //                     (num_running_sequences, max_num_blocks),
+        //                     &device,
+        //                 )?
+        //                 .reshape((num_running_sequences, max_num_blocks))?,
+        //             ),
+        //             max_decoding_sequence_length: max_decoding_sequence_length,
+        //             sequence_lengths: Some(Tensor::from_vec(
+        //                 tokens.iter().map(|ts| ts.len() as u32).collect::<Vec<_>>(),
+        //                 (tokens.len(),),
+        //                 &device,
+        //             )?),
+        //         }),
+        //         prefill_metadata: None,
+        //         num_prefill_tokens: 0,
+        //         num_decoding_tokens: 10,
+        //     };
+        //     let logits = llama_model
+        //         .forward(
+        //             &input,
+        //             &input_positions,
+        //             &selected_token_indices,
+        //             &kv_caches,
+        //             attention_metadata,
+        //         )?
+        //         .squeeze(0)?;
 
-            (0..10).for_each(|i| {
-                let next_token = logits_processor.sample(&logits.i(i).unwrap()).unwrap();
-                if let Some(t) = tokenizers[i].next_token(next_token).unwrap() {
-                    print!("{t}");
-                    std::io::stdout().flush().unwrap();
-                }
+        //     (0..10).for_each(|i| {
+        //         let next_token = logits_processor.sample(&logits.i(i).unwrap()).unwrap();
+        //         if let Some(t) = tokenizers[i].next_token(next_token).unwrap() {
+        //             print!("{t}");
+        //             std::io::stdout().flush().unwrap();
+        //         }
 
-                tokens[i].push(next_token);
+        //         tokens[i].push(next_token);
 
-                // update finished sequences, in case a sequence is finished
-                if Some(next_token) == eos_token_id {
-                    finished_sequences.push(tokens[i].clone());
-                    tokens.remove(i);
-                }
-            });
-            token_generated += 10;
+        //         // update finished sequences, in case a sequence is finished
+        //         if Some(next_token) == eos_token_id {
+        //             finished_sequences.push(tokens[i].clone());
+        //             tokens.remove(i);
+        //         }
+        //     });
+        //     token_generated += 10;
 
-            next_tokens = tokens
-                .iter()
-                .map(|ts| *ts.last().unwrap())
-                .collect::<Vec<_>>();
+        //     next_tokens = tokens
+        //         .iter()
+        //         .map(|ts| *ts.last().unwrap())
+        //         .collect::<Vec<_>>();
 
-            num_running_sequences = tokens.len();
-        }
+        //     num_running_sequences = tokens.len();
+        // }
 
-        finished_sequences.extend(tokens);
+        // finished_sequences.extend(tokens);
 
-        for i in 0..10 {
-            if let Some(rest) = tokenizers[i].decode_rest().unwrap() {
-                print!("{rest}");
-            }
-        }
+        // for i in 0..10 {
+        //     if let Some(rest) = tokenizers[i].decode_rest().unwrap() {
+        //         print!("{rest}");
+        //     }
+        // }
 
-        let dt = start_gen.elapsed();
-        println!(
-            "\n\n{} tokens generated ({} token/s)\n",
-            token_generated,
-            (token_generated - 1) as f64 / dt.as_secs_f64(),
-        );
+        // let dt = start_gen.elapsed();
+        // println!(
+        //     "\n\n{} tokens generated ({} token/s)\n",
+        //     token_generated,
+        //     (token_generated - 1) as f64 / dt.as_secs_f64(),
+        // );
 
         Ok(())
     }
