@@ -763,7 +763,7 @@ mod tests {
         };
 
         let selected_token_indices = Tensor::from_vec(
-            tokens.iter().map(|ts| ts.len() - 1).collect(),
+            tokens.iter().map(|ts| ts.len() as u32- 1).collect(),
             (tokens.len(),),
             &device,
         )?;
@@ -804,7 +804,7 @@ mod tests {
             let input = Tensor::from_vec(next_tokens, (1,), &device)?;
             let input_positions =
                 Tensor::from_vec(&tokens.iter().map(|ts| ts.len() - 1).collect(), &device)?;
-            let selected_token_indices = Tensor::new(&(0..10), &device)?;
+            let selected_token_indices = Tensor::new(&(0u32..10u32), &device)?;
             let max_decoding_sequence_length = tokens.iter().map(|ts| ts.len()).max().unwrap();
             let num_blocks_per_sequence = tokens
                 .iter()
@@ -817,27 +817,28 @@ mod tests {
                     &tokens
                         .iter()
                         .enumerate()
-                        .map(|(i, ts)| i * token_size_allocation + ts.len() - 1),
+                        .map(|(i, ts)| i * token_size_allocation + ts.len() - 1)
+                        .collect(),
                     &device,
                 )?,
                 decoding_metadata: Some(FlashAttentionDecodingMetadata {
                     block_tables: Some(
                         Tensor::from_vec(
-                            (0i64..num_running_sequences)
+                            (0i64..(num_running_sequences as i64))
                                 .flat_map(|i| {
                                     {
                                         ((i * total_num_blocks_per_sequence)
                                             ..(i * total_num_blocks_per_sequence
-                                                + num_blocks_per_sequence[i]))
+                                                + num_blocks_per_sequence[i as usize]))
                                             .collect::<Vec<_>>()
                                             .extend([0i64].repeat(
-                                                max_num_blocks - num_blocks_per_sequence[i],
+                                                max_num_blocks - num_blocks_per_sequence[i as usize],
                                             )) // pad to max_num_blocks
                                     }
                                 })
                                 .collect(),
-                                (num_running_sequences, max_num_blocks),
-                            () & device,
+                            (num_running_sequences, max_num_blocks),
+                            &device,
                         )?
                         .reshape((10, max_num_blocks))?,
                     ),
