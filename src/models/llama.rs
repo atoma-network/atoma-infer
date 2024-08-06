@@ -818,6 +818,8 @@ mod tests {
             .map(|ts| *ts.last().unwrap())
             .collect::<Vec<_>>();
 
+        println!("next_tokens: {:?}", next_tokens);
+
         // round division
         let total_num_blocks_per_sequence =
             ((token_size_allocation + block_size - 1) / block_size) as i64;
