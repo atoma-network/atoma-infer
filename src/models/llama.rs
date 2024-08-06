@@ -873,7 +873,7 @@ mod tests {
                 &device,
             )?;
             let block_tables = Some(Tensor::from_vec(
-                0..active_indices.len()
+                (0..active_indices.len())
                     .flat_map(|&i| {
                         {
                             let mut range = ((i as i64 * total_num_blocks_per_sequence)
