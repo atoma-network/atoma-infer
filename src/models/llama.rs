@@ -748,7 +748,7 @@ mod tests {
                 query_start_locations: Some(Tensor::from_vec(
                     vec![0u32]
                         .into_iter()
-                        .chain(tokens.iter().map(|ts| ts.len() as u32).collect())
+                        .chain(tokens.iter().map(|ts| ts.len() as u32).collect::<Vec<_>>())
                         .collect(),
                     (tokens.len() + 1,),
                     &device,
@@ -756,7 +756,7 @@ mod tests {
                 sequence_start_locations: Some(Tensor::from_vec(
                     vec![0u32]
                         .into_iter()
-                        .chain(tokens.iter().map(|ts| ts.len() as u32).collect())
+                        .chain(tokens.iter().map(|ts| ts.len() as u32).collect::<Vec<_>>())
                         .collect(),
                     (tokens.len() + 1,),
                     &device,
