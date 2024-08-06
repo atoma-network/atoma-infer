@@ -923,19 +923,19 @@ mod tests {
 
             let mut new_active_indices = Vec::new();
             next_tokens = Vec::new();
-            for &idx in active_indices.iter() {
+            for (idx, &i) in active_indices.iter().enumerate() {
                 let next_token = logits_processor.sample(&logits.i(idx).unwrap()).unwrap();
-                if let Some(t) = tokenizers[idx].next_token(next_token).unwrap() {
-                    sentences[idx].push_str(&t);
+                if let Some(t) = tokenizers[i].next_token(next_token).unwrap() {
+                    sentences[i].push_str(&t);
                 }
 
-                tokens[idx].push(next_token);
+                tokens[i].push(next_token);
                 next_tokens.push(next_token);
 
                 if Some(next_token) != eos_token_id {
-                    new_active_indices.push(idx);
+                    new_active_indices.push(i);
                 } else {
-                    finished_sequences.push(tokens[idx].clone());
+                    finished_sequences.push(tokens[i].clone());
                 }
             }
 
