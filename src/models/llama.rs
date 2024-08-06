@@ -759,6 +759,16 @@ mod tests {
             (tokens.len() + 1,),
             &device,
         )?);
+        let sequence_start_locs = Some(Tensor::from_vec(
+            sequence_start_locs,
+            (tokens.len() + 1,),
+            &device,
+        )?);
+        let sequence_lengths = Some(Tensor::from_vec(
+            tokens.iter().map(|ts| ts.len() as u32).collect(),
+            (tokens.len(),),
+            &device,
+        )?);
         // let attention_metadata = FlashAttentionMetadata {
         //     context_lengths,
         //     slot_mapping, // [0, .., num_tokens]
@@ -770,16 +780,8 @@ mod tests {
         //         max_query_length: Some(max_tokens_len),
         //         max_prefill_sequence_length: max_tokens_len,
         //         query_start_locations,
-        //         sequence_start_locations: Some(Tensor::from_vec(
-        //             sequence_start_locs,
-        //             (tokens.len() + 1,),
-        //             &device,
-        //         )?),
-        //         sequence_lengths: Some(Tensor::from_vec(
-        //             tokens.iter().map(|ts| ts.len() as u32).collect(),
-        //             (tokens.len(),),
-        //             &device,
-        //         )?),
+        //         sequence_start_locations,
+        //         sequence_lengths,
         //     }),
         // };
 
