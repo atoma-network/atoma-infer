@@ -806,7 +806,7 @@ mod tests {
         (0..10).for_each(|i| {
             let next_token = logits_processor.sample(&logits.i(i).unwrap()).unwrap();
             if let Some(t) = tokenizers[i].next_token(next_token).unwrap() {
-                print!("{t}");
+                println!("{t}");
                 std::io::stdout().flush().unwrap();
             }
             tokens[i].push(next_token);
