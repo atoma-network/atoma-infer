@@ -432,6 +432,7 @@ mod tests {
     use hf_hub::{api::sync::Api, Repo, RepoType};
     use std::io::Write;
     use tokenizers::Tokenizer;
+    use candle_core::IndexOp;
 
     const EOS_TOKEN: &str = "</s>";
 
@@ -754,7 +755,7 @@ mod tests {
                     &device,
                 )?),
                 sequence_lengths: Some(Tensor::from_vec(
-                    tokens.iter().map(|ts| ts.len()).collect(),
+                    tokens.iter().map(|ts| ts.len() as u32).collect(),
                     (tokens.len(),),
                     &device,
                 )?),
@@ -795,7 +796,7 @@ mod tests {
         let total_num_blocks_per_sequence =
             ((token_size_allocation + block_size - 1) / block_size) as i64;
 
-        let num_running_sequences = tokens.len();
+        let mut num_running_sequences = tokens.len();
         let mut finished_sequences = Vec::with_capacity(10);
 
         // decoding loop
@@ -822,7 +823,7 @@ mod tests {
                 decoding_metadata: Some(FlashAttentionDecodingMetadata {
                     block_tables: Some(
                         Tensor::from_vec(
-                            (0i64..10)
+                            (0i64..num_running_sequences)
                                 .flat_map(|i| {
                                     {
                                         ((i * total_num_blocks_per_sequence)
@@ -835,13 +836,14 @@ mod tests {
                                     }
                                 })
                                 .collect(),
+                                ()
                             &device,
                         )?
                         .reshape((10, max_num_blocks))?,
                     ),
                     max_decoding_sequence_length: max_decoding_sequence_length,
                     sequence_lengths: Some(Tensor::new(
-                        &tokens.iter().map(|ts| ts.len()),
+                        &tokens.iter().map(|ts| ts.len() as u32),
                         &device,
                     )?),
                 }),
@@ -880,6 +882,8 @@ mod tests {
                 .iter()
                 .map(|ts| *ts.last().unwrap())
                 .collect::<Vec<_>>();
+
+            num_running_sequences = tokens.len();
         }
 
         finished_sequences.extend(tokens);
