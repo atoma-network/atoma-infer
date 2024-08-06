@@ -713,7 +713,7 @@ mod tests {
         let input_positions = Tensor::from_vec(
             tokens
                 .iter()
-                .map(|ts| (0..(ts.len() as i64)))
+                .flat_map(|ts| (0..(ts.len() as i64)))
                 .collect::<Vec<_>>(),
             (1,),
             &device,
@@ -726,7 +726,7 @@ mod tests {
                 &device,
             )?),
             slot_mapping: Tensor::from_vec(
-                tokens.iter().enumerate().map(|(i, ts)| {
+                tokens.iter().enumerate().flat_map(|(i, ts)| {
                     (i * token_size_allocation)..(i * token_size_allocation + ts.len())
                 }),
                 (1,),
@@ -823,7 +823,7 @@ mod tests {
                     block_tables: Some(
                         Tensor::from_vec(
                             (0i64..10)
-                                .map(|i| {
+                                .flat_map(|i| {
                                     {
                                         ((i * total_num_blocks_per_sequence)
                                             ..(i * total_num_blocks_per_sequence
@@ -889,7 +889,7 @@ mod tests {
 
         finished_sequences.extend(tokens.iter());
 
-        for _ in 0..10 {
+        for i in 0..10 {
             if let Some(rest) = tokenizers[i].decode_rest().unwrap() {
                 print!("{rest}");
             }
