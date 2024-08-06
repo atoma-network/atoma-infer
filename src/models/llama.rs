@@ -778,7 +778,7 @@ mod tests {
 
         (0..10).for_each(|i| {
             let next_token = logits_processor.sample(&logits.i(i))?;
-            if let Some(t) = tokenizers[i].next_token(next_token)? {
+            if let Some(t) = tokenizers[i].next_token(next_token).unwrap() {
                 print!("{t}");
                 std::io::stdout().flush().unwrap();
             }
@@ -860,8 +860,8 @@ mod tests {
                 .squeeze(0)?;
 
             (0..10).for_each(|i| {
-                let next_token = logits_processor.sample(&logits.i(i))?;
-                if let Some(t) = tokenizers[i].next_token(next_token)? {
+                let next_token = logits_processor.sample(&logits.i(i)).unwrap();
+                if let Some(t) = tokenizers[i].next_token(next_token).unwrap() {
                     print!("{t}");
                     std::io::stdout().flush()?;
                 }
@@ -872,11 +872,6 @@ mod tests {
                 if Some(next_token) == eos_token_id {
                     finished_sequences.push(tokens[i]);
                     tokens.remove(i);
-                }
-
-                if let Some(t) = tokenizers[i].next_token(next_token)? {
-                    print!("{t}");
-                    std::io::stdout().flush().unwrap();
                 }
             });
             token_generated += 10;
