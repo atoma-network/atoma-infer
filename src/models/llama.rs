@@ -858,12 +858,13 @@ mod tests {
                         .reshape((num_running_sequences, max_num_blocks))?,
                     ),
                     max_decoding_sequence_length: max_decoding_sequence_length,
-                    sequence_lengths: Some(Tensor::new(
+                    sequence_lengths: Some(Tensor::from_vec(
                         &tokens
                             .iter()
                             .map(|ts| ts.len() as u32)
                             .collect::<Vec<_>>()
                             .clone(),
+                        (tokens.len(),),
                         &device,
                     )?),
                 }),
