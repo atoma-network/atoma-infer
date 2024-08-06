@@ -898,7 +898,7 @@ mod tests {
                 )?
                 .squeeze(0)?;
 
-            for i in 0..num_running_sequences {
+            for i in 0..10 {
                 if stopped_sequences[i] {
                     continue;
                 }
@@ -912,7 +912,6 @@ mod tests {
                 // update finished sequences, in case a sequence is finished
                 if Some(next_token) == eos_token_id {
                     finished_sequences.push(tokens[i].clone());
-                    tokens.remove(i);
                     stopped_sequences[i] = true;
                 }
             }
