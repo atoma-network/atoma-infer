@@ -737,6 +737,11 @@ mod tests {
             });
             result
         };
+        let context_lengths = Some(Tensor::from_vec(
+            tokens.iter().map(|ts| ts.len() as u32).collect::<Vec<_>>(),
+            (1, tokens.len()),
+            &device,
+        )?);
         let slot_mapping = Tensor::from_vec(
             tokens
                 .iter()
@@ -750,11 +755,7 @@ mod tests {
             &device,
         )?;
         // let attention_metadata = FlashAttentionMetadata {
-        //     context_lengths: Some(Tensor::from_vec(
-        //         tokens.iter().map(|ts| ts.len() as u32).collect::<Vec<_>>(),
-        //         (1, num_prefill_tokens),
-        //         &device,
-        //     )?),
+        //     context_lengths,
         //     slot_mapping, // [0, .., num_tokens]
         //     decoding_metadata: None,
         //     num_prefill_tokens,
