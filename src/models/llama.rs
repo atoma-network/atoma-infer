@@ -737,48 +737,48 @@ mod tests {
             });
             result
         };
-        let attention_metadata = FlashAttentionMetadata {
-            context_lengths: Some(Tensor::from_vec(
-                tokens.iter().map(|ts| ts.len() as u32).collect::<Vec<_>>(),
-                (1, num_prefill_tokens),
-                &device,
-            )?),
-            slot_mapping: Tensor::from_vec(
-                tokens
-                    .iter()
-                    .enumerate()
-                    .flat_map(|(i, ts)| {
-                        ((i * token_size_allocation) as i64)
-                            ..((i * token_size_allocation + ts.len()) as i64)
-                    })
-                    .collect(),
-                (num_prefill_tokens,),
-                &device,
-            )?, // [0, .., num_tokens]
-            decoding_metadata: None,
-            num_prefill_tokens,
-            num_decoding_tokens: 0,
-            prefill_metadata: Some(FlashAttentionPrefillMetadata {
-                block_tables: None,
-                max_query_length: Some(max_tokens_len),
-                max_prefill_sequence_length: max_tokens_len,
-                query_start_locations: Some(Tensor::from_vec(
-                    sequence_start_locs.clone(),
-                    (tokens.len() + 1,),
-                    &device,
-                )?),
-                sequence_start_locations: Some(Tensor::from_vec(
-                    sequence_start_locs,
-                    (tokens.len() + 1,),
-                    &device,
-                )?),
-                sequence_lengths: Some(Tensor::from_vec(
-                    tokens.iter().map(|ts| ts.len() as u32).collect(),
-                    (tokens.len(),),
-                    &device,
-                )?),
-            }),
-        };
+        // let attention_metadata = FlashAttentionMetadata {
+        //     context_lengths: Some(Tensor::from_vec(
+        //         tokens.iter().map(|ts| ts.len() as u32).collect::<Vec<_>>(),
+        //         (1, num_prefill_tokens),
+        //         &device,
+        //     )?),
+        //     slot_mapping: Tensor::from_vec(
+        //         tokens
+        //             .iter()
+        //             .enumerate()
+        //             .flat_map(|(i, ts)| {
+        //                 ((i * token_size_allocation) as i64)
+        //                     ..((i * token_size_allocation + ts.len()) as i64)
+        //             })
+        //             .collect(),
+        //         (num_prefill_tokens,),
+        //         &device,
+        //     )?, // [0, .., num_tokens]
+        //     decoding_metadata: None,
+        //     num_prefill_tokens,
+        //     num_decoding_tokens: 0,
+        //     prefill_metadata: Some(FlashAttentionPrefillMetadata {
+        //         block_tables: None,
+        //         max_query_length: Some(max_tokens_len),
+        //         max_prefill_sequence_length: max_tokens_len,
+        //         query_start_locations: Some(Tensor::from_vec(
+        //             sequence_start_locs.clone(),
+        //             (tokens.len() + 1,),
+        //             &device,
+        //         )?),
+        //         sequence_start_locations: Some(Tensor::from_vec(
+        //             sequence_start_locs,
+        //             (tokens.len() + 1,),
+        //             &device,
+        //         )?),
+        //         sequence_lengths: Some(Tensor::from_vec(
+        //             tokens.iter().map(|ts| ts.len() as u32).collect(),
+        //             (tokens.len(),),
+        //             &device,
+        //         )?),
+        //     }),
+        // };
 
         // let selected_token_indices = Tensor::from_vec(
         //     tokens.iter().map(|ts| ts.len() as u32 - 1).collect(),
