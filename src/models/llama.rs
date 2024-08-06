@@ -730,7 +730,7 @@ mod tests {
         let sequence_start_locs = {
             let mut result = Vec::with_capacity(tokens.len() + 1);
             result.push(0); // Start with 0
-            tokens.iter().fold(0, |acc, &x| {
+            tokens.iter().fold(0, |acc, x| {
                 let sum = acc + x.len() as u32;
                 result.push(sum);
                 sum
