@@ -823,7 +823,6 @@ mod tests {
         let total_num_blocks_per_sequence =
             ((token_size_allocation + block_size - 1) / block_size) as i64;
 
-        let mut num_running_sequences = tokens.len();
         let mut finished_sequences = Vec::with_capacity(10);
 
         let mut stopped_sequences = vec![false; 10];
@@ -871,7 +870,7 @@ mod tests {
                         .iter()
                         .map(|i| (i * token_size_allocation + tokens[*i].len()) as i64 - 1)
                         .collect::<Vec<_>>(),
-                    (num_running_sequences,),
+                    (num_active,),
                     &device,
                 )?,
                 decoding_metadata: Some(FlashAttentionDecodingMetadata {
@@ -906,7 +905,7 @@ mod tests {
                 }),
                 prefill_metadata: None,
                 num_prefill_tokens: 0,
-                num_decoding_tokens: num_running_sequences,
+                num_decoding_tokens: num_active,
             };
             let logits = llama_model
                 .forward(
@@ -942,7 +941,7 @@ mod tests {
 
         finished_sequences.extend(tokens);
 
-        for i in 0..num_running_sequences {
+        for i in 0..10 {
             if let Some(rest) = tokenizers[i].decode_rest().unwrap() {
                 sentences[i].push_str(&rest);
             }
