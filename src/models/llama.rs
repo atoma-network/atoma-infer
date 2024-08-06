@@ -428,6 +428,7 @@ impl Llama {
 mod tests {
     use super::*;
     use crate::flash_attention::{FlashAttentionDecodingMetadata, FlashAttentionPrefillMetadata};
+    use candle_core::IndexOp;
     use candle_transformers::generation::{LogitsProcessor, Sampling};
     use hf_hub::{api::sync::Api, Repo, RepoType};
     use serial_test::serial;
