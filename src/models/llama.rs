@@ -829,7 +829,7 @@ mod tests {
                     &tokens
                         .iter()
                         .enumerate()
-                        .map(|(i, ts)| i * token_size_allocation + ts.len() - 1)
+                        .map(|(i, ts)| (i * token_size_allocation + ts.len()) as i64- 1)
                         .collect::<Vec<_>>(),
                     &device,
                 )?,
