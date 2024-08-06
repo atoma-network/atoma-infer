@@ -785,11 +785,11 @@ mod tests {
             }),
         };
 
-        // let selected_token_indices = Tensor::from_vec(
-        //     tokens.iter().map(|ts| ts.len() as u32 - 1).collect(),
-        //     (tokens.len(),),
-        //     &device,
-        // )?;
+        let selected_token_indices = Tensor::from_vec(
+            tokens.iter().map(|ts| ts.len() as u32 - 1).collect(),
+            (tokens.len(),),
+            &device,
+        )?;
         // let logits = llama_model.forward(
         //     &input,
         //     &input_positions,
