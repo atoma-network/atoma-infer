@@ -824,8 +824,6 @@ mod tests {
             ((token_size_allocation + block_size - 1) / block_size) as i64;
 
         let mut finished_sequences = Vec::with_capacity(10);
-
-        let mut stopped_sequences = vec![false; 10];
         let mut active_indices: Vec<usize> = (0..10).collect();
 
         // decoding loop
