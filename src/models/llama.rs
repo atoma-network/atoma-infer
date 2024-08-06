@@ -731,7 +731,7 @@ mod tests {
                     .iter()
                     .enumerate()
                     .flat_map(|(i, ts)| {
-                        (i * token_size_allocation)..(i * token_size_allocation + ts.len())
+                        ((i * token_size_allocation) as i64)..((i * token_size_allocation + ts.len()) as i64)
                     })
                     .collect(),
                 (1,),
