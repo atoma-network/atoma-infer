@@ -819,8 +819,6 @@ mod tests {
             .map(|ts| *ts.last().unwrap())
             .collect::<Vec<_>>();
 
-        println!("sentences: {:?}", sentences);
-
         // round division
         let total_num_blocks_per_sequence =
             ((token_size_allocation + block_size - 1) / block_size) as i64;
@@ -886,7 +884,7 @@ mod tests {
                 }),
                 prefill_metadata: None,
                 num_prefill_tokens: 0,
-                num_decoding_tokens: 10,
+                num_decoding_tokens: num_running_sequences,
             };
             let logits = llama_model
                 .forward(
@@ -898,7 +896,7 @@ mod tests {
                 )?
                 .squeeze(0)?;
 
-            (0..10).for_each(|i| {
+            (0..num_running_sequences).for_each(|i| {
                 let next_token = logits_processor.sample(&logits.i(i).unwrap()).unwrap();
                 if let Some(t) = tokenizers[i].next_token(next_token).unwrap() {
                     sentences[i].push_str(&t);
@@ -912,7 +910,7 @@ mod tests {
                     tokens.remove(i);
                 }
             });
-            token_generated += 10;
+            token_generated += num_running_sequences;
 
             next_tokens = tokens
                 .iter()
@@ -924,7 +922,7 @@ mod tests {
 
         finished_sequences.extend(tokens);
 
-        for i in 0..10 {
+        for i in 0..num_running_sequences {
             if let Some(rest) = tokenizers[i].decode_rest().unwrap() {
                 sentences[i].push_str(&rest);
             }
