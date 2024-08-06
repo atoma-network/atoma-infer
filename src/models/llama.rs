@@ -433,10 +433,12 @@ mod tests {
     use hf_hub::{api::sync::Api, Repo, RepoType};
     use std::io::Write;
     use tokenizers::Tokenizer;
+    use serial_test::serial;
 
     const EOS_TOKEN: &str = "</s>";
 
     #[test]
+    #[serial]
     fn test_llama_model() -> Result<()> {
         let prompt = "The capital of France is ".to_string();
 
@@ -612,6 +614,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_llama_model_batch() -> Result<()> {
         let prompts = vec![
             "The capital of France is ".to_string(),
