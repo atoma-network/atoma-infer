@@ -826,6 +826,8 @@ mod tests {
         let mut num_running_sequences = tokens.len();
         let mut finished_sequences = Vec::with_capacity(10);
 
+        let mut stopped_sequences = vec![false; 10];
+
         // decoding loop
         for _ in 1..sample_len {
             let input = Tensor::from_vec(next_tokens, (1, num_running_sequences), &device)?;
@@ -896,7 +898,10 @@ mod tests {
                 )?
                 .squeeze(0)?;
 
-            (0..num_running_sequences).for_each(|i| {
+            for i in 0..num_running_sequences {
+                if stopped_sequences[i] {
+                    continue;
+                }
                 let next_token = logits_processor.sample(&logits.i(i).unwrap()).unwrap();
                 if let Some(t) = tokenizers[i].next_token(next_token).unwrap() {
                     sentences[i].push_str(&t);
@@ -907,9 +912,10 @@ mod tests {
                 // update finished sequences, in case a sequence is finished
                 if Some(next_token) == eos_token_id {
                     finished_sequences.push(tokens[i].clone());
-                    // tokens.remove(i);
+                    tokens.remove(i);
+                    stopped_sequences[i] = true;
                 }
-            });
+            }
             token_generated += num_running_sequences;
 
             next_tokens = tokens
