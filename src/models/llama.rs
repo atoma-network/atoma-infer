@@ -829,8 +829,9 @@ mod tests {
                     &tokens
                         .iter()
                         .enumerate()
-                        .map(|(i, ts)| (i * token_size_allocation + ts.len()) as i64- 1)
-                        .collect::<Vec<_>>(),
+                        .map(|(i, ts)| (i * token_size_allocation + ts.len()) as i64 - 1)
+                        .collect::<Vec<_>>()
+                        .clone(),
                     &device,
                 )?,
                 decoding_metadata: Some(FlashAttentionDecodingMetadata {
@@ -858,7 +859,11 @@ mod tests {
                     ),
                     max_decoding_sequence_length: max_decoding_sequence_length,
                     sequence_lengths: Some(Tensor::new(
-                        &tokens.iter().map(|ts| ts.len() as u32).collect::<Vec<_>>(),
+                        &tokens
+                            .iter()
+                            .map(|ts| ts.len() as u32)
+                            .collect::<Vec<_>>()
+                            .clone(),
                         &device,
                     )?),
                 }),
