@@ -873,7 +873,7 @@ mod tests {
                 &device,
             )?;
             let block_tables = Some(Tensor::from_vec(
-                active_indices
+                0..active_indices.len()
                     .iter()
                     .flat_map(|&i| {
                         {
