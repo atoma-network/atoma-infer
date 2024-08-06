@@ -737,24 +737,25 @@ mod tests {
             });
             result
         };
+        let slot_mapping = Tensor::from_vec(
+            tokens
+                .iter()
+                .enumerate()
+                .flat_map(|(i, ts)| {
+                    ((i * token_size_allocation) as i64)
+                        ..((i * token_size_allocation + ts.len()) as i64)
+                })
+                .collect(),
+            (num_prefill_tokens,),
+            &device,
+        )?;
         // let attention_metadata = FlashAttentionMetadata {
         //     context_lengths: Some(Tensor::from_vec(
         //         tokens.iter().map(|ts| ts.len() as u32).collect::<Vec<_>>(),
         //         (1, num_prefill_tokens),
         //         &device,
         //     )?),
-        //     slot_mapping: Tensor::from_vec(
-        //         tokens
-        //             .iter()
-        //             .enumerate()
-        //             .flat_map(|(i, ts)| {
-        //                 ((i * token_size_allocation) as i64)
-        //                     ..((i * token_size_allocation + ts.len()) as i64)
-        //             })
-        //             .collect(),
-        //         (num_prefill_tokens,),
-        //         &device,
-        //     )?, // [0, .., num_tokens]
+        //     slot_mapping, // [0, .., num_tokens]
         //     decoding_metadata: None,
         //     num_prefill_tokens,
         //     num_decoding_tokens: 0,
