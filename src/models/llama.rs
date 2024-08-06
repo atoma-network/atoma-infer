@@ -919,7 +919,7 @@ mod tests {
 
             let mut new_active_indices = Vec::new();
             next_tokens = Vec::new();
-            for idx in active_indices.iter() {
+            for &idx in active_indices.iter() {
                 let next_token = logits_processor.sample(&logits.i(idx).unwrap()).unwrap();
                 if let Some(t) = tokenizers[idx].next_token(next_token).unwrap() {
                     sentences[idx].push_str(&t);
