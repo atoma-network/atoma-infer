@@ -790,41 +790,41 @@ mod tests {
             (tokens.len(),),
             &device,
         )?;
-        // let logits = llama_model.forward(
-        //     &input,
-        //     &input_positions,
-        //     &selected_token_indices,
-        //     &kv_caches,
-        //     attention_metadata,
-        // )?;
-        // assert_eq!(logits.dims()[0], 1);
-        // assert_eq!(logits.dims()[1], 10);
-        // assert_eq!(logits.dims()[2], 32_000);
-        // let logits = logits.squeeze(0)?.squeeze(0)?;
+        let logits = llama_model.forward(
+            &input,
+            &input_positions,
+            &selected_token_indices,
+            &kv_caches,
+            attention_metadata,
+        )?;
+        assert_eq!(logits.dims()[0], 1);
+        assert_eq!(logits.dims()[1], 10);
+        assert_eq!(logits.dims()[2], 32_000);
+        let logits = logits.squeeze(0)?.squeeze(0)?;
 
-        // (0..10).for_each(|i| {
-        //     let next_token = logits_processor.sample(&logits.i(i).unwrap()).unwrap();
-        //     if let Some(t) = tokenizers[i].next_token(next_token).unwrap() {
-        //         print!("{t}");
-        //         std::io::stdout().flush().unwrap();
-        //     }
-        //     tokens[i].push(next_token);
-        // });
-        // token_generated += 10;
+        (0..10).for_each(|i| {
+            let next_token = logits_processor.sample(&logits.i(i).unwrap()).unwrap();
+            if let Some(t) = tokenizers[i].next_token(next_token).unwrap() {
+                print!("{t}");
+                std::io::stdout().flush().unwrap();
+            }
+            tokens[i].push(next_token);
+        });
+        token_generated += 10;
 
-        // let mut next_tokens = tokens
-        //     .iter()
-        //     .map(|ts| *ts.last().unwrap())
-        //     .collect::<Vec<_>>();
+        let mut next_tokens = tokens
+            .iter()
+            .map(|ts| *ts.last().unwrap())
+            .collect::<Vec<_>>();
 
-        // // round division
-        // let total_num_blocks_per_sequence =
-        //     ((token_size_allocation + block_size - 1) / block_size) as i64;
+        // round division
+        let total_num_blocks_per_sequence =
+            ((token_size_allocation + block_size - 1) / block_size) as i64;
 
-        // let mut num_running_sequences = tokens.len();
-        // let mut finished_sequences = Vec::with_capacity(10);
+        let mut num_running_sequences = tokens.len();
+        let mut finished_sequences = Vec::with_capacity(10);
 
-        // // decoding loop
+        // decoding loop
         // for _ in 1..sample_len {
         //     let input = Tensor::from_vec(next_tokens, (1,), &device)?;
         //     let input_positions = Tensor::from_vec(
