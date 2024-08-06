@@ -430,9 +430,9 @@ mod tests {
     use crate::flash_attention::{FlashAttentionDecodingMetadata, FlashAttentionPrefillMetadata};
     use candle_transformers::generation::{LogitsProcessor, Sampling};
     use hf_hub::{api::sync::Api, Repo, RepoType};
+    use serial_test::serial;
     use std::io::Write;
     use tokenizers::Tokenizer;
-    use serial_test::serial;
 
     const EOS_TOKEN: &str = "</s>";
 
@@ -722,7 +722,21 @@ mod tests {
             (1, num_prefill_tokens),
             &device,
         )?;
-        let input = Tensor::from_vec(tokens.clone().into_iter().flatten().collect(), (1, num_prefill_tokens), &device)?;
+        let input = Tensor::from_vec(
+            tokens.clone().into_iter().flatten().collect(),
+            (1, num_prefill_tokens),
+            &device,
+        )?;
+        let sequence_start_locs = {
+            let mut result = Vec::with_capacity(tokens.len() + 1);
+            result.push(0); // Start with 0
+            tokens.iter().fold(0, |acc, &x| {
+                let sum = acc + x.len() as u32;
+                result.push(sum);
+                sum
+            });
+            result
+        };
         let attention_metadata = FlashAttentionMetadata {
             context_lengths: Some(Tensor::from_vec(
                 tokens.iter().map(|ts| ts.len() as u32).collect::<Vec<_>>(),
@@ -742,25 +756,19 @@ mod tests {
                 &device,
             )?, // [0, .., num_tokens]
             decoding_metadata: None,
-            num_prefill_tokens: tokens.iter().map(|ts| ts.len()).sum::<usize>(),
+            num_prefill_tokens,
             num_decoding_tokens: 0,
             prefill_metadata: Some(FlashAttentionPrefillMetadata {
                 block_tables: None,
                 max_query_length: Some(max_tokens_len),
                 max_prefill_sequence_length: max_tokens_len,
                 query_start_locations: Some(Tensor::from_vec(
-                    vec![0u32]
-                        .into_iter()
-                        .chain(tokens.iter().map(|ts| ts.len() as u32).collect::<Vec<_>>())
-                        .collect(),
+                    sequence_start_locs.clone(),
                     (tokens.len() + 1,),
                     &device,
                 )?),
                 sequence_start_locations: Some(Tensor::from_vec(
-                    vec![0u32]
-                        .into_iter()
-                        .chain(tokens.iter().map(|ts| ts.len() as u32).collect::<Vec<_>>())
-                        .collect(),
+                    sequence_start_locs,
                     (tokens.len() + 1,),
                     &device,
                 )?),
