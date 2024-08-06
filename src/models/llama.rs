@@ -747,7 +747,7 @@ mod tests {
                 max_prefill_sequence_length: max_tokens_len,
                 query_start_locations: Some(Tensor::from_vec(
                     vec![0u32]
-                        .iter()
+                        .into_iter()
                         .chain(tokens.iter().map(|ts| ts.len() as u32).collect())
                         .collect(),
                     (tokens.len() + 1,),
@@ -755,7 +755,7 @@ mod tests {
                 )?),
                 sequence_start_locations: Some(Tensor::from_vec(
                     vec![0u32]
-                        .iter()
+                        .into_iter()
                         .chain(tokens.iter().map(|ts| ts.len() as u32).collect())
                         .collect(),
                     (tokens.len() + 1,),
@@ -812,7 +812,7 @@ mod tests {
         for _ in 1..sample_len {
             let input = Tensor::from_vec(next_tokens, (1,), &device)?;
             let input_positions = Tensor::from_vec(
-                tokens.iter().map(|ts| ts.len() - 1).collect(),
+                tokens.iter().map(|ts| ts.len() as i64 - 1).collect(),
                 (1,),
                 &device,
             )?;
