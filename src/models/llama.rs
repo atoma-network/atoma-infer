@@ -903,7 +903,7 @@ mod tests {
                             ..((global_idx as i64 * total_num_blocks_per_sequence)
                                 + num_blocks_per_sequence[local_idx]))
                             .collect::<Vec<_>>();
-                        range.extend([0i64].repeat(
+                        range.extend([100i64].repeat(
                             max_num_blocks - num_blocks_per_sequence[local_idx] as usize,
                         )); // pad to max_num_blocks
                         range
