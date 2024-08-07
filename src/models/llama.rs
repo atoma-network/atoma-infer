@@ -547,12 +547,10 @@ mod tests {
         let logits = logits.squeeze(0)?.squeeze(0)?;
 
         let mut next_token = logits_processor.sample(&logits)?;
-        println!("next_token: {next_token}");
         token_generated += 1;
         tokens.push(next_token);
 
         if let Some(t) = tokenizer.next_token(next_token)? {
-            println!("next token: {t}");
             print!("{t}");
             std::io::stdout().flush()?;
         }
@@ -716,6 +714,19 @@ mod tests {
         let max_tokens_len = tokens.iter().map(|ts| ts.len()).max().unwrap();
         let token_size_allocation = max_tokens_len + 64 + 1;
 
+        println!("tokens: {tokens:?}");
+        println!(
+            "input: {:?}",
+            tokens.clone().into_iter().flatten().collect()
+        );
+        println!(
+            "input_positions: {:?}",
+            tokens
+                .iter()
+                .flat_map(|ts| (0..(ts.len() as i64)))
+                .collect::<Vec<_>>()
+        );
+
         // prefill forward pass
         let input_positions = Tensor::from_vec(
             tokens
@@ -793,13 +804,15 @@ mod tests {
             (tokens.len(),),
             &device,
         )?;
-        let logits = llama_model.forward(
-            &input,
-            &input_positions,
-            &selected_token_indices,
-            &kv_caches,
-            attention_metadata,
-        )?.squeeze(0)?;
+        let logits = llama_model
+            .forward(
+                &input,
+                &input_positions,
+                &selected_token_indices,
+                &kv_caches,
+                attention_metadata,
+            )?
+            .squeeze(0)?;
 
         assert_eq!(logits.dims().len(), 2);
         assert_eq!(logits.dims()[0], 10);
