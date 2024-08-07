@@ -440,7 +440,7 @@ mod tests {
     #[test]
     #[serial]
     fn test_llama_model() -> Result<()> {
-        let prompt = "The capital of France is ".to_string();
+        let prompt = "Modern music is especially focused on ".to_string();
 
         let dtype = DType::BF16;
         let device = Device::new_cuda(0).unwrap();
@@ -547,6 +547,7 @@ mod tests {
         let logits = logits.squeeze(0)?.squeeze(0)?;
 
         let mut next_token = logits_processor.sample(&logits)?;
+        println!("next_token: {next_token}");
         token_generated += 1;
         tokens.push(next_token);
 
