@@ -865,7 +865,7 @@ mod tests {
             let slot_mapping = Tensor::from_vec(
                 active_indices
                     .iter()
-                    .map(|i| (i * token_size_allocation + tokens[*i].len()) as i64 - 1)
+                    .map(|&i| (i * token_size_allocation + tokens[i].len()) as i64 - 1)
                     .collect::<Vec<_>>(),
                 (num_active,),
                 &device,
@@ -911,7 +911,7 @@ mod tests {
             let sequence_lengths = Some(Tensor::from_vec(
                 active_indices
                     .iter()
-                    .map(|i| tokens[*i].len() as u32)
+                    .map(|&i| tokens[i].len() as u32)
                     .collect::<Vec<_>>(),
                 (active_indices.len(),),
                 &device,
@@ -922,7 +922,7 @@ mod tests {
                 slot_mapping,
                 decoding_metadata: Some(FlashAttentionDecodingMetadata {
                     block_tables,
-                    max_decoding_sequence_length: max_decoding_sequence_length,
+                    max_decoding_sequence_length,
                     sequence_lengths,
                 }),
                 prefill_metadata: None,
