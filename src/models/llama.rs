@@ -874,7 +874,8 @@ mod tests {
 
             println!("slot_mapping: {:?}", active_indices
             .iter()
-            .map(|i| (i * token_size_allocation + tokens[*i].len()) as i64 - 1)
+            .enumerate()
+            .map(|(idx, &i)| (idx * token_size_allocation + tokens[i].len()) as i64 - 1)
             .collect::<Vec<_>>());
 
             // println!("block_tables: {:?}", (0..active_indices.len())
