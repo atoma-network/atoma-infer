@@ -799,8 +799,9 @@ mod tests {
             attention_metadata,
         )?.squeeze(0)?;
 
-        assert_eq!(logits.dims()[1], 10);
-        assert_eq!(logits.dims()[2], 32_000);
+        assert_eq!(logits.dims().len(), 2);
+        assert_eq!(logits.dims()[0], 10);
+        assert_eq!(logits.dims()[1], 32_000);
 
         let mut sentences = prompts.clone();
 
