@@ -865,7 +865,8 @@ mod tests {
             let slot_mapping = Tensor::from_vec(
                 active_indices
                     .iter()
-                    .map(|&i| (i * token_size_allocation + tokens[i].len()) as i64 - 1)
+                    .enumerate()
+                    .map(|(idx, &i)| (idx * token_size_allocation + tokens[i].len()) as i64 - 1)
                     .collect::<Vec<_>>(),
                 (num_active,),
                 &device,
