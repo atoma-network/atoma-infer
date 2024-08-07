@@ -639,7 +639,7 @@ mod tests {
     }
 
     #[test]
-    fn test_forwared_with_varlen() {
+    fn test_forward_with_varlen() {
         let device = Device::new_cuda(0).unwrap();
         let q = Tensor::arange(0u32, 48, &device)
             .unwrap()

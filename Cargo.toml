@@ -7,9 +7,20 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-candle-core = "0.6.0"
-candle-nn = "0.6.0"
-candle-transformers = "0.6.0"
+candle-core = { version = "0.6.0", features = ["cuda"] }
+candle-nn = { version = "0.6.0", features = ["cuda"] }
+candle-transformers = { version = "0.6.0", features = ["cuda"] }
 csrc = { path = "csrc" }
 serde = { version = "1.0.204", features = ["derive"] }
 tracing = "0.1.40"
+
+hex-literal = "0.4.1"
+sha3 = "0.10.8"
+half = { version = "2.4.1", features = ["num-traits"] }
+serde_json = "1.0.120"
+
+[dev-dependencies]
+candle-examples = { version = "0.6.0", features = ["cuda"] }
+hf-hub = "0.3.2"
+serde_json = "1.0.120"
+tokenizers = "0.19.1"

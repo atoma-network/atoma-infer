@@ -2196,7 +2196,6 @@ pub(crate) mod utils {
             } else {
                 let n_waves = (batch_nheads_mblocks * num_splits) as f32 / num_sms as f32;
                 let eff = n_waves / n_waves.ceil();
-                // println!("num_splits = {}, eff = {}", num_splits, eff);
                 if eff > max_efficiency {
                     max_efficiency = eff;
                 }
@@ -2209,7 +2208,6 @@ pub(crate) mod utils {
                 continue;
             }
             if efficiency[(num_splits - 1) as usize] >= 0.85 * max_efficiency {
-                // println!("num_splits chosen = {}", num_splits);
                 return num_splits;
             }
         }
