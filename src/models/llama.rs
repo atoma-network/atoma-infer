@@ -872,7 +872,6 @@ mod tests {
                 &device,
             )?;
 
-            println!("active_indices: {:?}", active_indices);
             println!("num_blocks_per_sequence: {:?}", num_blocks_per_sequence);
             println!("slot_mapping: {:?}", active_indices
             .iter()
@@ -880,6 +879,7 @@ mod tests {
             .map(|(idx, &i)| (idx * token_size_allocation + tokens[i].len()) as i64 - 1)
             .collect::<Vec<_>>());
 
+            println!("total_num_blocks_per_sequence: {total_num_blocks_per_sequence}");
             println!("block_tables: {:?}",active_indices
             .iter()
             .enumerate()
