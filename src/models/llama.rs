@@ -717,7 +717,7 @@ mod tests {
         println!("tokens: {tokens:?}");
         println!(
             "input: {:?}",
-            tokens.clone().into_iter().flatten().collect()
+            tokens.clone().into_iter().flatten().collect::<Vec<_>>()
         );
         println!(
             "input_positions: {:?}",
