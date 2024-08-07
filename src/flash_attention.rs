@@ -235,9 +235,9 @@ impl FlashAttention {
         num_blocks: usize,
         block_size: usize,
         num_kv_heads: usize,
-        head_size: usize,
+        head_dim: usize,
     ) -> Vec<usize> {
-        vec![2, num_blocks, block_size * num_kv_heads * head_size]
+        vec![2, num_blocks, block_size, num_kv_heads, head_dim]
     }
 
     /// Splits the KV cache
