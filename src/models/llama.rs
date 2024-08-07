@@ -878,20 +878,20 @@ mod tests {
             .map(|(idx, &i)| (idx * token_size_allocation + tokens[i].len()) as i64 - 1)
             .collect::<Vec<_>>());
 
-            // println!("block_tables: {:?}", (0..active_indices.len())
-            // .flat_map(|i| {
-            //     {
-            //         let mut range = ((i as i64 * total_num_blocks_per_sequence)
-            //             ..(i as i64 * total_num_blocks_per_sequence
-            //                 + num_blocks_per_sequence[i]))
-            //             .collect::<Vec<_>>();
-            //         range.extend([0i64].repeat(
-            //             max_num_blocks - num_blocks_per_sequence[i] as usize,
-            //         )); // pad to max_num_blocks
-            //         range
-            //     }
-            // })
-            // .collect::<Vec<_>>());
+            println!("block_tables: {:?}",active_indices
+            .iter()
+            .enumerate()
+            .flat_map(|(local_idx, &global_idx)| {
+                let mut range = ((global_idx as i64 * total_num_blocks_per_sequence)
+                    ..((global_idx as i64 * total_num_blocks_per_sequence)
+                        + num_blocks_per_sequence[local_idx]))
+                    .collect::<Vec<_>>();
+                range.extend([0i64].repeat(
+                    max_num_blocks - num_blocks_per_sequence[local_idx] as usize,
+                )); // pad to max_num_blocks
+                range
+            })
+            .collect::<Vec<_>>());
             let block_tables = Some(Tensor::from_vec(
                 active_indices
                     .iter()
