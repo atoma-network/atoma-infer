@@ -751,9 +751,14 @@ mod tests {
             });
             result
         };
+        println!("sequence_start_locs: {sequence_start_locs:?}");
+        println!("context_lengths: {:?}", tokens.iter().map(|ts| ts.len() as u32).collect::<Vec<_>>());
+        println!("slot_mapping: {:?}", tokens.iter().enumerate().flat_map(|(i, ts)| {
+            ((i * token_size_allocation) as i64)..((i * token_size_allocation + ts.len()) as i64)
+        }).collect::<Vec<_>>());
         let context_lengths = Some(Tensor::from_vec(
-            tokens.iter().map(|ts| ts.len() as u32).collect::<Vec<_>>(),
-            (1, tokens.len()),
+            tokens.iter().map(|ts| ts.len() as u32).collect(),
+            (tokens.len(),),
             &device,
         )?);
         let slot_mapping = Tensor::from_vec(
