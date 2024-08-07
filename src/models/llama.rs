@@ -872,6 +872,7 @@ mod tests {
                 &device,
             )?;
 
+            println!("active_indices: {:?}", active_indices);
             println!("num_blocks_per_sequence: {:?}", num_blocks_per_sequence);
             println!("slot_mapping: {:?}", active_indices
             .iter()
