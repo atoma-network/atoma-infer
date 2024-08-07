@@ -576,6 +576,48 @@ mod reshape_and_cache {
         let result = reshape_and_cache_flash(&key, &value, &key_cache, &value_cache, &slot_mapping);
 
         assert!(result.is_ok());
+
+        // Additional assertions
+        let (reshaped_key, reshaped_value) = result.unwrap();
+
+        // Check shapes
+        assert_eq!(reshaped_key.shape(), &[num_tokens, num_heads, head_size]);
+        assert_eq!(reshaped_value.shape(), &[num_tokens, num_heads, head_size]);
+
+        // Check that data has been copied correctly (you might want to check a few elements)
+        for i in 0..num_tokens {
+            let original_key_slice = key
+                .i(i)
+                .unwrap()
+                .flatten_all()
+                .unwrap()
+                .to_vec1::<f16>()
+                .unwrap();
+            let reshaped_key_slice = reshaped_key
+                .i(i)
+                .unwrap()
+                .flatten_all()
+                .unwrap()
+                .to_vec1::<f16>()
+                .unwrap();
+            assert_eq!(original_key_slice, reshaped_key_slice);
+
+            let original_value_slice = value
+                .i(i)
+                .unwrap()
+                .flatten_all()
+                .unwrap()
+                .to_vec1::<f16>()
+                .unwrap();
+            let reshaped_value_slice = reshaped_value
+                .i(i)
+                .unwrap()
+                .flatten_all()
+                .unwrap()
+                .to_vec1::<f16>()
+                .unwrap();
+            assert_eq!(original_value_slice, reshaped_value_slice);
+        }
     }
 
     #[test]
@@ -604,6 +646,48 @@ mod reshape_and_cache {
 
         let result = reshape_and_cache_flash(&key, &value, &key_cache, &value_cache, &slot_mapping);
         assert!(result.is_ok());
+
+        // Additional assertions
+        let (reshaped_key, reshaped_value) = result.unwrap();
+
+        // Check shapes
+        assert_eq!(reshaped_key.shape(), &[num_tokens, num_heads, head_size]);
+        assert_eq!(reshaped_value.shape(), &[num_tokens, num_heads, head_size]);
+
+        // Check that data has been copied correctly (you might want to check a few elements)
+        for i in 0..num_tokens {
+            let original_key_slice = key
+                .i(i)
+                .unwrap()
+                .flatten_all()
+                .unwrap()
+                .to_vec1::<bf16>()
+                .unwrap();
+            let reshaped_key_slice = reshaped_key
+                .i(i)
+                .unwrap()
+                .flatten_all()
+                .unwrap()
+                .to_vec1::<bf16>()
+                .unwrap();
+            assert_eq!(original_key_slice, reshaped_key_slice);
+
+            let original_value_slice = value
+                .i(i)
+                .unwrap()
+                .flatten_all()
+                .unwrap()
+                .to_vec1::<bf16>()
+                .unwrap();
+            let reshaped_value_slice = reshaped_value
+                .i(i)
+                .unwrap()
+                .flatten_all()
+                .unwrap()
+                .to_vec1::<bf16>()
+                .unwrap();
+            assert_eq!(original_value_slice, reshaped_value_slice);
+        }
     }
 
     #[test]
