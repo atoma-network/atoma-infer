@@ -891,18 +891,18 @@ mod tests {
             // })
             // .collect::<Vec<_>>());
             let block_tables = Some(Tensor::from_vec(
-                (0..active_indices.len())
-                    .flat_map(|i| {
-                        {
-                            let mut range = ((i as i64 * total_num_blocks_per_sequence)
-                                ..(i as i64 * total_num_blocks_per_sequence
-                                    + num_blocks_per_sequence[i]))
-                                .collect::<Vec<_>>();
-                            range.extend([0i64].repeat(
-                                max_num_blocks - num_blocks_per_sequence[i] as usize,
-                            )); // pad to max_num_blocks
-                            range
-                        }
+                active_indices
+                    .iter()
+                    .enumerate()
+                    .flat_map(|(local_idx, &global_idx)| {
+                        let mut range = ((global_idx as i64 * total_num_blocks_per_sequence)
+                            ..((global_idx as i64 * total_num_blocks_per_sequence)
+                                + num_blocks_per_sequence[local_idx]))
+                            .collect::<Vec<_>>();
+                        range.extend([0i64].repeat(
+                            max_num_blocks - num_blocks_per_sequence[local_idx] as usize,
+                        )); // pad to max_num_blocks
+                        range
                     })
                     .collect(),
                 (active_indices.len(), max_num_blocks),
