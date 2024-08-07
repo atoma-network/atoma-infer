@@ -797,11 +797,10 @@ mod tests {
             &selected_token_indices,
             &kv_caches,
             attention_metadata,
-        )?;
-        assert_eq!(logits.dims()[0], 1);
+        )?.squeeze(0)?;
+
         assert_eq!(logits.dims()[1], 10);
         assert_eq!(logits.dims()[2], 32_000);
-        let logits = logits.squeeze(0)?.squeeze(0)?;
 
         let mut sentences = prompts.clone();
 
@@ -818,6 +817,8 @@ mod tests {
             .iter()
             .map(|ts| *ts.last().unwrap())
             .collect::<Vec<_>>();
+
+        println!("next_tokens: {:?}", next_tokens);
 
         // round division
         let total_num_blocks_per_sequence =
@@ -873,28 +874,18 @@ mod tests {
             )?;
 
             println!("num_blocks_per_sequence: {:?}", num_blocks_per_sequence);
-            println!("slot_mapping: {:?}", active_indices
-            .iter()
-            .enumerate()
-            .map(|(idx, &i)| (idx * token_size_allocation + tokens[i].len()) as i64 - 1)
-            .collect::<Vec<_>>());
+            println!(
+                "slot_mapping: {:?}",
+                active_indices
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, &i)| (idx * token_size_allocation + tokens[i].len()) as i64 - 1)
+                    .collect::<Vec<_>>()
+            );
 
             println!("total_num_blocks_per_sequence: {total_num_blocks_per_sequence}");
-            println!("block_tables: {:?}",active_indices
-            .iter()
-            .enumerate()
-            .flat_map(|(local_idx, &global_idx)| {
-                let mut range = ((global_idx as i64 * total_num_blocks_per_sequence)
-                    ..((global_idx as i64 * total_num_blocks_per_sequence)
-                        + num_blocks_per_sequence[local_idx]))
-                    .collect::<Vec<_>>();
-                range.extend([0i64].repeat(
-                    max_num_blocks - num_blocks_per_sequence[local_idx] as usize,
-                )); // pad to max_num_blocks
-                range
-            })
-            .collect::<Vec<_>>());
-            let block_tables = Some(Tensor::from_vec(
+            println!(
+                "block_tables: {:?}",
                 active_indices
                     .iter()
                     .enumerate()
@@ -903,15 +894,34 @@ mod tests {
                             ..((global_idx as i64 * total_num_blocks_per_sequence)
                                 + num_blocks_per_sequence[local_idx]))
                             .collect::<Vec<_>>();
-                        range.extend([100i64].repeat(
-                            max_num_blocks - num_blocks_per_sequence[local_idx] as usize,
-                        )); // pad to max_num_blocks
+                        range.extend(
+                            [0i64].repeat(
+                                max_num_blocks - num_blocks_per_sequence[local_idx] as usize,
+                            ),
+                        ); // pad to max_num_blocks
                         range
                     })
-                    .collect(),
-                (active_indices.len(), max_num_blocks),
-                &device,
-            )?);
+                    .collect::<Vec<_>>()
+            );
+            let block_tables =
+                Some(Tensor::from_vec(
+                    active_indices
+                        .iter()
+                        .enumerate()
+                        .flat_map(|(local_idx, &global_idx)| {
+                            let mut range = ((global_idx as i64 * total_num_blocks_per_sequence)
+                                ..((global_idx as i64 * total_num_blocks_per_sequence)
+                                    + num_blocks_per_sequence[local_idx]))
+                                .collect::<Vec<_>>();
+                            range.extend([100i64].repeat(
+                                max_num_blocks - num_blocks_per_sequence[local_idx] as usize,
+                            )); // pad to max_num_blocks
+                            range
+                        })
+                        .collect(),
+                    (active_indices.len(), max_num_blocks),
+                    &device,
+                )?);
             let sequence_lengths = Some(Tensor::from_vec(
                 active_indices
                     .iter()
