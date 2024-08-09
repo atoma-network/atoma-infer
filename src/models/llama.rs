@@ -688,7 +688,7 @@ mod tests {
             &mut LogitsProcessor::from_sampling(42, sampling)
         });
 
-        let mut logits_processor = logits_processors.take(10).collect::<Vec<_>>();
+        let mut logits_processors = logits_processors.take(10).collect::<Vec<_>>();
 
         let sample_len = 64;
         let start_gen = std::time::Instant::now();
