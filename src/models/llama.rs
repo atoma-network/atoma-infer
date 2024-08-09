@@ -831,6 +831,7 @@ mod tests {
                 result.push(sum);
                 sum
             });
+            result
         };
         println!("selected_token_indices: {:?}", selected_token_indices);
         let selected_token_indices =
