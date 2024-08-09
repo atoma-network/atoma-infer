@@ -875,6 +875,7 @@ mod tests {
 
         // decoding loop
         for _ in 1..sample_len {
+            println!("active_indices: {active_indices:?}");
             let num_active = active_indices.len();
             if num_active == 0 {
                 break; // All sequences have finished
