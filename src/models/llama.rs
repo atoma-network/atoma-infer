@@ -682,12 +682,13 @@ mod tests {
             println!("{prompt}");
         }
 
-        let mut logits_processors = std::iter::repeat_with(|| {
+        let logits_processors = std::iter::repeat_with(|| {
             let temperature = 0.8;
             let sampling = Sampling::All { temperature };
             &mut LogitsProcessor::from_sampling(42, sampling)
         });
 
+        let mut logits_processor = logits_processors.take(10).collect::<Vec<_>>();
 
         let sample_len = 64;
         let start_gen = std::time::Instant::now();
@@ -937,7 +938,10 @@ mod tests {
                     range.extend([0i64].repeat(max_num_blocks - *num_blocks as usize)); // pad to max_num_blocks
                     range
                 });
-            println!("block_tables: {:?}", block_tables.clone().collect::<Vec<_>>());
+            println!(
+                "block_tables: {:?}",
+                block_tables.clone().collect::<Vec<_>>()
+            );
             let block_tables = Some(Tensor::from_vec(
                 block_tables.collect(),
                 (active_indices.len(), max_num_blocks),
@@ -977,7 +981,9 @@ mod tests {
             let mut new_active_indices = Vec::new();
             next_tokens = Vec::new();
             for (idx, &i) in active_indices.iter().enumerate() {
-                let next_token = logits_processors[i].sample(&logits.i(idx).unwrap()).unwrap();
+                let next_token = logits_processors[i]
+                    .sample(&logits.i(idx).unwrap())
+                    .unwrap();
                 if let Some(t) = tokenizers[i].next_token(next_token).unwrap() {
                     sentences[i].push_str(&t);
                 }
