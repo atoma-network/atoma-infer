@@ -181,9 +181,8 @@ impl CausalSelfAttention {
         kv_cache: &Tensor,
         attention_metadata: &FlashAttentionMetadata,
     ) -> Result<Tensor> {
-        let (_batch_size, num_total_tokens, _hidden_size) = x.dims3()?;
-        let b_sz = 1;
-        if x.dims()[0] != b_sz {
+        let (batch_size, num_total_tokens, _hidden_size) = x.dims3()?;
+        if batch_size != 1 {
             candle_core::bail!(
                 "x must be of shape [1, num_total_tokens], got {:?}",
                 x.dims()
@@ -197,7 +196,7 @@ impl CausalSelfAttention {
 
         let q = q
             .reshape((
-                b_sz,
+                batch_size,
                 num_total_tokens,
                 self.num_attention_heads,
                 self.head_dim,
@@ -206,7 +205,7 @@ impl CausalSelfAttention {
             .contiguous()?;
         let k = k
             .reshape((
-                b_sz,
+                batch_size,
                 num_total_tokens,
                 self.num_key_value_heads,
                 self.head_dim,
@@ -214,7 +213,7 @@ impl CausalSelfAttention {
             .transpose(1, 2)?
             .contiguous()?;
         let v = v.reshape((
-            b_sz,
+            batch_size,
             num_total_tokens,
             self.num_key_value_heads,
             self.head_dim,
@@ -388,7 +387,7 @@ impl Llama {
     ) -> Result<Tensor> {
         if x.dims()[0] != 1 {
             candle_core::bail!(
-                "x must be of shape [1, _num_total_tokens], got {:?}",
+                "x must be of shape [1, num_total_tokens], got {:?}",
                 x.dims()
             );
         }
@@ -512,35 +511,97 @@ mod tests {
         let kv_caches = kv_caches.iter_mut().collect();
 
         // prefill forward pass
-        let input_positions = Tensor::arange(0, tokens.len() as i64, &device)?.unsqueeze(0)?;
-        let input = Tensor::new(&tokens[..], &device)?.unsqueeze(0)?;
+        let input_positions = Tensor::from_vec(
+            tokens
+                .iter()
+                .flat_map(|ts| (0..(ts.len() as i64)))
+                .collect::<Vec<_>>(),
+            (1, num_prefill_tokens),
+            &device,
+        )?;
+        let input = Tensor::from_vec(
+            tokens.clone().into_iter().flatten().collect(),
+            (1, num_prefill_tokens),
+            &device,
+        )?;
+        let sequence_start_locs = {
+            let mut result = Vec::with_capacity(tokens.len() + 1);
+            result.push(0); // Start with 0
+            tokens.iter().fold(0, |acc, x| {
+                let sum = acc + x.len() as u32;
+                result.push(sum);
+                sum
+            });
+            result
+        };
+        let context_lengths = Some(Tensor::from_vec(
+            tokens.iter().map(|ts| ts.len() as u32).collect(),
+            (tokens.len(),),
+            &device,
+        )?);
+        let slot_mapping = Tensor::from_vec(
+            tokens
+                .iter()
+                .enumerate()
+                .flat_map(|(i, ts)| {
+                    ((i * token_size_allocation) as i64)
+                        ..((i * token_size_allocation + ts.len()) as i64)
+                })
+                .collect(),
+            (num_prefill_tokens,),
+            &device,
+        )?;
+        let query_start_locations = Some(Tensor::from_vec(
+            sequence_start_locs.clone(),
+            (tokens.len() + 1,),
+            &device,
+        )?);
+        let sequence_start_locations = Some(Tensor::from_vec(
+            sequence_start_locs,
+            (tokens.len() + 1,),
+            &device,
+        )?);
+        let sequence_lengths = Some(Tensor::from_vec(
+            tokens.iter().map(|ts| ts.len() as u32).collect(),
+            (tokens.len(),),
+            &device,
+        )?);
         let attention_metadata = FlashAttentionMetadata {
-            context_lengths: Some(Tensor::from_vec(vec![tokens.len() as u32], (1,), &device)?),
-            slot_mapping: Tensor::arange(0, tokens.len() as i64, &device)?,
+            context_lengths,
+            slot_mapping,
             decoding_metadata: None,
-            num_prefill_tokens: tokens.len(),
+            num_prefill_tokens,
             num_decoding_tokens: 0,
             prefill_metadata: Some(FlashAttentionPrefillMetadata {
                 block_tables: None,
-                max_query_length: Some(tokens.len()),
-                max_prefill_sequence_length: tokens.len(),
-                query_start_locations: Some(Tensor::from_vec(
-                    vec![0, tokens.len() as u32],
-                    (2,),
-                    &device,
-                )?),
-                sequence_start_locations: Some(Tensor::from_vec(
-                    vec![0, tokens.len() as u32],
-                    (2,),
-                    &device,
-                )?),
-                sequence_lengths: Some(Tensor::from_vec(vec![tokens.len() as u32], (1,), &device)?),
+                max_query_length: Some(max_tokens_len),
+                max_prefill_sequence_length: max_tokens_len,
+                query_start_locations,
+                sequence_start_locations,
+                sequence_lengths,
             }),
         };
+        let selected_token_indices = {
+            let mut result = Vec::with_capacity(tokens.len());
+            let mut i = 0;
+            tokens.iter().fold(0, |acc, x| {
+                let sum = if i == 0 {
+                    i += 1;
+                    acc + x.len() as u32 - 1
+                } else {
+                    acc + x.len() as u32
+                };
+                result.push(sum);
+                sum
+            });
+            result
+        };
+        let selected_token_indices =
+            Tensor::from_vec(selected_token_indices, (tokens.len(),), &device)?;
         let logits = llama_model.forward(
             &input,
             &input_positions,
-            &Tensor::new(vec![tokens.len() as u32 - 1], &device)?,
+            &selected_token_indices,
             &kv_caches,
             attention_metadata,
         )?;
@@ -815,18 +876,23 @@ mod tests {
             }),
         };
 
-        println!(
-            "selected_token_indices: {:?}",
-            tokens
-                .iter()
-                .map(|ts| ts.len() as u32 - 1)
-                .collect::<Vec<_>>()
-        );
-        let selected_token_indices = Tensor::from_vec(
-            tokens.iter().map(|ts| ts.len() as u32 - 1).collect(),
-            (tokens.len(),),
-            &device,
-        )?;
+        let selected_token_indices = {
+            let mut result = Vec::with_capacity(tokens.len());
+            let mut i = 0;
+            tokens.iter().fold(0, |acc, x| {
+                let sum = if i == 0 {
+                    i += 1;
+                    acc + x.len() as u32 - 1
+                } else {
+                    acc + x.len() as u32
+                };
+                result.push(sum);
+                sum
+            });
+        };
+        println!("selected_token_indices: {:?}", selected_token_indices);
+        let selected_token_indices =
+            Tensor::from_vec(selected_token_indices, (tokens.len(),), &device)?;
         let logits = llama_model
             .forward(
                 &input,
@@ -905,62 +971,38 @@ mod tests {
             let slot_mapping = Tensor::from_vec(
                 active_indices
                     .iter()
-                    .enumerate()
-                    .map(|(idx, &i)| (idx * token_size_allocation + tokens[i].len()) as i64 - 1)
-                    .collect::<Vec<_>>(),
+                    .map(|&i| (i * token_size_allocation + tokens[i].len()) as i64 - 1)
+                    .collect(),
                 (num_active,),
                 &device,
             )?;
 
-            // println!("num_blocks_per_sequence: {:?}", num_blocks_per_sequence);
-            // println!(
-            //     "slot_mapping: {:?}",
-            //     active_indices
-            //         .iter()
-            //         .enumerate()
-            //         .map(|(idx, &i)| (idx * token_size_allocation + tokens[i].len()) as i64 - 1)
-            //         .collect::<Vec<_>>()
-            // );
+            println!("num_blocks_per_sequence: {:?}", num_blocks_per_sequence);
+            println!(
+                "slot_mapping: {:?}",
+                active_indices
+                    .iter()
+                    .map(|&i| (i * token_size_allocation + tokens[i].len()) as i64 - 1)
+                    .collect::<Vec<_>>()
+            );
 
-            // println!("total_num_blocks_per_sequence: {total_num_blocks_per_sequence}");
-            // println!(
-            //     "block_tables: {:?}",
-            //     active_indices
-            //         .iter()
-            //         .enumerate()
-            //         .flat_map(|(local_idx, &global_idx)| {
-            //             let mut range = ((global_idx as i64 * total_num_blocks_per_sequence)
-            //                 ..((global_idx as i64 * total_num_blocks_per_sequence)
-            //                     + num_blocks_per_sequence[local_idx]))
-            //                 .collect::<Vec<_>>();
-            //             range.extend(
-            //                 [0i64].repeat(
-            //                     max_num_blocks - num_blocks_per_sequence[local_idx] as usize,
-            //                 ),
-            //             ); // pad to max_num_blocks
-            //             range
-            //         })
-            //         .collect::<Vec<_>>()
-            // );
-            let block_tables =
-                Some(Tensor::from_vec(
-                    active_indices
-                        .iter()
-                        .enumerate()
-                        .flat_map(|(local_idx, &global_idx)| {
-                            let mut range = ((global_idx as i64 * total_num_blocks_per_sequence)
-                                ..((global_idx as i64 * total_num_blocks_per_sequence)
-                                    + num_blocks_per_sequence[local_idx]))
-                                .collect::<Vec<_>>();
-                            range.extend([100i64].repeat(
-                                max_num_blocks - num_blocks_per_sequence[local_idx] as usize,
-                            )); // pad to max_num_blocks
-                            range
-                        })
-                        .collect(),
-                    (active_indices.len(), max_num_blocks),
-                    &device,
-                )?);
+            println!("total_num_blocks_per_sequence: {total_num_blocks_per_sequence}");
+            let block_tables = active_indices
+                .iter()
+                .zip(num_blocks_per_sequence.iter())
+                .flat_map(|(i, num_blocks)| {
+                    let mut range = ((*i as i64 * total_num_blocks_per_sequence)
+                        ..((*i as i64 * total_num_blocks_per_sequence) + *num_blocks as i64))
+                        .collect::<Vec<_>>();
+                    range.extend([0i64].repeat(max_num_blocks - *num_blocks as usize)); // pad to max_num_blocks
+                    range
+                });
+            println!("block_tables: {:?}", block_tables.collect::<Vec<_>>());
+            let block_tables = Some(Tensor::from_vec(
+                block_tables.collect(),
+                (active_indices.len(), max_num_blocks),
+                &device,
+            )?);
             let sequence_lengths = Some(Tensor::from_vec(
                 active_indices
                     .iter()
