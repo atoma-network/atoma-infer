@@ -439,7 +439,7 @@ mod tests {
     #[test]
     #[serial]
     fn test_llama_model() -> Result<()> {
-        let prompt = "Modern music is especially focused on ".to_string();
+        let prompt = "The capital of France is ".to_string();
 
         let dtype = DType::BF16;
         let device = Device::new_cuda(0).unwrap();
@@ -491,6 +491,7 @@ mod tests {
 
         let sample_len = 32;
         let start_gen = std::time::Instant::now();
+        let mut index_pos = 0;
         let mut token_generated = 0;
 
         // kv cache
@@ -498,7 +499,7 @@ mod tests {
         let block_size = 16;
         let num_key_value_heads = config.num_key_value_heads;
         let head_dim = config.hidden_size / config.num_attention_heads;
-        let mut kv_caches = std::iter::repeat_with(|| {
+        let mut kv_cache = std::iter::repeat_with(|| {
             Tensor::zeros(
                 (2, num_blocks, block_size, num_key_value_heads, head_dim),
                 dtype,
@@ -508,104 +509,43 @@ mod tests {
         .take(config.num_hidden_layers)
         .collect::<Result<Vec<_>>>()?;
 
-        let kv_caches = kv_caches.iter_mut().collect();
+        let kv_cache = kv_cache.iter_mut().collect();
 
         // prefill forward pass
-        let input_positions = Tensor::from_vec(
-            tokens
-                .iter()
-                .flat_map(|ts| (0..(ts.len() as i64)))
-                .collect::<Vec<_>>(),
-            (1, num_prefill_tokens),
-            &device,
-        )?;
-        let input = Tensor::from_vec(
-            tokens.clone().into_iter().flatten().collect(),
-            (1, num_prefill_tokens),
-            &device,
-        )?;
-        let sequence_start_locs = {
-            let mut result = Vec::with_capacity(tokens.len() + 1);
-            result.push(0); // Start with 0
-            tokens.iter().fold(0, |acc, x| {
-                let sum = acc + x.len() as u32;
-                result.push(sum);
-                sum
-            });
-            result
-        };
-        let context_lengths = Some(Tensor::from_vec(
-            tokens.iter().map(|ts| ts.len() as u32).collect(),
-            (tokens.len(),),
-            &device,
-        )?);
-        let slot_mapping = Tensor::from_vec(
-            tokens
-                .iter()
-                .enumerate()
-                .flat_map(|(i, ts)| {
-                    ((i * token_size_allocation) as i64)
-                        ..((i * token_size_allocation + ts.len()) as i64)
-                })
-                .collect(),
-            (num_prefill_tokens,),
-            &device,
-        )?;
-        let query_start_locations = Some(Tensor::from_vec(
-            sequence_start_locs.clone(),
-            (tokens.len() + 1,),
-            &device,
-        )?);
-        let sequence_start_locations = Some(Tensor::from_vec(
-            sequence_start_locs,
-            (tokens.len() + 1,),
-            &device,
-        )?);
-        let sequence_lengths = Some(Tensor::from_vec(
-            tokens.iter().map(|ts| ts.len() as u32).collect(),
-            (tokens.len(),),
-            &device,
-        )?);
+        let input_positions = Tensor::arange(0, tokens.len() as i64, &device)?.unsqueeze(0)?;
+        let input = Tensor::new(&tokens[..], &device)?.unsqueeze(0)?;
         let attention_metadata = FlashAttentionMetadata {
-            context_lengths,
-            slot_mapping,
+            context_lengths: Some(Tensor::from_vec(vec![tokens.len() as u32], (1,), &device)?),
+            slot_mapping: Tensor::arange(0, tokens.len() as i64, &device)?,
             decoding_metadata: None,
-            num_prefill_tokens,
+            num_prefill_tokens: tokens.len(),
             num_decoding_tokens: 0,
             prefill_metadata: Some(FlashAttentionPrefillMetadata {
                 block_tables: None,
-                max_query_length: Some(max_tokens_len),
-                max_prefill_sequence_length: max_tokens_len,
-                query_start_locations,
-                sequence_start_locations,
-                sequence_lengths,
+                max_query_length: Some(tokens.len()),
+                max_prefill_sequence_length: tokens.len(),
+                query_start_locations: Some(Tensor::from_vec(
+                    vec![0, tokens.len() as u32],
+                    (2,),
+                    &device,
+                )?),
+                sequence_start_locations: Some(Tensor::from_vec(
+                    vec![0, tokens.len() as u32],
+                    (2,),
+                    &device,
+                )?),
+                sequence_lengths: Some(Tensor::from_vec(vec![tokens.len() as u32], (1,), &device)?),
             }),
         };
-        let selected_token_indices = {
-            let mut result = Vec::with_capacity(tokens.len());
-            let mut i = 0;
-            tokens.iter().fold(0, |acc, x| {
-                let sum = if i == 0 {
-                    i += 1;
-                    acc + x.len() as u32 - 1
-                } else {
-                    acc + x.len() as u32
-                };
-                result.push(sum);
-                sum
-            });
-            result
-        };
-        let selected_token_indices =
-            Tensor::from_vec(selected_token_indices, (tokens.len(),), &device)?;
         let logits = llama_model.forward(
             &input,
             &input_positions,
-            &selected_token_indices,
-            &kv_caches,
+            &Tensor::new(vec![tokens.len() as u32 - 1], &device)?,
+            &kv_cache,
             attention_metadata,
         )?;
         let logits = logits.squeeze(0)?.squeeze(0)?;
+        index_pos += tokens.len();
 
         let mut next_token = logits_processor.sample(&logits)?;
         token_generated += 1;
@@ -642,11 +582,13 @@ mod tests {
                     &input,
                     &input_positions,
                     &selected_token_indices,
-                    &kv_caches,
+                    &kv_cache,
                     attention_metadata,
                 )?
                 .squeeze(0)?
                 .squeeze(0)?;
+
+            index_pos += 1;
 
             next_token = logits_processor.sample(&logits)?;
             token_generated += 1;
