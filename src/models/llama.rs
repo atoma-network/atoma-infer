@@ -491,7 +491,6 @@ mod tests {
 
         let sample_len = 32;
         let start_gen = std::time::Instant::now();
-        let mut index_pos = 0;
         let mut token_generated = 0;
 
         // kv cache
@@ -545,7 +544,6 @@ mod tests {
             attention_metadata,
         )?;
         let logits = logits.squeeze(0)?.squeeze(0)?;
-        index_pos += tokens.len();
 
         let mut next_token = logits_processor.sample(&logits)?;
         token_generated += 1;
@@ -587,8 +585,6 @@ mod tests {
                 )?
                 .squeeze(0)?
                 .squeeze(0)?;
-
-            index_pos += 1;
 
             next_token = logits_processor.sample(&logits)?;
             token_generated += 1;
@@ -686,11 +682,12 @@ mod tests {
             println!("{prompt}");
         }
 
-        let mut logits_processor = {
+        let mut logits_processors = std::iter::repeat_with(|| {
             let temperature = 0.8;
             let sampling = Sampling::All { temperature };
-            LogitsProcessor::from_sampling(42, sampling)
-        };
+            &mut LogitsProcessor::from_sampling(42, sampling)
+        });
+
 
         let sample_len = 64;
         let start_gen = std::time::Instant::now();
@@ -853,7 +850,7 @@ mod tests {
         let mut sentences = prompts.clone();
 
         (0..10).for_each(|i| {
-            let next_token = logits_processor.sample(&logits.i(i).unwrap()).unwrap();
+            let next_token = logits_processors[i].sample(&logits.i(i).unwrap()).unwrap();
             if let Some(t) = tokenizers[i].next_token(next_token).unwrap() {
                 sentences[i].push_str(&t);
             }
@@ -980,7 +977,7 @@ mod tests {
             let mut new_active_indices = Vec::new();
             next_tokens = Vec::new();
             for (idx, &i) in active_indices.iter().enumerate() {
-                let next_token = logits_processor.sample(&logits.i(idx).unwrap()).unwrap();
+                let next_token = logits_processors[i].sample(&logits.i(idx).unwrap()).unwrap();
                 if let Some(t) = tokenizers[i].next_token(next_token).unwrap() {
                     sentences[i].push_str(&t);
                 }
