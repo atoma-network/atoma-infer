@@ -713,7 +713,7 @@ mod tests {
 
         let num_prefill_tokens = tokens.iter().map(|ts| ts.len()).sum::<usize>();
         let max_tokens_len = tokens.iter().map(|ts| ts.len()).max().unwrap();
-        let token_size_allocation = max_tokens_len + 64 + 1;
+        let token_size_allocation = ((max_tokens_len + 64 + 16) / 16) * 16;
 
         println!("tokens: {tokens:?}");
         println!(
@@ -906,7 +906,7 @@ mod tests {
                 .unwrap();
             let num_blocks_per_sequence = active_indices
                 .iter()
-                .map(|i| (tokens[*i].len() / block_size) as i64 + 1)
+                .map(|i| ((tokens[*i].len() + 15) / block_size) as i64)
                 .collect::<Vec<_>>();
             let max_num_blocks = *num_blocks_per_sequence.iter().max().unwrap() as usize;
 
