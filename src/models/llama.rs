@@ -682,13 +682,12 @@ mod tests {
             println!("{prompt}");
         }
 
-        let logits_processors = std::iter::repeat_with(|| {
+        let mut logits_processors = {
             let temperature = 0.8;
             let sampling = Sampling::All { temperature };
-            &mut LogitsProcessor::from_sampling(42, sampling)
-        });
-
-        let mut logits_processors = logits_processors.take(10).collect::<Vec<_>>();
+            std::iter::repeat_with(|| LogitsProcessor::from_sampling(42, sampling))
+                .collect::<Vec<_>>()
+        };
 
         let sample_len = 64;
         let start_gen = std::time::Instant::now();
