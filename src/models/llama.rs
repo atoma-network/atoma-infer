@@ -940,7 +940,7 @@ mod tests {
                     range.extend([0i64].repeat(max_num_blocks - *num_blocks as usize)); // pad to max_num_blocks
                     range
                 });
-            println!("block_tables: {:?}", block_tables.collect::<Vec<_>>());
+            println!("block_tables: {:?}", block_tables.clone().collect::<Vec<_>>());
             let block_tables = Some(Tensor::from_vec(
                 block_tables.collect(),
                 (active_indices.len(), max_num_blocks),
