@@ -685,7 +685,7 @@ mod tests {
         let mut logits_processors = {
             let temperature = 0.8;
             let sampling = Sampling::All { temperature };
-            std::iter::repeat_with(|| LogitsProcessor::from_sampling(42, sampling))
+            std::iter::repeat_with(|| LogitsProcessor::from_sampling(42, sampling.clone()))
                 .collect::<Vec<_>>()
         };
 
