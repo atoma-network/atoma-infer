@@ -686,6 +686,7 @@ mod tests {
             let temperature = 0.8;
             let sampling = Sampling::All { temperature };
             std::iter::repeat_with(|| LogitsProcessor::from_sampling(42, sampling.clone()))
+                .take(prompts.len())
                 .collect::<Vec<_>>()
         };
 
