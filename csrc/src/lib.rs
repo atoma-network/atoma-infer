@@ -1847,6 +1847,40 @@ impl FlashAttentionKvCache {
                     (o_stride[0] * seqlen_q) as u32,
                 )
             };
+            println!("q_ptr = {:?}", q_ptr);
+            println!("kc_ptr = {:?}", kc_ptr);
+            println!("vc_ptr = {:?}", vc_ptr);
+            println!("dst_ptr = {:?}", dst_ptr);
+            println!("softmax_lse_ptr = {:?}", softmax_lse_ptr);
+            println!("alibi_slopes_ptr = {:?}", alibi_slopes_ptr);
+            println!("cu_seqlens_q_ptr = {:?}", std::ptr::null());
+            println!("cu_seqlens_k_ptr = {:?}", cu_seqlens_k_ptr);
+            println!("is_seqlens_k_cumulative = {:?}", is_seqlens_k_cumulative);
+            println!("q_batch_stride = {:?}", q_batch_stride);
+            println!("k_batch_stride = {:?}", k_batch_stride);
+            println!("v_batch_stride = {:?}", v_batch_stride);
+            println!("o_batch_stride = {:?}", o_batch_stride);
+            println!("alibi_slopes_batch_stride = {:?}", alibi_slopes_batch_stride);
+            println!("seqlen_q_rounded = {:?}", seqlen_q_rounded);
+            println!("seqlen_k_rounded = {:?}", seqlen_k_rounded);
+            println!("d_rounded = {:?}", head_size_rounded);
+            println!("softmax_scale = {:?}", softmax_scale);
+            println!("scale_softmatx_log2 = {:?}", scale_softmatx_log2);
+            println!("block_table_ptr = {:?}", block_table_ptr);
+            println!("block_table_batch_stride = {:?}", block_table_batch_stride);
+            println!("page_block_size = {:?}", page_block_size);
+            println!("seqused_k = {:?}", std::ptr::null());
+            println!("seqlen_q = {:?}", seqlen_q);
+            println!("seqlen_k = {:?}", seqlens_k);
+            println!("seqlen_q_rounded = {:?}", seqlen_q_rounded);
+            println!("seqlen_k_rounded = {:?}", seqlen_k_rounded);
+            println!("is_bf16 = {:?}", is_bf16);
+            println!("is_causal = {:?}", is_causal);
+            println!("window_size_left = {:?}", window_size_left);
+            println!("window_size_right = {:?}", window_size_right);
+            println!("softcap = {:?}", softcap);
+            println!("unpadded_lse = {:?}", false);
+            println!("force_split_kernel = {:?}", !block_table_ptr.is_null());
             ffi::run_mha(
                 q_ptr,
                 kc_ptr,
@@ -2234,10 +2268,11 @@ pub(crate) mod utils {
         // Technically kBlockM = 64 only for the splitKV kernels, not the standard kernel.
         // In any case we don't expect seqlen_q to be larger than 64 for inference.
         let num_m_blocks = (max_seqlen_q + 64 - 1) / 64;
+        // We multiply number of SMs by 2 to hard-code the fact that we're using 128 threads per block.
         let cuda_multiprocessor_count = get_multiprocessor_count(device_ordinal)?;
         let num_splits = num_splits_heuristic(
             batch_size * num_heads * num_m_blocks,
-            cuda_multiprocessor_count,
+            cuda_multiprocessor_count * 2,
             num_n_blocks,
             128,
         );
