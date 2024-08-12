@@ -96,16 +96,17 @@ impl FlashAttentionMetadata {
         sequence_start_locations: Tensor,
         sequence_lengths: Tensor,
         block_table: Tensor,
+        prefix_caching: bool,
     ) -> Result<Self> {
-        let prefill_block_tables = if num_prefill_tokens > 0 {
+        let prefill_block_tables = if prefix_caching && num_prefill_tokens > 0 {
             Some(block_table.i(..num_prefill_tokens)?)
         } else {
             None
         };
-        let decoding_block_tables = if num_decoding_tokens > 0 {
+        let decoding_block_tables = if prefix_caching && num_decoding_tokens > 0 {
             Some(block_table.i(num_prefill_tokens..)?)
         } else {
-            None
+            Some(block_table)
         };
         let prefill_metadata = if num_prefill_tokens > 0 {
             Some(FlashAttentionPrefillMetadata {
