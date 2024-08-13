@@ -463,7 +463,7 @@ impl FlashAttention {
                 decoding_metadata.block_tables.as_ref(),
                 decoding_metadata.sequence_lengths.as_ref(),
                 None,
-                false,
+                true,
             )?;
             output.slice_assign(&[num_prefill_tokens.., 0.., 0..], &out.squeeze(1)?)?
         } else {
@@ -587,7 +587,7 @@ mod tests {
             slot_mapping: Tensor::arange(0i64, 15, &device).unwrap(),
             prefill_metadata: Some(FlashAttentionPrefillMetadata {
                 block_tables: Some(
-                    Tensor::arange(0i64, 2, &device)
+                    Tensor::arange(0u32, 2, &device)
                         .unwrap()
                         .reshape((2, 1))
                         .unwrap(),
@@ -604,7 +604,7 @@ mod tests {
             }),
             decoding_metadata: Some(FlashAttentionDecodingMetadata {
                 block_tables: Some(
-                    Tensor::arange(2i64, 7, &device)
+                    Tensor::arange(2u32, 7, &device)
                         .unwrap()
                         .reshape((5, 1))
                         .unwrap(),

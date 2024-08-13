@@ -154,7 +154,7 @@ fn flash_attn_varlen_with_block_table() -> Result<()> {
     let seqlens_k = Tensor::new(&[0u32, 32u32, 64u32], &device)?;
 
     let ys = {
-        let block_table = Some(Tensor::arange(0i64, 4, &device)?.reshape((2, 2))?);
+        let block_table = Some(Tensor::arange(0u32, 4, &device)?.reshape((2, 2))?);
         csrc::flash_attn_varlen_with_block_table(
             &q,
             &k,
@@ -208,20 +208,8 @@ fn flash_attn_kv_cache() -> Result<()> {
         let q = q.transpose(1, 2)?;
         let k = k.transpose(1, 2)?;
         let v = v.transpose(1, 2)?;
-        csrc::flash_attn_kv_cache_full(
-            &q,
-            &k,
-            &v,
-            None,
-            0.5,
-            None,
-            None,
-            None,
-            Some(&seqlens_k),
-            None,
-            false,
-        )?
-        .transpose(1, 2)?
+        csrc::flash_attn_kv_cache_full(&q, &k, &v, None, 0.5, None, Some(&seqlens_k), None, false)?
+            .transpose(1, 2)?
     };
     let ys = ys.to_dtype(DType::F32)?;
 
@@ -263,15 +251,13 @@ fn test_flash_attn_kv_cache_with_block_table() -> Result<()> {
     let seqlens_k = Tensor::new(&[1u32; 32], &device)?;
 
     let ys = {
-        let block_table = Some(Tensor::arange(0i64, 64, &device)?.reshape((32, 2))?);
+        let block_table = Some(Tensor::arange(0u32, 64, &device)?.reshape((32, 2))?);
         csrc::flash_attn_kv_cache_full(
             &q,
             &k,
             &v,
             None,
             0.5,
-            None,
-            None,
             block_table.as_ref(),
             Some(&seqlens_k),
             None,
@@ -293,7 +279,7 @@ fn test_flash_attn_kv_cache_with_block_table() -> Result<()> {
     let seqlens_k = Tensor::from_vec((0u32..=32).collect::<Vec<_>>(), (33,), &device)?;
 
     let should_be_ys = {
-        let block_table = Some(Tensor::arange(0i64, 64, &device)?.reshape((32, 2))?);
+        let block_table = Some(Tensor::arange(0u32, 64, &device)?.reshape((32, 2))?);
         csrc::flash_attn_varlen_with_block_table(
             &q,
             &k,
