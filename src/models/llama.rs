@@ -566,6 +566,7 @@ mod tests {
                 decoding_metadata: Some(FlashAttentionDecodingMetadata {
                     block_tables: Some(
                         Tensor::arange(0, num_blocks, &device)?
+                            .to_dtype(DType::U32)?
                             .reshape((1, num_blocks as usize))?,
                     ),
                     max_decoding_sequence_length: tokens.len(),
@@ -875,7 +876,6 @@ mod tests {
 
         // decoding loop
         for _ in 1..sample_len {
-            println!("active_indices: {active_indices:?}");
             let num_active = active_indices.len();
             if num_active == 0 {
                 break; // All sequences have finished
@@ -919,30 +919,17 @@ mod tests {
                 &device,
             )?;
 
-            println!("num_blocks_per_sequence: {:?}", num_blocks_per_sequence);
-            println!(
-                "slot_mapping: {:?}",
-                active_indices
-                    .iter()
-                    .map(|&i| (i * token_size_allocation + tokens[i].len()) as i64 - 1)
-                    .collect::<Vec<_>>()
-            );
-
-            println!("total_num_blocks_per_sequence: {total_num_blocks_per_sequence}");
             let block_tables = active_indices
                 .iter()
                 .zip(num_blocks_per_sequence.iter())
                 .flat_map(|(i, num_blocks)| {
-                    let mut range = ((*i as i64 * total_num_blocks_per_sequence)
-                        ..((*i as i64 * total_num_blocks_per_sequence) + *num_blocks as i64))
+                    let mut range = ((*i as u32 * total_num_blocks_per_sequence as u32)
+                        ..((*i as u32 * total_num_blocks_per_sequence as u32)
+                            + *num_blocks as u32))
                         .collect::<Vec<_>>();
-                    range.extend([0i64].repeat(max_num_blocks - *num_blocks as usize)); // pad to max_num_blocks
+                    range.extend([0u32].repeat(max_num_blocks - *num_blocks as usize)); // pad to max_num_blocks
                     range
                 });
-            println!(
-                "block_tables: {:?}",
-                block_tables.clone().collect::<Vec<_>>()
-            );
             let block_tables = Some(Tensor::from_vec(
                 block_tables.collect(),
                 (active_indices.len(), max_num_blocks),
@@ -1019,7 +1006,9 @@ mod tests {
             (token_generated - 1) as f64 / dt.as_secs_f64(),
         );
 
-        println!("sentences: {:?}", sentences);
+        for s in sentences {
+            println!("{:?}", s);
+        }
 
         Ok(())
     }
