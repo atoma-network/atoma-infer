@@ -587,7 +587,7 @@ mod tests {
             slot_mapping: Tensor::arange(0i64, 15, &device).unwrap(),
             prefill_metadata: Some(FlashAttentionPrefillMetadata {
                 block_tables: Some(
-                    Tensor::arange(0i64, 2, &device)
+                    Tensor::arange(0u32, 2, &device)
                         .unwrap()
                         .reshape((2, 1))
                         .unwrap(),
@@ -616,23 +616,22 @@ mod tests {
             num_decoding_tokens: 5,
         };
 
-        let result = flash_attention.forward(&q, &k, &v, &kv_cache, &attention_metadata).unwrap();
+        let result = flash_attention.forward(&q, &k, &v, &kv_cache, &attention_metadata);
 
-        // result.unwrap();
-        // assert!(result.is_ok());
+        assert!(result.is_ok());
 
-        // let output = result.unwrap();
+        let output = result.unwrap();
 
-        // // All elements are strictly positive
-        // assert!(!output
-        //     .eq(0.)
-        //     .unwrap()
-        //     .flatten_all()
-        //     .unwrap()
-        //     .to_vec1::<u8>()
-        //     .unwrap()
-        //     .iter()
-        //     .any(|&x| x == 1));
+        // All elements are strictly positive
+        assert!(!output
+            .eq(0.)
+            .unwrap()
+            .flatten_all()
+            .unwrap()
+            .to_vec1::<u8>()
+            .unwrap()
+            .iter()
+            .any(|&x| x == 1));
     }
 
     #[test]
