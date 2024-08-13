@@ -830,11 +830,6 @@ mod tests {
         });
         token_generated += 10;
 
-        let next_tokens = tokens
-            .iter()
-            .map(|ts| *ts.last().unwrap())
-            .collect::<Vec<_>>();
-
         // round division
         let total_num_blocks_per_sequence =
             ((token_size_allocation + block_size - 1) / block_size) as i64;
@@ -935,7 +930,6 @@ mod tests {
                 .squeeze(0)?;
 
             let mut new_active_indices = Vec::new();
-            next_tokens = Vec::new();
             for (idx, &i) in active_indices.iter().enumerate() {
                 let next_token = logits_processors[i]
                     .sample(&logits.i(idx).unwrap())
@@ -945,7 +939,6 @@ mod tests {
                 }
 
                 tokens[i].push(next_token);
-                next_tokens.push(next_token);
 
                 if Some(next_token) != eos_token_id {
                     new_active_indices.push(i);
