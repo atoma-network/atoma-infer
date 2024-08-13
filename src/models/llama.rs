@@ -830,7 +830,7 @@ mod tests {
         });
         token_generated += 10;
 
-        let mut next_tokens = tokens
+        let next_tokens = tokens
             .iter()
             .map(|ts| *ts.last().unwrap())
             .collect::<Vec<_>>();
