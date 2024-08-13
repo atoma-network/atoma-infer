@@ -2,7 +2,7 @@
 // The cuda build time is very long so one can set the ATOMA_FLASH_ATTN_BUILD_DIR environment
 // variable in order to cache the compiled artifacts and avoid recompiling too often.
 use anyhow::{Context, Result};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 const KERNEL_FILES: [&str; 66] = [
     "kernels/cache_manager.cu",
@@ -110,11 +110,11 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn compile_cuda_files(build_dir: &PathBuf) -> Result<()> {
+fn compile_cuda_files(build_dir: &Path) -> Result<()> {
     let kernels: Vec<_> = KERNEL_FILES.iter().map(|&s| s.to_string()).collect();
     let builder = bindgen_cuda::Builder::default()
         .kernel_paths(kernels)
-        .out_dir(build_dir.clone())
+        .out_dir(build_dir.to_path_buf())
         .arg("-std=c++17")
         .arg("-O3")
         .arg("-Icutlass/include")
