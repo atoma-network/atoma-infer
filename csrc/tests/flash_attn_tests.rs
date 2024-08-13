@@ -208,18 +208,8 @@ fn flash_attn_kv_cache() -> Result<()> {
         let q = q.transpose(1, 2)?;
         let k = k.transpose(1, 2)?;
         let v = v.transpose(1, 2)?;
-        csrc::flash_attn_kv_cache_full(
-            &q,
-            &k,
-            &v,
-            None,
-            0.5,
-            None,
-            Some(&seqlens_k),
-            None,
-            false,
-        )?
-        .transpose(1, 2)?
+        csrc::flash_attn_kv_cache_full(&q, &k, &v, None, 0.5, None, Some(&seqlens_k), None, false)?
+            .transpose(1, 2)?
     };
     let ys = ys.to_dtype(DType::F32)?;
 
