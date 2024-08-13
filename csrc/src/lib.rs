@@ -202,7 +202,7 @@ impl FlashAttention {
         } else {
             0
         };
-        if seqlen_q == 1 && !self.alibi_slopes.is_some() {
+        if seqlen_q == 1 && self.alibi_slopes.is_none() {
             is_causal = 0;
         }
 

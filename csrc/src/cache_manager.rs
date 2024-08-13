@@ -41,7 +41,7 @@ pub fn swap_blocks(
                     src_offset: (*src_block as usize) * block_size_in_bytes,
                     dst_offset: (*dst_block as usize) * block_size_in_bytes,
                 };
-                dst.inplace_op2(&src, &swap_op)?;
+                dst.inplace_op2(src, &swap_op)?;
             }
         }
         (Device::Cpu, Device::Cuda(_)) => {
@@ -77,20 +77,18 @@ pub fn swap_blocks(
             let src_slice = match &*src {
                 candle_core::Storage::Cuda(src_c) => match &src_c.slice {
                     CudaStorageSlice::BF16(src_c) => unsafe {
-                        let src_c = src_c.transmute::<u8>(src_c.num_bytes()).ok_or_else(|| {
+                        src_c.transmute::<u8>(src_c.num_bytes()).ok_or_else(|| {
                             candle_core::Error::Cuda(
                                 "swap_blocks: unable to transmute src_c".to_string().into(),
                             )
-                        })?;
-                        src_c
+                        })?
                     },
                     CudaStorageSlice::F16(src_c) => unsafe {
-                        let src_c = src_c.transmute::<u8>(src_c.num_bytes()).ok_or_else(|| {
+                        src_c.transmute::<u8>(src_c.num_bytes()).ok_or_else(|| {
                             candle_core::Error::Cuda(
                                 "swap_blocks: unable to transmute src_c".to_string().into(),
                             )
-                        })?;
-                        src_c
+                        })?
                     },
                     _ => {
                         candle_core::bail!(
@@ -114,7 +112,7 @@ pub fn swap_blocks(
                 let dst_offset = (*dst_block as usize) * block_size_in_bytes;
                 let swap_block_gpu_to_cpu_op = SwapBlockGpuToCpuOp {
                     src_slice: src_slice.slice(src_offset..src_offset + block_size_in_bytes),
-                    cuda_device: src_device,
+                    cuda_device: &src_device,
                     block_size_in_bytes,
                     dst_offset,
                 };
@@ -142,9 +140,13 @@ pub fn swap_blocks(
 ///  * `value_caches` - A vector of `Tensor`s to copy the blocks to.
 ///  * `block_mapping` - A `Tensor` of shape `[num_pairs, 2]` that maps the block indices
 ///  *  to be copied, where `num_pairs` is the number of block pairs to be copied.
+/// 
+/// # Safety 
+/// 
+/// Unsafe due to dangling CUDA pointers
 pub unsafe fn copy_blocks(
-    key_caches: &Vec<&mut Tensor>,
-    value_caches: &Vec<&mut Tensor>,
+    key_caches: &[&mut Tensor],
+    value_caches: &[&mut Tensor],
     block_mapping: Tensor,
 ) -> Result<()> {
     match (key_caches[0].dtype(), value_caches[0].dtype()) {
@@ -163,8 +165,8 @@ pub unsafe fn copy_blocks(
 unsafe fn copy_blocks_t<
     T: candle_core::cuda_backend::CudaDType + candle_core::cuda_backend::cudarc::driver::DeviceRepr,
 >(
-    key_caches: &Vec<&mut Tensor>,
-    value_caches: &Vec<&mut Tensor>,
+    key_caches: &[&mut Tensor],
+    value_caches: &[&mut Tensor],
     block_mapping: Tensor,
 ) -> Result<()> {
     let num_layers = key_caches.len();
@@ -241,7 +243,7 @@ unsafe fn copy_blocks_t<
     };
     let num_pairs = block_mapping.dims()[0];
 
-    if &[num_pairs, 2] != block_mapping.shape().dims() {
+    if [num_pairs, 2] != block_mapping.shape().dims() {
         candle_core::bail!("block_mapping must have shape [num_pairs, 2]")
     }
 
