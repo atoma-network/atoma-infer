@@ -716,19 +716,6 @@ mod tests {
         let max_tokens_len = tokens.iter().map(|ts| ts.len()).max().unwrap();
         let token_size_allocation = ((max_tokens_len + 64 + 16) / 16) * 16;
 
-        println!("tokens: {tokens:?}");
-        println!(
-            "input: {:?}",
-            tokens.clone().into_iter().flatten().collect::<Vec<_>>()
-        );
-        println!(
-            "input_positions: {:?}",
-            tokens
-                .iter()
-                .flat_map(|ts| (0..(ts.len() as i64)))
-                .collect::<Vec<_>>()
-        );
-
         // prefill forward pass
         let input_positions = Tensor::from_vec(
             tokens
@@ -963,7 +950,6 @@ mod tests {
                 if Some(next_token) != eos_token_id {
                     new_active_indices.push(i);
                 } else {
-                    println!("sequence finished for id = {i}");
                     finished_sequences.push(tokens[i].clone());
                 }
             }
