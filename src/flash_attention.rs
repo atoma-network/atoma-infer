@@ -94,30 +94,32 @@ impl FlashAttentionMetadata {
         max_query_length: usize,
         max_decoding_sequence_length: usize,
         max_prefill_sequence_length: usize,
+        num_prefill_sequences: usize,
         sequence_start_locations: Tensor,
         sequence_lengths: Tensor,
         block_table: Tensor,
+        prefix_caching: bool,
     ) -> Result<Self> {
-        let prefill_block_tables = if num_prefill_tokens > 0 {
+        let prefill_block_tables = if prefix_caching && num_prefill_tokens > 0 {
             Some(block_table.i(..num_prefill_tokens)?)
         } else {
             None
         };
-        let decoding_block_tables = if num_decoding_tokens > 0 {
+        let decoding_block_tables = if prefix_caching && num_decoding_tokens > 0 {
             Some(block_table.i(num_prefill_tokens..)?)
         } else {
-            None
+            Some(block_table)
         };
         let prefill_metadata = if num_prefill_tokens > 0 {
             Some(FlashAttentionPrefillMetadata {
                 block_tables: prefill_block_tables,
                 max_query_length: Some(max_query_length),
                 max_prefill_sequence_length,
-                query_start_locations: Some(query_start_locations.i(..num_prefill_tokens)?),
+                query_start_locations: Some(query_start_locations.i(..num_prefill_sequences)?),
                 sequence_start_locations: Some(
-                    sequence_start_locations.i(..num_prefill_tokens + 1)?,
+                    sequence_start_locations.i(..num_prefill_sequences + 1)?,
                 ), // cumulative sequence lengths, so has size `batch_size + 1`
-                sequence_lengths: Some(sequence_lengths.i(..num_prefill_tokens)?),
+                sequence_lengths: Some(sequence_lengths.i(..num_prefill_sequences)?),
             })
         } else {
             None
@@ -126,7 +128,7 @@ impl FlashAttentionMetadata {
             Some(FlashAttentionDecodingMetadata {
                 block_tables: decoding_block_tables,
                 max_decoding_sequence_length,
-                sequence_lengths: Some(sequence_lengths.i(num_prefill_tokens..)?),
+                sequence_lengths: Some(sequence_lengths.i(num_prefill_sequences..)?),
             })
         } else {
             None
