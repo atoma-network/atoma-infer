@@ -269,7 +269,7 @@ impl CausalSelfAttention {
                 dtype,
                 device.clone(),
             )?,
-            cos_sin_cache: Cache::new(&cfg, device, dtype)?,
+            cos_sin_cache: Cache::new(cfg, device, dtype)?,
         })
     }
 }
@@ -323,7 +323,7 @@ impl Block {
     ) -> Result<Tensor> {
         let _enter = self.span.enter();
         let residual = x;
-        let x = self.rms_1.forward(&x)?;
+        let x = self.rms_1.forward(x)?;
         let x = (self
             .attn
             .forward(&x, input_positions, cache, attention_metadata)?
@@ -382,7 +382,7 @@ impl Llama {
         x: &Tensor,
         input_positions: &Tensor,
         selected_token_indices: &Tensor,
-        kv_caches: &Vec<&mut Tensor>,
+        kv_caches: &[&mut Tensor],
         attention_metadata: FlashAttentionMetadata,
     ) -> Result<Tensor> {
         if x.dims()[0] != 1 {
@@ -393,7 +393,7 @@ impl Llama {
         }
         let mut x = self.wte.forward(x)?;
         for (i, block) in self.blocks.iter_mut().enumerate() {
-            x = block.forward(&x, input_positions, &kv_caches[i], &attention_metadata)?;
+            x = block.forward(&x, input_positions, kv_caches[i], &attention_metadata)?;
         }
         let x = self.ln_f.forward(&x)?;
         let x = x.index_select(selected_token_indices, 1)?.contiguous()?;

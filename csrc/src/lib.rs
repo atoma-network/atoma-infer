@@ -2211,7 +2211,7 @@ pub(crate) mod utils {
             if !is_split_eligible(num_splits) {
                 continue;
             }
-            if efficiency[(num_splits - 1) as usize] >= 0.85 * max_efficiency {
+            if efficiency[num_splits - 1] >= 0.85 * max_efficiency {
                 return num_splits;
             }
         }
