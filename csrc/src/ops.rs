@@ -223,14 +223,14 @@ pub(crate) mod utils {
     /// Cast a mutable slice of type T to a mutable slice of u8
     pub(crate) fn cast_slice_mut<T>(slice: &mut [T]) -> &mut [u8] {
         let ptr = slice.as_mut_ptr() as *mut u8;
-        let len = slice.len() * std::mem::size_of::<T>();
+        let len = std::mem::size_of_val(slice);
         unsafe { std::slice::from_raw_parts_mut(ptr, len) }
     }
 
     /// Cast a slice of type T to a slice of u8
     pub(crate) fn cast_slice<T>(slice: &[T]) -> &[u8] {
         let ptr = slice.as_ptr() as *const u8;
-        let len = slice.len() * std::mem::size_of::<T>();
+        let len = std::mem::size_of_val(slice);
         unsafe { std::slice::from_raw_parts(ptr, len) }
     }
 }

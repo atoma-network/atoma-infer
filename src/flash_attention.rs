@@ -84,6 +84,7 @@ pub struct FlashAttentionMetadata {
 
 impl FlashAttentionMetadata {
     /// Constructor
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         context_lengths: Tensor,
         slot_mapping: Tensor,
@@ -195,6 +196,7 @@ pub struct FlashAttention {
 
 impl FlashAttention {
     /// Constructor
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         num_heads: usize,
         num_kv_heads: usize,
@@ -279,7 +281,7 @@ impl FlashAttention {
         &self,
         src: &Tensor,
         dst: &mut Tensor,
-        block_mapping: &HashMap<i64, i64>,
+        block_mapping: &HashMap<u32, u32>,
     ) -> Result<()> {
         let (src_key, src_value) = self.split_kv_cache(src)?;
         let (mut dst_key, mut dst_value) = self.split_kv_cache(dst)?;
@@ -288,17 +290,17 @@ impl FlashAttention {
     }
 
     /// Initiates a copy blocks operation on the current CUDA device
-    pub fn copy_blocks(kv_caches: &mut Vec<Tensor>, block_mapping: Tensor) -> Result<()> {
+    pub fn copy_blocks(kv_caches: &mut [Tensor], block_mapping: Tensor) -> Result<()> {
         let mut key_caches = kv_caches
             .iter_mut()
             .map(|kv_cache| kv_cache.i(0)?.squeeze(0))
             .collect::<Result<Vec<_>>>()?;
-        let key_caches = key_caches.iter_mut().collect();
+        let key_caches = key_caches.iter_mut().collect::<Vec<_>>();
         let mut value_caches = kv_caches
             .iter_mut()
             .map(|kv_cache| kv_cache.i(1)?.squeeze(0))
             .collect::<Result<Vec<_>>>()?;
-        let value_caches = value_caches.iter_mut().collect();
+        let value_caches = value_caches.iter_mut().collect::<Vec<_>>();
         unsafe { copy_blocks(&key_caches, &value_caches, block_mapping) }
     }
 
@@ -354,7 +356,7 @@ impl FlashAttention {
 
         // Reshape the input keys and values and store them in the cache.
         let (k_cache, v_cache) = self.split_kv_cache(kv_cache)?;
-        reshape_and_cache_flash(&k, &v, &k_cache, &v_cache, &attention_metadata.slot_mapping)?;
+        reshape_and_cache_flash(k, v, &k_cache, &v_cache, &attention_metadata.slot_mapping)?;
 
         let num_prefill_tokens = attention_metadata.num_prefill_tokens;
         let num_decoding_tokens = attention_metadata.num_decoding_tokens;
@@ -521,7 +523,7 @@ mod tests {
     #[test]
     fn test_get_kv_cache_shape() {
         let shape = FlashAttention::get_kv_cache_shape(10, 32, 4, 64);
-        assert_eq!(shape, vec![2, 10, 8192]);
+        assert_eq!(shape, vec![2, 10, 32, 4, 64]);
     }
 
     #[test]

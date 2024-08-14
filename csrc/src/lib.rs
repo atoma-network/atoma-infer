@@ -27,6 +27,7 @@ pub struct FlashAttention {
 }
 
 impl FlashAttention {
+    #[allow(clippy::too_many_arguments)]
     fn cuda_fwd_t<
         T: candle_core::cuda_backend::CudaDType
             + candle_core::cuda_backend::cudarc::driver::DeviceRepr,
@@ -202,7 +203,7 @@ impl FlashAttention {
         } else {
             0
         };
-        if seqlen_q == 1 && !self.alibi_slopes.is_some() {
+        if seqlen_q == 1 && self.alibi_slopes.is_none() {
             is_causal = 0;
         }
 
@@ -528,6 +529,7 @@ pub fn flash_attn_alibi_windowed(
 /// softmax output before the softmax is applied. Softcap is used in Grok and Gemma2 models.
 ///
 /// The resulting tensor has dimensions `(batch, seq_len_q, num_heads_q, head_size)`.
+#[allow(clippy::too_many_arguments)]
 pub fn flash_attn_alibi_windowed_with_softcap(
     q: &Tensor,
     k: &Tensor,
@@ -581,6 +583,7 @@ struct FlashAttentionVarLen {
 }
 
 impl FlashAttentionVarLen {
+    #[allow(clippy::too_many_arguments)]
     fn cuda_fwd_t<
         T: candle_core::cuda_backend::CudaDType
             + candle_core::cuda_backend::cudarc::driver::DeviceRepr,
@@ -757,7 +760,7 @@ impl FlashAttentionVarLen {
             candle_core::bail!("page_block_size must be a multiple of 16, got {page_block_size}")
         }
 
-        if batch_size <= 0 {
+        if batch_size == 0 {
             candle_core::bail!("batch_size must be > 0")
         }
         if head_size_og > 256 {
@@ -1472,6 +1475,7 @@ struct FlashAttentionKvCache {
 }
 
 impl FlashAttentionKvCache {
+    #[allow(clippy::too_many_arguments)]
     fn cuda_fwd_t<
         T: candle_core::cuda_backend::CudaDType
             + candle_core::cuda_backend::cudarc::driver::DeviceRepr,
@@ -1589,7 +1593,7 @@ impl FlashAttentionKvCache {
             }
         }
 
-        if batch_size <= 0 {
+        if batch_size == 0 {
             candle_core::bail!("batch_size must be > 0")
         }
         if head_size_og > 256 {
@@ -1738,7 +1742,7 @@ impl FlashAttentionKvCache {
         let seqlen_k_rounded = utils::round_multiple(seqlens_k, 128);
 
         let cu_seqlens_k_ptr = if let Some(seqlens_k) = &self.seqlens_k {
-            if seqlens_k.dims() != &[batch_size] {
+            if seqlens_k.dims() != [batch_size] {
                 candle_core::bail!(
                     "shape mismatch of seqlens_k (got {:?}) expected {:?})",
                     seqlens_k.dims(),
@@ -2181,7 +2185,7 @@ pub(crate) mod utils {
 
         let max_splits = max_splits.min(num_sms).min(num_n_blocks);
         let mut max_efficiency = 0.0;
-        let mut efficiency = Vec::with_capacity(max_splits as usize);
+        let mut efficiency = Vec::with_capacity(max_splits);
 
         let ceil_div = |a: usize, b: usize| -> usize { (a + b - 1) / b };
 
@@ -2207,7 +2211,7 @@ pub(crate) mod utils {
             if !is_split_eligible(num_splits) {
                 continue;
             }
-            if efficiency[(num_splits - 1) as usize] >= 0.85 * max_efficiency {
+            if efficiency[num_splits - 1] >= 0.85 * max_efficiency {
                 return num_splits;
             }
         }
