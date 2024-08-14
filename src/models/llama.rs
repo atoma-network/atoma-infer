@@ -508,7 +508,7 @@ mod tests {
         .take(config.num_hidden_layers)
         .collect::<Result<Vec<_>>>()?;
 
-        let kv_cache = kv_cache.iter_mut().collect();
+        let kv_cache = kv_cache.iter_mut().collect::<Vec<_>>();
 
         // prefill forward pass
         let input_positions = Tensor::arange(0, tokens.len() as i64, &device)?.unsqueeze(0)?;
