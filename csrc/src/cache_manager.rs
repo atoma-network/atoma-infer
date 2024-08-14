@@ -10,7 +10,7 @@ use candle_core::{
 use half::{bf16, f16};
 use std::collections::HashMap;
 
-/// Swaps blocks from `src` to `dst` tensors, through the block_mapping.
+/// Swaps blocks from `src` to `dst` tensors, using the block_mapping.
 /// Both `src` and `dst` tensors must have the same dtype, and either be on
 /// the same cuda device, or one in either cpu and the other in a cuda device.
 /// Moreover, both `src` and `dst` have shape `[num_blocks, block_size, num_kv_heads, head_size]`,
@@ -18,7 +18,7 @@ use std::collections::HashMap;
 pub fn swap_blocks(
     src: &Tensor,
     dst: &mut Tensor,
-    block_mapping: &HashMap<i64, i64>,
+    block_mapping: &HashMap<u32, u32>,
 ) -> Result<()> {
     let t_size_in_bytes = src.dtype().size_in_bytes();
     // NOTE: the rhs of * should be equivalent to src.i(0)?.elem_count()
@@ -114,7 +114,7 @@ pub fn swap_blocks(
                 let dst_offset = (*dst_block as usize) * block_size_in_bytes;
                 let swap_block_gpu_to_cpu_op = SwapBlockGpuToCpuOp {
                     src_slice: src_slice.slice(src_offset..src_offset + block_size_in_bytes),
-                    cuda_device: src_device,
+                    cuda_device: &src_device,
                     block_size_in_bytes,
                     dst_offset,
                 };
@@ -141,7 +141,8 @@ pub fn swap_blocks(
 ///  * `key_caches` - A vector of `Tensor`s to copy the blocks to.
 ///  * `value_caches` - A vector of `Tensor`s to copy the blocks to.
 ///  * `block_mapping` - A `Tensor` of shape `[num_pairs, 2]` that maps the block indices
-///  *  to be copied, where `num_pairs` is the number of block pairs to be copied.
+///  *  to be copied, where `num_pairs` is the number of block pairs to be copied. This
+///      tensor has dtype `u32`.
 pub unsafe fn copy_blocks(
     key_caches: &Vec<&mut Tensor>,
     value_caches: &Vec<&mut Tensor>,
@@ -248,7 +249,7 @@ unsafe fn copy_blocks_t<
     let (block_mapping_storage, block_mapping_layout) = block_mapping.storage_and_layout();
     let block_mapping_ptr = match &*block_mapping_storage {
         candle_core::Storage::Cuda(c) => {
-            let cuda_slice = c.as_cuda_slice::<i64>()?;
+            let cuda_slice = c.as_cuda_slice::<u32>()?;
             let cuda_slice = cuda_slice.slice(block_mapping_layout.start_offset()..);
             *cuda_slice.device_ptr() as *const core::ffi::c_void
         }
