@@ -529,6 +529,7 @@ pub fn flash_attn_alibi_windowed(
 /// softmax output before the softmax is applied. Softcap is used in Grok and Gemma2 models.
 ///
 /// The resulting tensor has dimensions `(batch, seq_len_q, num_heads_q, head_size)`.
+#[allow(clippy::too_many_arguments)]
 pub fn flash_attn_alibi_windowed_with_softcap(
     q: &Tensor,
     k: &Tensor,
@@ -1741,7 +1742,7 @@ impl FlashAttentionKvCache {
         let seqlen_k_rounded = utils::round_multiple(seqlens_k, 128);
 
         let cu_seqlens_k_ptr = if let Some(seqlens_k) = &self.seqlens_k {
-            if seqlens_k.dims() != &[batch_size] {
+            if seqlens_k.dims() != [batch_size] {
                 candle_core::bail!(
                     "shape mismatch of seqlens_k (got {:?}) expected {:?})",
                     seqlens_k.dims(),
@@ -2184,7 +2185,7 @@ pub(crate) mod utils {
 
         let max_splits = max_splits.min(num_sms).min(num_n_blocks);
         let mut max_efficiency = 0.0;
-        let mut efficiency = Vec::with_capacity(max_splits as usize);
+        let mut efficiency = Vec::with_capacity(max_splits);
 
         let ceil_div = |a: usize, b: usize| -> usize { (a + b - 1) / b };
 

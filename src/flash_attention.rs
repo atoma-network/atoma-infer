@@ -291,12 +291,12 @@ impl FlashAttention {
             .iter_mut()
             .map(|kv_cache| kv_cache.i(0)?.squeeze(0))
             .collect::<Result<Vec<_>>>()?;
-        let key_caches = key_caches.iter_mut().collect();
+        let key_caches = key_caches.iter_mut().collect::<Vec<_>>();
         let mut value_caches = kv_caches
             .iter_mut()
             .map(|kv_cache| kv_cache.i(1)?.squeeze(0))
             .collect::<Result<Vec<_>>>()?;
-        let value_caches = value_caches.iter_mut().collect();
+        let value_caches = value_caches.iter_mut().collect::<Vec<_>>();
         unsafe { copy_blocks(&key_caches, &value_caches, block_mapping) }
     }
 

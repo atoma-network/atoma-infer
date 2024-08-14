@@ -256,7 +256,7 @@ impl CausalSelfAttention {
             o_proj,
             num_attention_heads: cfg.num_attention_heads,
             num_key_value_heads: cfg.num_key_value_heads,
-            head_dim: head_dim,
+            head_dim,
             span,
             span_rot,
             attention: FlashAttention::new(

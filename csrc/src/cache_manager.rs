@@ -112,7 +112,7 @@ pub fn swap_blocks(
                 let dst_offset = (*dst_block as usize) * block_size_in_bytes;
                 let swap_block_gpu_to_cpu_op = SwapBlockGpuToCpuOp {
                     src_slice: src_slice.slice(src_offset..src_offset + block_size_in_bytes),
-                    cuda_device: &src_device,
+                    cuda_device: src_device,
                     block_size_in_bytes,
                     dst_offset,
                 };
@@ -217,8 +217,8 @@ unsafe fn copy_blocks_t<
         value_cache_ptrs.push(value_cache_ptr);
     }
 
-    let key_cache_ptrs = Tensor::from_vec(key_cache_ptrs, (num_layers,), &device)?;
-    let value_cache_ptrs = Tensor::from_vec(value_cache_ptrs, (num_layers,), &device)?;
+    let key_cache_ptrs = Tensor::from_vec(key_cache_ptrs, (num_layers,), device)?;
+    let value_cache_ptrs = Tensor::from_vec(value_cache_ptrs, (num_layers,), device)?;
     let key_cache_ptrs = {
         let (key_cache_ptrs_s, key_cache_ptrs_l) = key_cache_ptrs.storage_and_layout();
         match &*key_cache_ptrs_s {
