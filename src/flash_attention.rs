@@ -523,7 +523,7 @@ mod tests {
     #[test]
     fn test_get_kv_cache_shape() {
         let shape = FlashAttention::get_kv_cache_shape(10, 32, 4, 64);
-        assert_eq!(shape, vec![2, 10, 8192]);
+        assert_eq!(shape, vec![2, 10, 32, 4, 64]);
     }
 
     #[test]
