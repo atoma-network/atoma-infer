@@ -112,7 +112,7 @@ pub fn swap_blocks(
                 let dst_offset = (*dst_block as usize) * block_size_in_bytes;
                 let swap_block_gpu_to_cpu_op = SwapBlockGpuToCpuOp {
                     src_slice: src_slice.slice(src_offset..src_offset + block_size_in_bytes),
-                    cuda_device: &src_device,
+                    cuda_device: src_device,
                     block_size_in_bytes,
                     dst_offset,
                 };
