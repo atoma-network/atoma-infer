@@ -27,6 +27,7 @@ pub struct FlashAttention {
 }
 
 impl FlashAttention {
+    #[allow(clippy::too_many_arguments)]
     fn cuda_fwd_t<
         T: candle_core::cuda_backend::CudaDType
             + candle_core::cuda_backend::cudarc::driver::DeviceRepr,
@@ -581,6 +582,7 @@ struct FlashAttentionVarLen {
 }
 
 impl FlashAttentionVarLen {
+    #[allow(clippy::too_many_arguments)]
     fn cuda_fwd_t<
         T: candle_core::cuda_backend::CudaDType
             + candle_core::cuda_backend::cudarc::driver::DeviceRepr,
@@ -757,7 +759,7 @@ impl FlashAttentionVarLen {
             candle_core::bail!("page_block_size must be a multiple of 16, got {page_block_size}")
         }
 
-        if batch_size <= 0 {
+        if batch_size == 0 {
             candle_core::bail!("batch_size must be > 0")
         }
         if head_size_og > 256 {
@@ -1472,6 +1474,7 @@ struct FlashAttentionKvCache {
 }
 
 impl FlashAttentionKvCache {
+    #[allow(clippy::too_many_arguments)]
     fn cuda_fwd_t<
         T: candle_core::cuda_backend::CudaDType
             + candle_core::cuda_backend::cudarc::driver::DeviceRepr,
@@ -1589,7 +1592,7 @@ impl FlashAttentionKvCache {
             }
         }
 
-        if batch_size <= 0 {
+        if batch_size == 0 {
             candle_core::bail!("batch_size must be > 0")
         }
         if head_size_og > 256 {
