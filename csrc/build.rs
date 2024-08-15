@@ -105,7 +105,11 @@ fn main() -> Result<()> {
     println!("cargo:rustc-link-search={}", build_dir.display());
     println!("cargo:rustc-link-lib=static=flashattention");
     println!("cargo:rustc-link-lib=dylib=cudart");
-    println!("cargo:rustc-link-lib=dylib=stdc++");
+    if cfg!(target_os = "windows") {
+        println!("cargo:rustc-link-lib=dylib=msvcprt");
+    } else {
+        println!("cargo:rustc-link-lib=dylib=stdc++");
+    }
 
     Ok(())
 }
@@ -129,7 +133,12 @@ fn compile_cuda_files(build_dir: &PathBuf) -> Result<()> {
 
     println!("cargo:info={builder:?}");
 
-    let out_file = build_dir.join("libflashattention.a");
+    let out_file = if cfg!(target_os = "windows") {
+        build_dir.join("flashattention.lib")
+    } else {
+        build_dir.join("libflashattention.a")
+    };
+
     builder.build_lib(&out_file);
 
     Ok(())
