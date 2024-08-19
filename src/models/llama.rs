@@ -213,8 +213,8 @@ impl CausalSelfAttention {
         let k = self.apply_rotary_embed(&k, input_positions)?;
 
         // transpose the matrices back to [sequence_length, num_heads, head_dim]
-        let q = q.transpose(1, 2)?.squeeze(0)?;
-        let k = k.transpose(1, 2)?.squeeze(0)?;
+        let q = q.squeeze(0)?;
+        let k = k.squeeze(0)?;
 
         let o = self
             .attention
