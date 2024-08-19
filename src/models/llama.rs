@@ -117,8 +117,8 @@ impl Cache {
             .to_dtype(DType::F32)?
             .reshape((MAX_SEQ_LEN, 1))?
             .matmul(&theta.reshape((1, theta.elem_count()))?)?;
-        let cos = idx_theta.cos()?.to_dtype(dtype)?;
-        let sin = idx_theta.sin()?.to_dtype(dtype)?;
+        let cos = idx_theta.cos()?.to_dtype(dtype)?.transpose(0, 1)?;
+        let sin = idx_theta.sin()?.to_dtype(dtype)?.transpose(0, 1)?;
 
         Ok(Self { cos, sin })
     }
@@ -165,11 +165,11 @@ impl CausalSelfAttention {
         let cos = self
             .cos_sin_cache
             .cos
-            .index_select(&input_positions.flatten(0, 1)?, 0)?;
+            .index_select(&input_positions.flatten(0, 1)?, 1)?;
         let sin = self
             .cos_sin_cache
             .sin
-            .index_select(&input_positions.flatten(0, 1)?, 0)?;
+            .index_select(&input_positions.flatten(0, 1)?, 1)?;
 
         candle_nn::rotary_emb::rope(x, &cos, &sin)
     }
@@ -200,32 +200,21 @@ impl CausalSelfAttention {
                 num_total_tokens,
                 self.num_attention_heads,
                 self.head_dim,
-            ))?
-            .transpose(1, 2)?
-            .contiguous()?;
+            ))?;
         let k = k
             .reshape((
                 batch_size,
                 num_total_tokens,
                 self.num_key_value_heads,
                 self.head_dim,
-            ))?
-            .transpose(1, 2)?
-            .contiguous()?;
-        let v = v.reshape((
-            batch_size,
-            num_total_tokens,
-            self.num_key_value_heads,
-            self.head_dim,
-        ))?;
+            ))?;
 
         let q = self.apply_rotary_embed(&q, input_positions)?;
         let k = self.apply_rotary_embed(&k, input_positions)?;
 
         // transpose the matrices back to [sequence_length, num_heads, head_dim]
-        let q = q.transpose(1, 2)?.squeeze(0)?.contiguous()?;
-        let k = k.transpose(1, 2)?.squeeze(0)?.contiguous()?;
-        let v = v.squeeze(0)?;
+        let q = q.transpose(1, 2)?.squeeze(0)?;
+        let k = k.transpose(1, 2)?.squeeze(0)?;
 
         let o = self
             .attention
