@@ -55,7 +55,6 @@ impl FlashAttention {
         }
 
         // Faster to transpose q from (b, 1, (nheads_kv ngroups), d) to (b, ngroups, nheads_kv, d) in this case
-
         let q = q.as_cuda_slice::<T>()?;
         let k = k.as_cuda_slice::<T>()?;
         let v = v.as_cuda_slice::<T>()?;
@@ -1618,13 +1617,12 @@ impl FlashAttentionKvCache {
             candle_core::bail!("page_block_size must be a multiple of 16, got {page_block_size}")
         }
 
-        let _seqlenq_ngroups_swapped = seqlen_q == 1
+        let seqlenq_ngroups_swapped = seqlen_q == 1
             && num_heads > num_heads_k
             && self.window_size_left.is_none()
             && self.window_size_right.is_none()
             && head_size_og % 8 == 0
             && self.alibi_slopes.is_none();
-        let seqlenq_ngroups_swapped = false; // TODO: remove this
         let (q_l, out_l, out_shape, seqlen_q, num_heads) = if seqlenq_ngroups_swapped {
             let ngroups = num_heads / num_heads_k;
             let new_shape = Shape::from((batch_size, ngroups, num_heads_k, head_size_og));
