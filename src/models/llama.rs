@@ -691,23 +691,35 @@ mod tests {
         // prefill forward pass
         let input_positions = Tensor::arange(0, tokens.len() as i64, &device)?.unsqueeze(0)?;
         let input = Tensor::new(&tokens[..], &device)?.unsqueeze(0)?;
+
+        let context_lengths = Tensor::from_vec(vec![tokens.len() as u32], (1,), &device)?;
+        let slot_mapping = Tensor::arange(0, tokens.len() as i64, &device)?;
+        let query_start_locations = Tensor::from_vec(vec![0, tokens.len() as u32], (2,), &device)?;
+        let sequence_start_locations =
+            Tensor::from_vec(vec![0, tokens.len() as u32], (2,), &device)?;
+        let sequence_lengths = Tensor::from_vec(vec![tokens.len() as u32], (1,), &device)?;
+        let block_tables = Tensor::new::<&[u32; 0]>(&[], &device)?;
+
+        let num_prefill_tokens = tokens.len();
+        let num_decoding_tokens = 0;
+        let max_query_length = tokens.len();
+        let max_decoding_sequence_length = 0;
+        let max_prefill_sequence_length = tokens.len();
+        let num_prefill_sequences = 1;
+
         let attention_metadata = FlashAttentionMetadata::new(
-            Tensor::from_vec(vec![tokens.len() as u32], (1,), &device)?,
-            Tensor::arange(0, tokens.len() as i64, &device)?,
-            Tensor::from_vec(
-                vec![0, tokens.len() as u32],
-                (2,),
-                &device,
-            )?,
-            tokens.len(),
-            0,
-            tokens.len(),
-            0,
-            tokens.len(),
-            1,
-            Tensor::from_vec(vec![0, tokens.len() as u32], (2,), &device)?,
-            Tensor::from_vec(vec![tokens.len() as u32], (1,), &device)?,
-            Tensor::new::<&[u32; 0]>(&[], &device)?,
+            context_lengths,
+            slot_mapping,
+            query_start_locations,
+            num_prefill_tokens,
+            num_decoding_tokens,
+            max_query_length,
+            max_decoding_sequence_length,
+            max_prefill_sequence_length,
+            num_prefill_sequences,
+            sequence_start_locations,
+            sequence_lengths,
+            block_tables,
             false,
         )
         .expect("Failed to create `FlashAttentionMetadata` instance");
@@ -735,23 +747,38 @@ mod tests {
             let input_positions = Tensor::new(&[tokens.len() as i64 - 1], &device)?.unsqueeze(0)?;
             let selected_token_indices = Tensor::new(&[0u32], &device)?;
             let num_blocks = (tokens.len() / block_size) as i64 + 1;
+
+            let context_lengths = Tensor::new(&[0u32], &device)?;
+            let slot_mapping = Tensor::new(&[tokens.len() as i64 - 1], &device)?;
+            let query_start_locations = Tensor::new(&[0u32, 1], &device)?;
+            let sequence_start_locations = Tensor::new(&[0, tokens.len() as u32], &device)?;
+            let sequence_lengths = Tensor::new(&[tokens.len() as u32], &device)?;
+            let block_tables = Tensor::arange(0, num_blocks, &device)?
+            .to_dtype(DType::U32)?
+            .reshape((1, num_blocks as usize))?;
+
+            let num_prefill_tokens = 0;
+            let num_decoding_tokens = 1;
+            let max_query_length = 1;
+            let max_decoding_sequence_length = 1;
+            let max_prefill_sequence_length = 0;
+            let num_prefill_sequences = 0;
+
             let attention_metadata = FlashAttentionMetadata::new(
-                Tensor::new(&[0u32], &device)?,
-                Tensor::new(&[tokens.len() as i64 - 1], &device)?,
-                Tensor::new(&[0u32, 1], &device)?,
+                context_lengths,
+                slot_mapping,
+                query_start_locations,
                 0,
                 1,
                 1,
                 1,
                 0,
                 0,
-                Tensor::new(&[0, tokens.len() as u32], &device)?,
-                Tensor::new(&[tokens.len() as u32], &device)?,
-                Tensor::arange(0, num_blocks, &device)?
-                    .to_dtype(DType::U32)?
-                    .reshape((1, num_blocks as usize))?,
-                false,
-            ).expect("Failed to create the `FlashAttentionMetadata` instance");
+                sequence_start_locations,
+                sequence_lengths,
+                block_tables,
+            )
+            .expect("Failed to create the `FlashAttentionMetadata` instance");
             let logits = llama_model
                 .forward(
                     &input,
