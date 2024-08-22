@@ -616,6 +616,182 @@ mod tests {
 
     #[test]
     #[serial]
+    fn test_llama_model_long() -> Result<()> {
+        let prompt = "The capital of France is ".to_string();
+
+        let dtype = DType::BF16;
+        let device = Device::new_cuda(0).unwrap();
+        let model_id = "TinyLlama/TinyLlama-1.1B-Chat-v1.0".to_string();
+        let revision = "main".to_string();
+        let api = Api::new().expect("Failed to create the HF API");
+
+        println!("loading the model weights from {model_id}");
+        let api = api.repo(Repo::with_revision(model_id, RepoType::Model, revision));
+
+        let tokenizer_filename = api
+            .get("tokenizer.json")
+            .expect("Failed to get tokenizer.json");
+        let config_filename = api.get("config.json").expect("Failed to get config.json");
+        let config: LlamaConfig = serde_json::from_slice(
+            &std::fs::read(config_filename).expect("Failed to read config.json"),
+        )
+        .expect("Failed to deserialize config.json");
+        let config = config.into_config();
+
+        let filenames = vec![api
+            .get("model.safetensors")
+            .expect("Failed to get model.safetensors")];
+        let mut llama_model = {
+            let vb = unsafe { VarBuilder::from_mmaped_safetensors(&filenames, dtype, &device)? };
+            Llama::load(vb, &config, dtype, &device).expect("Failed to load the model")
+        };
+        let tokenizer =
+            Tokenizer::from_file(tokenizer_filename).expect("Failed to load the tokenizer");
+        let eos_token_id = config
+            .eos_token_id
+            .or_else(|| tokenizer.token_to_id(EOS_TOKEN));
+
+        let mut tokens = tokenizer
+            .encode(prompt.clone(), true)
+            .expect("Failed to encode the prompt")
+            .get_ids()
+            .to_vec();
+
+        let mut tokenizer = candle_examples::token_output_stream::TokenOutputStream::new(tokenizer);
+        println!("starting the inference loop");
+        print!("{prompt}");
+
+        let mut logits_processor = {
+            let temperature = 0.8;
+            let sampling = Sampling::All { temperature };
+            LogitsProcessor::from_sampling(42, sampling)
+        };
+
+        let sample_len = 512;
+        let start_gen = std::time::Instant::now();
+        let mut token_generated = 0;
+
+        // kv cache
+        let num_blocks = 100;
+        let block_size = 16;
+        let num_key_value_heads = config.num_key_value_heads;
+        let head_dim = config.hidden_size / config.num_attention_heads;
+        let mut kv_cache = std::iter::repeat_with(|| {
+            Tensor::zeros(
+                (2, num_blocks, block_size, num_key_value_heads, head_dim),
+                dtype,
+                &device,
+            )
+        })
+        .take(config.num_hidden_layers)
+        .collect::<Result<Vec<_>>>()?;
+
+        let kv_cache = kv_cache.iter_mut().collect::<Vec<_>>();
+
+        // prefill forward pass
+        let input_positions = Tensor::arange(0, tokens.len() as i64, &device)?.unsqueeze(0)?;
+        let input = Tensor::new(&tokens[..], &device)?.unsqueeze(0)?;
+        let attention_metadata = FlashAttentionMetadata::new(
+            Tensor::from_vec(vec![tokens.len() as u32], (1,), &device)?,
+            Tensor::arange(0, tokens.len() as i64, &device)?,
+            Tensor::from_vec(
+                vec![0, tokens.len() as u32],
+                (2,),
+                &device,
+            )?,
+            tokens.len(),
+            0,
+            tokens.len(),
+            0,
+            tokens.len(),
+            1,
+            Tensor::from_vec(vec![0, tokens.len() as u32], (2,), &device)?,
+            Tensor::from_vec(vec![tokens.len() as u32], (1,), &device)?,
+            Tensor::new(&[], &device)?,
+            false,
+        )
+        .expect("Failed to create `FlashAttentionMetadata` instance");
+        let logits = llama_model.forward(
+            &input,
+            &input_positions,
+            &Tensor::new(vec![tokens.len() as u32 - 1], &device)?,
+            &kv_cache,
+            attention_metadata,
+        )?;
+        let logits = logits.squeeze(0)?.squeeze(0)?;
+
+        let mut next_token = logits_processor.sample(&logits)?;
+        token_generated += 1;
+        tokens.push(next_token);
+
+        if let Some(t) = tokenizer.next_token(next_token)? {
+            print!("{t}");
+            std::io::stdout().flush()?;
+        }
+
+        // decoding loop
+        for _ in 1..sample_len {
+            let input = Tensor::new(&[next_token], &device)?.unsqueeze(0)?;
+            let input_positions = Tensor::new(&[tokens.len() as i64 - 1], &device)?.unsqueeze(0)?;
+            let selected_token_indices = Tensor::new(&[0u32], &device)?;
+            let num_blocks = (tokens.len() / block_size) as i64 + 1;
+            let attention_metadata = FlashAttentionMetadata::new(
+                Tensor::new(&[], &device)?,
+                Tensor::new(&[tokens.len() as i64 - 1], &device)?,
+                Tensor::new(&[1], &device)?,
+                0,
+                1,
+                1,
+                1,
+                0,
+                0,
+                Tensor::new(&[0, tokens.len() as u32], &device)?,
+                Tensor::new(&[tokens.len() as u32], &device)?,
+                Tensor::arange(0, num_blocks, &device)?
+                    .to_dtype(DType::U32)?
+                    .reshape((1, num_blocks as usize))?,
+                false,
+            );
+            let logits = llama_model
+                .forward(
+                    &input,
+                    &input_positions,
+                    &selected_token_indices,
+                    &kv_cache,
+                    attention_metadata,
+                )?
+                .squeeze(0)?
+                .squeeze(0)?;
+
+            next_token = logits_processor.sample(&logits)?;
+            token_generated += 1;
+            tokens.push(next_token);
+
+            if Some(next_token) == eos_token_id {
+                break;
+            }
+            if let Some(t) = tokenizer.next_token(next_token)? {
+                print!("{t}");
+                std::io::stdout().flush()?;
+            }
+        }
+
+        if let Some(rest) = tokenizer.decode_rest().unwrap() {
+            print!("{rest}");
+        }
+
+        let dt = start_gen.elapsed();
+        println!(
+            "\n\n{} tokens generated ({} token/s)\n",
+            token_generated,
+            (token_generated - 1) as f64 / dt.as_secs_f64(),
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
     fn test_llama_model_batch() -> Result<()> {
         let prompts = vec![
             "The capital of France is ".to_string(),
