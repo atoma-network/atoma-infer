@@ -738,7 +738,7 @@ mod tests {
             let attention_metadata = FlashAttentionMetadata::new(
                 Tensor::new(&[], &device)?,
                 Tensor::new(&[tokens.len() as i64 - 1], &device)?,
-                Tensor::new(&[1], &device)?,
+                Tensor::new(&[], &device)?,
                 0,
                 1,
                 1,
