@@ -751,7 +751,7 @@ mod tests {
                     .to_dtype(DType::U32)?
                     .reshape((1, num_blocks as usize))?,
                 false,
-            );
+            ).expect("Failed to create the `FlashAttentionMetadata` instance");
             let logits = llama_model
                 .forward(
                     &input,
