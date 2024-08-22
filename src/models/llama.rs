@@ -707,7 +707,7 @@ mod tests {
             1,
             Tensor::from_vec(vec![0, tokens.len() as u32], (2,), &device)?,
             Tensor::from_vec(vec![tokens.len() as u32], (1,), &device)?,
-            Tensor::new(&[], &device)?,
+            Tensor::new::<&[u32; 0]>(&[], &device)?,
             false,
         )
         .expect("Failed to create `FlashAttentionMetadata` instance");
