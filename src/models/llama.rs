@@ -736,9 +736,9 @@ mod tests {
             let selected_token_indices = Tensor::new(&[0u32], &device)?;
             let num_blocks = (tokens.len() / block_size) as i64 + 1;
             let attention_metadata = FlashAttentionMetadata::new(
-                Tensor::new(&[], &device)?,
+                Tensor::new(&[0u32], &device)?,
                 Tensor::new(&[tokens.len() as i64 - 1], &device)?,
-                Tensor::new(&[], &device)?,
+                Tensor::new(&[0u32, 1], &device)?,
                 0,
                 1,
                 1,
