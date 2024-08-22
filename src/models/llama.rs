@@ -617,7 +617,7 @@ mod tests {
     #[test]
     #[serial]
     fn test_llama_model_long() -> Result<()> {
-        let prompt = "The capital of France is ".to_string();
+        let prompt = "The History of France start in ".to_string();
 
         let dtype = DType::BF16;
         let device = Device::new_cuda(0).unwrap();
