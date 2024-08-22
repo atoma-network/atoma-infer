@@ -760,7 +760,7 @@ mod tests {
             let num_prefill_tokens = 0;
             let num_decoding_tokens = 1;
             let max_query_length = 1;
-            let max_decoding_sequence_length = 1;
+            let max_decoding_sequence_length = tokens.len();
             let max_prefill_sequence_length = 0;
             let num_prefill_sequences = 0;
 
