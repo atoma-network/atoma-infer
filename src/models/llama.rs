@@ -902,7 +902,11 @@ mod tests {
         let input = Tensor::new(&tokens[..], &device)?.unsqueeze(0)?;
 
         let context_lengths = Tensor::from_vec(vec![tokens.len() as u32], (1,), &device)?;
-        let slot_mapping = Tensor::arange(0, tokens.len() as i64, &device)?;
+        let slot_mapping = Tensor::arange(
+            (99 * block_size) as i64,
+            (99 * block_size) as i64 + (tokens.len() / block_size) as i64,
+            &device,
+        )?;
         let query_start_locations = Tensor::from_vec(vec![0, tokens.len() as u32], (2,), &device)?;
         let sequence_start_locations =
             Tensor::from_vec(vec![0, tokens.len() as u32], (2,), &device)?;
@@ -969,7 +973,10 @@ mod tests {
 
             let context_lengths = Tensor::new(&[0u32], &device)?;
             let last_allocated_block = *allocated_blocks.last().unwrap();
-            let slot_mapping = Tensor::new(&[last_allocated_block * block_size + (tokens.len() % block_size)], &device)?;
+            let slot_mapping = Tensor::new(
+                &[last_allocated_block * block_size + (tokens.len() % block_size)],
+                &device,
+            )?;
             let query_start_locations = Tensor::new(&[0u32, 1], &device)?;
             let sequence_start_locations = Tensor::new(&[0, tokens.len() as u32], &device)?;
             let sequence_lengths = Tensor::new(&[tokens.len() as u32], &device)?;
