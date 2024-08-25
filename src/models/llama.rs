@@ -957,7 +957,7 @@ mod tests {
             if tokens.len() % 16 == 0 {
                 let mut num = rng.gen_range(0..100);
                 while allocated_blocks.contains(&num) {
-                    num = rng.gen_rand(0..100);
+                    num = rng.gen_range(0..100);
                 }
                 allocated_blocks.push(num);
             }
