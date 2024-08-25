@@ -872,7 +872,7 @@ mod tests {
             LogitsProcessor::from_sampling(42, sampling)
         };
 
-        let sample_len = 64;
+        let sample_len = 255;
         let start_gen = std::time::Instant::now();
         let mut token_generated = 0;
 
