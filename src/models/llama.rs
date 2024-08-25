@@ -973,7 +973,7 @@ mod tests {
             let sequence_start_locations = Tensor::new(&[0, tokens.len() as u32], &device)?;
             let sequence_lengths = Tensor::new(&[tokens.len() as u32], &device)?;
             let block_tables =
-                Tensor::from_vec(allocated_blocks.clone(), (1, num_blocks as usize))?
+                Tensor::from_vec(allocated_blocks.clone(), (1, num_blocks as usize), &device)?
                     .to_dtype(DType::U32)?
                     .reshape((1, num_blocks as usize))?;
 
