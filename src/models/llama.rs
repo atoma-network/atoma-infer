@@ -904,7 +904,7 @@ mod tests {
         let context_lengths = Tensor::from_vec(vec![tokens.len() as u32], (1,), &device)?;
         let slot_mapping = Tensor::arange(
             (99 * block_size) as i64,
-            (99 * block_size) as i64 + (tokens.len() / block_size) as i64,
+            (99 * block_size) as i64 + (tokens.len() % block_size) as i64,
             &device,
         )?;
         let query_start_locations = Tensor::from_vec(vec![0, tokens.len() as u32], (2,), &device)?;
