@@ -955,7 +955,7 @@ mod tests {
         // decoding loop
         for _ in 1..sample_len {
             if tokens.len() % 16 == 0 {
-                let mut num = rng.gen_rand(0..100);
+                let mut num = rng.gen_range(0..100);
                 while allocated_blocks.contains(&num) {
                     num = rng.gen_rand(0..100);
                 }
