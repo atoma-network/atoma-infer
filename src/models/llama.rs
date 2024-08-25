@@ -968,11 +968,12 @@ mod tests {
             let num_blocks = (tokens.len() / block_size) as i64 + 1;
 
             let context_lengths = Tensor::new(&[0u32], &device)?;
-            let slot_mapping = Tensor::new(&[tokens.len() as i64 - 1], &device)?;
+            let last_allocated_block = *allocated_blocks.last().unwrap();
+            let slot_mapping = Tensor::new(&[last_allocated_block * block_size + (tokens.len() % block_size)], &device)?;
             let query_start_locations = Tensor::new(&[0u32, 1], &device)?;
             let sequence_start_locations = Tensor::new(&[0, tokens.len() as u32], &device)?;
             let sequence_lengths = Tensor::new(&[tokens.len() as u32], &device)?;
-            println!("FLAG: {:?}", allocated_blocks.to_vec2::<u32>()?);
+
             let block_tables =
                 Tensor::from_vec(allocated_blocks.clone(), (1, num_blocks as usize), &device)?
                     .to_dtype(DType::U32)?
