@@ -11,6 +11,7 @@ candle-core = { version = "0.6.0", features = ["cuda"] }
 candle-nn = { version = "0.6.0", features = ["cuda"] }
 candle-transformers = { version = "0.6.0", features = ["cuda"] }
 csrc = { path = "csrc" }
+help = { path = "help" }
 serde = { version = "1.0.204", features = ["derive"] }
 tracing = "0.1.40"
 
@@ -25,4 +26,3 @@ hf-hub = "0.3.2"
 serde_json = "1.0.120"
 serial_test = "3.1.1"
 tokenizers = "0.19.1"
-
