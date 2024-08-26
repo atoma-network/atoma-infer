@@ -11,6 +11,7 @@ candle-core = { version = "0.6.0", features = ["cuda"] }
 cuda-runtime-sys = "0.3.0-alpha.1"
 cuda-sys = "0.2.0"
 half = { version = "2.4.1", features = ["num-traits"] }
+help = { path = "../help" }
 
 [build-dependencies]
 anyhow = { version = "1", features = ["backtrace"] }

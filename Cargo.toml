@@ -12,6 +12,7 @@ candle-nn = { version = "0.6.0", features = ["cuda"] }
 candle-transformers = { version = "0.6.0", features = ["cuda"] }
 csrc = { path = "csrc" }
 half = { version = "2.4.1", features = ["num-traits"] }
+help = { path = "help" }
 serde = { version = "1.0.204", features = ["derive"] }
 serde_json = "1.0.120"
 tracing = "0.1.40"
