@@ -1560,10 +1560,6 @@ impl FlashAttentionKvCache {
         let mut window_size_left = self.window_size_left.map(|i| i as i32);
         let mut window_size_right = self.window_size_right.map(|i| i as i32);
 
-        if is_causal {
-            window_size_right = Some(0);
-        }
-
         if let Some(w) = window_size_left {
             if w >= seqlen_k as i32 {
                 window_size_left = Some(-1);
@@ -1580,8 +1576,11 @@ impl FlashAttentionKvCache {
 
         let mut is_causal = window_size_left < 0 && window_size_right == 0;
         // causal=true is the same as causal=false in this case
-        if seqlen_q == 1 && alibi_slopes.is_none() {
+        if seqlen_q == 1 && self.alibi_slopes.is_none() {
             is_causal = false;
+        }
+        if is_causal {
+            window_size_right = Some(0);
         }
 
         if window_size_left < 0 && window_size_right >= 0 {
@@ -1671,7 +1670,7 @@ impl FlashAttentionKvCache {
         let head_size = utils::round_multiple(head_size_og, 8);
         let head_size_rounded = utils::round_multiple(head_size, 32);
         let seqlen_q_rounded = utils::round_multiple(seqlen_q, 128);
-        let seqlen_k_rounded = utils::round_multiple(seqlens_k, 128);
+        let seqlen_k_rounded = utils::round_multiple(seqlen_k, 128);
 
         let elem_count = out_shape.elem_count();
         let dst = unsafe { dev.alloc::<T>(elem_count) }.w()?;
@@ -1746,7 +1745,7 @@ impl FlashAttentionKvCache {
                 q_stride[0] as u32,
                 kc_stride[0] as u32,
                 vc_stride[0] as u32,
-                out_stride[0] as u32,
+                o_stride[0] as u32,
                 alibi_slopes_batch_stride as u32,
                 q_stride[q_rank - 3] as u32,
                 /* k_row_stride   */ kc_stride[kc_rank - 3] as u32,
