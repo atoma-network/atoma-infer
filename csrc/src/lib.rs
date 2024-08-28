@@ -1741,10 +1741,10 @@ impl FlashAttentionKvCache {
                 std::ptr::null(),
                 cu_seqlens_k_ptr,
                 is_seqlens_k_cumulative,
-                q_stride[0],
-                kc_stride[0],
-                vc_stride[0],
-                out_stride[0],
+                q_stride[0] as u32,
+                kc_stride[0] as u32,
+                vc_stride[0] as u32,
+                out_stride[0] as u32,
                 alibi_slopes_batch_stride,
                 q_stride[q_rank - 3] as u32,
                 /* k_row_stride   */ k_stride[k_rank - 3] as u32,
@@ -1755,11 +1755,11 @@ impl FlashAttentionKvCache {
                 /* v_head_stride  */ v_stride[v_rank - 2] as u32,
                 /* o_head_stride  */ o_stride[o_rank - 2] as u32,
                 num_splits,
-                batch_size,
-                num_heads,
-                num_heads_k,
-                head_size,
-                head_size_rounded,
+                batch_size as u32,
+                num_heads as u32,
+                num_heads_k as u32,
+                head_size as u32,
+                head_size_rounded as u32,
                 self.softmax_scale,
                 self.softmax_scale * std::f32::consts::LOG2_E,
                 block_table_ptr,
@@ -1779,12 +1779,6 @@ impl FlashAttentionKvCache {
                 !block_table_ptr.is_null(),
             )
         }
-
-        let out_shape = if seqlenq_ngroups_swapped {
-            Shape::from((batch_size, 1, num_heads_k * seqlen_q, head_size_og))
-        } else {
-            out_shape
-        };
 
         let dst = candle_core::CudaStorage::wrap_cuda_slice(dst, dev.clone());
         Ok((dst, out_shape))
