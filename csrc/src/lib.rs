@@ -1580,7 +1580,7 @@ impl FlashAttentionKvCache {
             is_causal = false;
         }
         if is_causal {
-            window_size_right = Some(0);
+            window_size_right = 0;
         }
 
         if window_size_left < 0 && window_size_right >= 0 {
