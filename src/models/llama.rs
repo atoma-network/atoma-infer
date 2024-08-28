@@ -974,7 +974,8 @@ mod tests {
             let context_lengths = Tensor::new(&[0u32], &device)?;
             let last_allocated_block = *allocated_blocks.last().unwrap();
             let slot_mapping = Tensor::new(
-                &[(last_allocated_block as i64) * (block_size as i64) + ((tokens.len() - 1) % block_size as usize) as i64],
+                &[(last_allocated_block as i64) * (block_size as i64)
+                    + ((tokens.len() - 1) % block_size as usize) as i64],
                 &device,
             )?;
             let query_start_locations = Tensor::new(&[0u32, 1], &device)?;
