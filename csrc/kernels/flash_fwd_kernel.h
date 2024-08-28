@@ -18,6 +18,11 @@
 #include "dropout.h"
 #include "rotary.h"
 
+#define myprint(data, format)                                               \
+    if (threadIdx.x == 0 && blockIdx.y == 0 && blockIdx.z == 0) {           \
+        printf("%s:%d %s = " format "\n", __FILE__, __LINE__, #data, data); \
+    }
+
 namespace flash {
 
 using namespace cute;
@@ -535,9 +540,21 @@ inline __device__ void compute_attn_1rowblock_splitkv(const Params &params, cons
         ? n_split_idx * n_blocks_per_split
         : std::max(n_split_idx * n_blocks_per_split, (m_block * kBlockM + binfo.actual_seqlen_k - binfo.actual_seqlen_q - params.window_size_left) / kBlockN);
     int n_block_max = std::min(cute::ceil_div(binfo.actual_seqlen_k, kBlockN), (n_split_idx + 1) * n_blocks_per_split);
+    myprint(binfo.actual_seqlen_k, "%d");
+    myprint(kBlockN, "%d");
+    myprint(n_split_idx, "%d");
+    myprint(n_blocks_per_split, "%d");
+    myprint(n_block_max, "%d");
     if (Is_causal || Is_local) {
         n_block_max = std::min(n_block_max,
                                cute::ceil_div((m_block + 1) * kBlockM + binfo.actual_seqlen_k - binfo.actual_seqlen_q + params.window_size_right, kBlockN));
+        myprint(m_block, "%d");
+        myprint(kBlockM, "%d");
+        myprint(binfo.actual_seqlen_k, "%d");
+        myprint(binfo.actual_seqlen_q, "%d");
+        myprint(params.window_size_right, "%d");
+        myprint(kBlockN, "%d");
+        myprint(n_block_max, "%d");
     }
     if (n_block_min >= n_block_max) {  // This also covers the case where n_block_max <= 0
         // We exit early and write 0 to gOaccum and -inf to gLSEaccum.
@@ -897,7 +914,8 @@ inline __device__ void compute_attn_1rowblock_splitkv(const Params &params, cons
         __syncthreads();
         // if (tidx == 0 && blockIdx.y == 0 && blockIdx.z == 0) { print(tVsV); }
         // __syncthreads();
-
+        myprint(n_block, "%d");
+        myprint(n_block_min, "%d");
         if (n_block > n_block_min) {
             // Advance gK
             if (block_table == nullptr) {
@@ -907,7 +925,14 @@ inline __device__ void compute_attn_1rowblock_splitkv(const Params &params, cons
                 const int block_table_offset_cur = n_block * kBlockN - block_table_idx_cur * params.page_block_size;
                 const int block_table_idx_next = (n_block - 1) * kBlockN / params.page_block_size;
                 const int block_table_offset_next =(n_block - 1) * kBlockN - block_table_idx_next * params.page_block_size;
+                myprint(block_table_idx_cur, "%d");
+                myprint(block_table_offset_cur, "%d");
+                myprint(block_table_idx_next, "%d");
+                myprint(block_table_offset_next, "%d");
                 tKgK.data() = tKgK.data() + (block_table[block_table_idx_next] - block_table[block_table_idx_cur]) * params.k_batch_stride + (block_table_offset_next - block_table_offset_cur) * params.k_row_stride;
+            }
+            if (binfo.actual_seqlen_k > 255) {
+                return;
             }
             flash::copy</*Is_even_MN=*/true, Is_even_K>(gmem_tiled_copy_QKV, tKgK, tKsK, tKVcKV, tKVpKV);
             // This cp_async_fence needs to be in the if block, otherwise the synchronization

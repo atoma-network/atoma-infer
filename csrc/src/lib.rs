@@ -2,6 +2,7 @@ pub mod cache_manager;
 mod ffi;
 pub mod ops;
 pub use cache_manager::{copy_blocks, reshape_and_cache_flash, swap_blocks};
+use help::{print_tensor, print_tensor_no_data};
 
 use std::mem::MaybeUninit;
 
@@ -24,6 +25,7 @@ pub struct FlashAttention {
     pub window_size_right: Option<usize>,
     /// Softcap parameter, used in Grok and Gemma2 models
     pub softcap: Option<f32>,
+    pub show: bool,
 }
 
 impl FlashAttention {
@@ -263,6 +265,7 @@ impl FlashAttention {
                 )
             };
             ffi::run_mha(
+                self.show,
                 q_ptr,
                 k_ptr,
                 v_ptr,
@@ -375,6 +378,7 @@ pub fn flash_attn(
     v: &Tensor,
     softmax_scale: f32,
     causal: bool,
+    show: bool,
 ) -> Result<Tensor> {
     let window_size_left = None;
     let window_size_right = if causal { Some(0) } else { None };
@@ -385,6 +389,7 @@ pub fn flash_attn(
         window_size_left,
         window_size_right,
         softcap: None,
+        show,
     };
     q.apply_op3(k, v, op)
 }
@@ -416,6 +421,7 @@ pub fn flash_attn_windowed(
     softmax_scale: f32,
     window_size_left: Option<usize>,
     window_size_right: Option<usize>,
+    show: bool,
 ) -> Result<Tensor> {
     let op = FlashAttention {
         softmax_scale,
@@ -423,6 +429,7 @@ pub fn flash_attn_windowed(
         window_size_left,
         window_size_right,
         softcap: None,
+        show,
     };
     q.apply_op3(k, v, op)
 }
@@ -448,6 +455,7 @@ pub fn flash_attn_alibi(
     alibi_slopes: &Tensor,
     softmax_scale: f32,
     causal: bool,
+    show: bool,
 ) -> Result<Tensor> {
     let window_size_left = None;
     let window_size_right = if causal { Some(0) } else { None };
@@ -458,6 +466,7 @@ pub fn flash_attn_alibi(
         window_size_left,
         window_size_right,
         softcap: None,
+        show,
     };
     q.apply_op3(k, v, op)
 }
@@ -491,6 +500,7 @@ pub fn flash_attn_alibi_windowed(
     softmax_scale: f32,
     window_size_left: Option<usize>,
     window_size_right: Option<usize>,
+    show: bool,
 ) -> Result<Tensor> {
     let op = FlashAttention {
         softmax_scale,
@@ -498,6 +508,7 @@ pub fn flash_attn_alibi_windowed(
         window_size_left,
         window_size_right,
         softcap: None,
+        show,
     };
     q.apply_op3(k, v, op)
 }
@@ -538,6 +549,7 @@ pub fn flash_attn_alibi_windowed_with_softcap(
     window_size_left: Option<usize>,
     window_size_right: Option<usize>,
     softcap: Option<f32>,
+    show: bool,
 ) -> Result<Tensor> {
     let op = FlashAttention {
         softmax_scale,
@@ -545,6 +557,7 @@ pub fn flash_attn_alibi_windowed_with_softcap(
         window_size_left,
         window_size_right,
         softcap,
+        show,
     };
     q.apply_op3(k, v, op)
 }
@@ -579,6 +592,7 @@ struct FlashAttentionVarLen {
     pub window_size_right: Option<usize>,
     /// Softcap parameter, used in Grok and Gemma2 models
     pub softcap: Option<f32>,
+    pub show: bool,
 }
 
 impl FlashAttentionVarLen {
@@ -996,6 +1010,7 @@ impl FlashAttentionVarLen {
                 .unwrap_or((0, 0));
             // TODO: handle case where max_seqlen_q == 0, separately
             ffi::run_mha(
+                self.show,
                 q_ptr,
                 k_ptr,
                 v_ptr,
@@ -1120,6 +1135,7 @@ pub fn flash_attn_varlen(
     max_seqlen_k: usize,
     softmax_scale: f32,
     causal: bool,
+    show: bool,
 ) -> Result<Tensor> {
     let window_size_left = None;
     let window_size_right = if causal { Some(0) } else { None };
@@ -1136,6 +1152,7 @@ pub fn flash_attn_varlen(
         softcap: None,
         block_table: None,
         seqused_k: None,
+        show,
     };
     q.apply_op3(k, v, op)
 }
@@ -1179,6 +1196,7 @@ pub fn flash_attn_varlen_windowed(
     softmax_scale: f32,
     window_size_left: Option<usize>,
     window_size_right: Option<usize>,
+    show: bool,
 ) -> Result<Tensor> {
     let op = FlashAttentionVarLen {
         softmax_scale,
@@ -1192,6 +1210,7 @@ pub fn flash_attn_varlen_windowed(
         softcap: None,
         block_table: None,
         seqused_k: None,
+        show,
     };
     q.apply_op3(k, v, op)
 }
@@ -1229,6 +1248,7 @@ pub fn flash_attn_varlen_alibi(
     max_seqlen_k: usize,
     softmax_scale: f32,
     causal: bool,
+    show: bool,
 ) -> Result<Tensor> {
     let window_size_left = None;
     let window_size_right = if causal { Some(0) } else { None };
@@ -1245,6 +1265,7 @@ pub fn flash_attn_varlen_alibi(
         softcap: None,
         block_table: None,
         seqused_k: None,
+        show,
     };
     q.apply_op3(k, v, op)
 }
@@ -1290,6 +1311,7 @@ pub fn flash_attn_varlen_alibi_windowed(
     softmax_scale: f32,
     window_size_left: Option<usize>,
     window_size_right: Option<usize>,
+    show: bool,
 ) -> Result<Tensor> {
     let op = FlashAttentionVarLen {
         softmax_scale,
@@ -1303,6 +1325,7 @@ pub fn flash_attn_varlen_alibi_windowed(
         block_table: None,
         seqused_k: None,
         softcap: None,
+        show,
     };
     q.apply_op3(k, v, op)
 }
@@ -1355,6 +1378,7 @@ pub fn flash_attn_varlen_with_block_table(
     window_size_left: Option<usize>,
     window_size_right: Option<usize>,
     block_table: Option<&Tensor>,
+    show: bool,
 ) -> Result<Tensor> {
     let op = FlashAttentionVarLen {
         softmax_scale,
@@ -1368,6 +1392,7 @@ pub fn flash_attn_varlen_with_block_table(
         block_table: block_table.cloned(),
         seqused_k: None,
         softcap: None,
+        show,
     };
     q.apply_op3(k, v, op)
 }
@@ -1429,6 +1454,7 @@ pub fn flash_attn_varlen_full(
     block_table: Option<&Tensor>,
     seqused_k: Option<&Tensor>,
     softcap: Option<f32>,
+    show: bool,
 ) -> Result<Tensor> {
     let op = FlashAttentionVarLen {
         softmax_scale,
@@ -1442,6 +1468,7 @@ pub fn flash_attn_varlen_full(
         block_table: block_table.cloned(),
         seqused_k: seqused_k.cloned(),
         softcap,
+        show,
     };
     q.apply_op3(k, v, op)
 }
@@ -1471,6 +1498,7 @@ struct FlashAttentionKvCache {
     pub seqlens_k: Option<Tensor>,
     /// Softcap parameter, used in Grok and Gemma2 models
     pub softcap: Option<f32>,
+    pub show: bool,
 }
 
 impl FlashAttentionKvCache {
@@ -1503,6 +1531,7 @@ impl FlashAttentionKvCache {
         }
 
         let (block_table_ptr, block_table_layout) = if let Some(block_table) = &self.block_table {
+            // print_tensor!(block_table);
             let (block_table_storage, block_table_layout) = block_table.storage_and_layout();
             let block_table_ptr = match &*block_table_storage {
                 candle_core::Storage::Cuda(c) => {
@@ -1740,6 +1769,7 @@ impl FlashAttentionKvCache {
         let seqlen_k_rounded = utils::round_multiple(seqlens_k, 128);
 
         let cu_seqlens_k_ptr = if let Some(seqlens_k) = &self.seqlens_k {
+            print_tensor!(seqlens_k, self.show);
             if seqlens_k.dims() != [batch_size] {
                 candle_core::bail!(
                     "shape mismatch of seqlens_k (got {:?}) expected {:?})",
@@ -1759,6 +1789,9 @@ impl FlashAttentionKvCache {
                 candle_core::Storage::Cuda(c) => c.as_cuda_slice::<u32>()?,
                 _ => candle_core::bail!("seqlens_k must be a cuda tensor"),
             };
+            if self.show {
+                dbg!(seqlens_k_layout);
+            }
             let seqlens_k = seqlens_k.slice(seqlens_k_layout.start_offset()..);
             let seqlens_k_stride = seqlens_k_layout.stride();
             let seqlens_k_rank = seqlens_k_stride.len();
@@ -1849,7 +1882,54 @@ impl FlashAttentionKvCache {
                     (o_stride[0] * seqlen_q) as u32,
                 )
             };
+            if self.show {
+                dbg!(q_ptr);
+                dbg!(kc_ptr);
+                dbg!(vc_ptr);
+                dbg!(dst_ptr);
+                dbg!(softmax_lse_ptr);
+                dbg!(alibi_slopes_ptr);
+                dbg!(cu_seqlens_k_ptr);
+                dbg!(is_seqlens_k_cumulative);
+                dbg!(q_batch_stride);
+                dbg!(k_batch_stride);
+                dbg!(v_batch_stride);
+                dbg!(o_batch_stride);
+
+                dbg!(alibi_slopes_batch_stride as u32);
+                dbg!(q_stride[q_rank - 3] as u32);
+                dbg!(kc_stride[kc_rank - 3] as u32);
+                dbg!(vc_stride[vc_rank - 3] as u32);
+                dbg!(o_stride[o_rank - 3] as u32);
+                dbg!(q_stride[q_rank - 2] as u32);
+                dbg!(kc_stride[kc_rank - 2] as u32);
+                dbg!(vc_stride[vc_rank - 2] as u32);
+                dbg!(o_stride[o_rank - 2] as u32);
+                dbg!(num_splits);
+                dbg!(batch_size as u32);
+                dbg!(num_heads as u32);
+                dbg!(num_heads_k as u32);
+                dbg!(head_size as u32);
+                dbg!(head_size_rounded as u32);
+                dbg!(softmax_scale);
+                dbg!(scale_softmatx_log2);
+                dbg!(block_table_ptr);
+                dbg!(block_table_batch_stride);
+                dbg!(page_block_size as i32);
+                dbg!(seqlen_q as u32);
+                dbg!(seqlens_k as u32);
+                dbg!(seqlen_q_rounded as u32);
+                dbg!(seqlen_k_rounded as u32);
+                dbg!(is_bf16);
+                dbg!(is_causal);
+                dbg!(window_size_left);
+                dbg!(window_size_right);
+                dbg!(softcap);
+                dbg!(false);
+                dbg!(!block_table_ptr.is_null());
+            }
             ffi::run_mha(
+                self.show,
                 q_ptr,
                 kc_ptr,
                 vc_ptr,
@@ -1975,6 +2055,7 @@ pub fn flash_attn_kv_cache(
         softcap: None,
         block_table: None,
         seqlens_k: None,
+        show: false,
     };
     q.apply_op3(k, v, op)
 }
@@ -2015,6 +2096,7 @@ pub fn flash_attn_kv_cache_windowed(
         softcap: None,
         block_table: None,
         seqlens_k: seqlens_k.cloned(),
+        show: false,
     };
     q.apply_op3(k, v, op)
 }
@@ -2057,6 +2139,7 @@ pub fn flash_attn_kv_cache_alibi(
         softcap: None,
         block_table: None,
         seqlens_k: seqlens_k.cloned(),
+        show: false,
     };
     q.apply_op3(k, v, op)
 }
@@ -2100,6 +2183,7 @@ pub fn flash_attn_kv_cache_alibi_windowed(
         block_table: None,
         seqlens_k: None,
         softcap: None,
+        show: false,
     };
     q.apply_op3(k, v, op)
 }
@@ -2139,7 +2223,17 @@ pub fn flash_attn_kv_cache_full(
     seqlens_k: Option<&Tensor>,
     softcap: Option<f32>,
     causal: bool,
+    show: bool,
 ) -> Result<Tensor> {
+    print_tensor_no_data!(q, show);
+    print_tensor_no_data!(k, show);
+    print_tensor_no_data!(v, show);
+    if let Some(block_table) = &block_table {
+        print_tensor!(block_table, show);
+    }
+    if let Some(seqlens_k) = &seqlens_k {
+        print_tensor!(seqlens_k, show);
+    }
     let window_size_left = None;
     let window_size_right = if causal { Some(0) } else { None };
 
@@ -2151,6 +2245,7 @@ pub fn flash_attn_kv_cache_full(
         block_table: block_table.cloned(),
         seqlens_k: seqlens_k.cloned(),
         softcap,
+        show: show,
     };
     q.apply_op3(k, v, op)
 }
@@ -2232,17 +2327,22 @@ pub(crate) mod utils {
         } else {
             64
         };
+        dbg!(block_n);
         let num_n_blocks = (max_seqlen_k + block_n - 1) / block_n;
+        dbg!(num_n_blocks);
         // Technically kBlockM = 64 only for the splitKV kernels, not the standard kernel.
         // In any case we don't expect seqlen_q to be larger than 64 for inference.
         let num_m_blocks = (max_seqlen_q + 64 - 1) / 64;
+        dbg!(num_m_blocks);
         let cuda_multiprocessor_count = get_multiprocessor_count(device_ordinal)?;
+        dbg!(cuda_multiprocessor_count);
         let num_splits = num_splits_heuristic(
             batch_size * num_heads * num_m_blocks,
-            cuda_multiprocessor_count,
+            cuda_multiprocessor_count * 2,
             num_n_blocks,
             128,
         );
+        dbg!(num_splits);
         if num_splits > 128 {
             candle_core::bail!("num_splits > 128 not supported")
         }

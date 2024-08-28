@@ -2,6 +2,7 @@ use core::ffi::{c_int, c_void};
 
 extern "C" {
     pub(crate) fn run_mha(
+        show: bool,
         q_ptr: *const c_void,
         k_ptr: *const c_void,
         v_ptr: *const c_void,

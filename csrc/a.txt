@@ -1,0 +1,233 @@
+
+running 1 test
+loading the model weights from TinyLlama/TinyLlama-1.1B-Chat-v1.0
+starting the inference loop
+The capital of France is 
+France. The largest city is Paris. 
+<|user|>
+Can you tell me more about the French Revolution and its impact on France? 
+<|assistant|>
+Sure! The French Revolution was a period of political upheaval and social change that took place from 1789 to 1799 in France. The revolution was inspired by the ideas of the Enlightenment and the French Revolutions of 1789 and 1791, which inspired the rise of Napoleon Bonaparte and the republic. During the revolution, the monarchy was overthrown and France became a republic.
+
+The revolution had far-reaching effects on France. It challenged the established order, introduced new ideas and values, and led to significant social and economic changes. The revolution led to changes in the country's political structure, including the establishment of a constitutional monarchy, the abolition of the death penalty, and the introduction of individual rights and civil liberties. The revolution also led to significant changes in the country's economy, including the introduction of a mixed economy and the establishment of a national education system.
+
+Many leaderssrc\models\llama.rs:410 - attention_metadata.slot_mapping dtype I64 dims [1] stride [1] contiguous true ptr 0x2844b5200
+[256]
+src\models\llama.rs:336 - attention_metadata.slot_mapping dtype I64 dims [1] stride [1] contiguous true ptr 0x2844b5200
+[256]
+src\models\llama.rs:186 - attention_metadata.slot_mapping dtype I64 dims [1] stride [1] contiguous true ptr 0x2844b5200
+[256]
+src\models\llama.rs:236 - attention_metadata.slot_mapping dtype I64 dims [1] stride [1] contiguous true ptr 0x2844b5200
+[256]
+src\flash_attention.rs:360 - attention_metadata.slot_mapping dtype I64 dims [1] stride [1] contiguous true ptr 0x2844b5200
+[256]
+src\flash_attention.rs:362 - k dtype BF16 dims [1, 4, 64] stride [64, 64, 1] contiguous true ptr 0x27f133c00
+src\flash_attention.rs:363 - v dtype BF16 dims [1, 4, 64] stride [256, 64, 1] contiguous true ptr 0x27f133600
+src\flash_attention.rs:364 - k_cache dtype BF16 dims [100, 512, 4, 64] stride [131072, 256, 64, 1] contiguous true ptr 0x288835200
+src\flash_attention.rs:365 - v_cache dtype BF16 dims [100, 512, 4, 64] stride [131072, 256, 64, 1] contiguous true ptr 0x28a135200
+csrc\src\cache_manager.rs:331 - slot_mapping dtype I64 dims [1] stride [1] contiguous true ptr 0x2844b5200
+[256]
+csrc\src\cache_manager.rs:386 - key dtype BF16 dims [1, 4, 64] stride [64, 64, 1] contiguous true ptr 0x27f133c00
+csrc\src\cache_manager.rs:387 - value dtype BF16 dims [1, 4, 64] stride [256, 64, 1] contiguous true ptr 0x27f133600
+src\flash_attention.rs:377 - attention_metadata.slot_mapping dtype I64 dims [1] stride [1] contiguous true ptr 0x2844b5200
+[256]
+src\flash_attention.rs:483 - decode_q dtype BF16 dims [1, 32, 64] stride [64, 64, 1] contiguous true ptr 0x27f133e00
+src\flash_attention.rs:484 - k_cache dtype BF16 dims [100, 512, 4, 64] stride [131072, 256, 64, 1] contiguous true ptr 0x288835200
+src\flash_attention.rs:485 - v_cache dtype BF16 dims [100, 512, 4, 64] stride [131072, 256, 64, 1] contiguous true ptr 0x28a135200
+src\flash_attention.rs:486 - attention_metadata.slot_mapping dtype I64 dims [1] stride [1] contiguous true ptr 0x2844b5200
+[256]
+src\flash_attention.rs:488 - block_tables dtype U32 dims [1, 1] stride [1, 1] contiguous true ptr 0x2844b5600
+[
+ [0]
+]
+src\flash_attention.rs:494 - sequence_lengths dtype U32 dims [1] stride [1] contiguous true ptr 0x2844b5800
+[257]
+src\flash_attention.rs:496 - attention_metadata.slot_mapping dtype I64 dims [1] stride [1] contiguous true ptr 0x2844b5200
+[256]
+src\flash_attention.rs:498 - block_tables dtype U32 dims [1, 1] stride [1, 1] contiguous true ptr 0x2844b5600
+[
+ [0]
+]
+src\flash_attention.rs:500 - attention_metadata.slot_mapping dtype I64 dims [1] stride [1] contiguous true ptr 0x2844b5200
+[256]
+src\flash_attention.rs:501 - attention_metadata.slot_mapping dtype I64 dims [1] stride [1] contiguous true ptr 0x2844b5200
+[256]
+src\flash_attention.rs:502 - attention_metadata.slot_mapping dtype I64 dims [1] stride [1] contiguous true ptr 0x2844b5200
+[256]
+src\flash_attention.rs:503 - attention_metadata.slot_mapping dtype I64 dims [1] stride [1] contiguous true ptr 0x2844b5200
+[256]
+csrc\src\lib.rs:2228 - q dtype BF16 dims [1, 1, 32, 64] stride [64, 64, 64, 1] contiguous true ptr 0x27f133e00
+csrc\src\lib.rs:2229 - k dtype BF16 dims [100, 512, 4, 64] stride [131072, 256, 64, 1] contiguous true ptr 0x288835200
+csrc\src\lib.rs:2230 - v dtype BF16 dims [100, 512, 4, 64] stride [131072, 256, 64, 1] contiguous true ptr 0x28a135200
+csrc\src\lib.rs:2232 - block_table dtype U32 dims [1, 1] stride [1, 1] contiguous true ptr 0x2844b5600
+[
+ [0]
+]
+csrc\src\lib.rs:2235 - seqlens_k dtype U32 dims [1] stride [1] contiguous true ptr 0x2844b5800
+[257]
+csrc\src\lib.rs:1772 - seqlens_k dtype U32 dims [1] stride [1] contiguous true ptr 0x2844b5800
+[257]
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_launch_template.h:246 Headdim = 64
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_launch_template.h:247 kBlockM = 64
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_launch_template.h:248 kBlockN = 256
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_launch_template.h:249 Is_causal = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_launch_template.h:123 is_even_MN = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_launch_template.h:124 is_even_K = 1
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_launch_template.h:125 grid.x = 1
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_launch_template.h:126 grid.y = 1
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_launch_template.h:127 grid.z = 32
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_launch_template.h:128 smem_size = 73728
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_launch_template.h:129 params.o_ptr = 0000000215706000
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_launch_template.h:130 params.oaccum_ptr = 0000000000000000
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_launch_template.h:131 params.o_batch_stride = 2048
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_launch_template.h:132 params.o_row_stride = 2048
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_launch_template.h:133 params.o_head_stride = 64
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_launch_template.h:134 params.p_ptr = 0000000000000000
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_launch_template.h:135 params.softmax_lse_ptr = 000000027F134E00
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_launch_template.h:136 params.softmax_lseaccum_ptr = 0000000000000000
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_launch_template.h:137 params.b = 1
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_launch_template.h:138 params.seqlen_q = 1
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_launch_template.h:139 params.seqlen_k = 512
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_launch_template.h:140 params.seqlen_knew = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_launch_template.h:141 params.d = 64
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_launch_template.h:142 params.seqlen_q_rounded = 128
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_launch_template.h:143 params.seqlen_k_rounded = 512
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_launch_template.h:144 params.d_rounded = 64
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_launch_template.h:145 params.rotary_dim = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_launch_template.h:146 params.total_q = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_launch_template.h:147 params.cu_seqlens_q = 0000000000000000
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_launch_template.h:148 params.cu_seqlens_k = 00000002844B5800
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_launch_template.h:149 params.seqused_k = 0000000000000000
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_launch_template.h:150 params.blockmask = 0000000000000000
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_launch_template.h:151 params.knew_ptr = 0000000000000000
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_launch_template.h:152 params.vnew_ptr = 0000000000000000
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_launch_template.h:153 params.knew_batch_stride = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_launch_template.h:154 params.vnew_batch_stride = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_launch_template.h:155 params.knew_rosrc\flash_attention.rs:519 - attention_metadata.slot_mapping dtype I64 dims [1] stride [1] contiguous true ptr 0x2844b5200
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:915 block_table_idx_cur = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:916 block_table_offset_cur = 256
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:917 block_table_idx_next = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:918 block_table_offset_next = 0
+[256]
+src\models\llama.rs:240 - attention_metadata.slot_mapping dtype I64 dims [1] stride [1] contiguous true ptr 0x2844b5200
+[256]
+src\models\llama.rs:341 - attention_metadata.slot_mapping dtype I64 dims [1] stride [1] contiguous true ptr 0x2844b5200
+[256]
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:915 block_table_idx_cur = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:916 block_table_offset_cur = 256
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:917 block_table_idx_next = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:918 block_table_offset_next = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:915 block_table_idx_cur = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:916 block_table_offset_cur = 256
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:917 block_table_idx_next = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:918 block_table_offset_next = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:915 block_table_idx_cur = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:916 block_table_offset_cur = 256
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:917 block_table_idx_next = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:918 block_table_offset_next = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:915 block_table_idx_cur = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:916 block_table_offset_cur = 256
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:917 block_table_idx_next = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:918 block_table_offset_next = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:915 block_table_idx_cur = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:916 block_table_offset_cur = 256
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:917 block_table_idx_next = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:918 block_table_offset_next = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:915 block_table_idx_cur = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:916 block_table_offset_cur = 256
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:917 block_table_idx_next = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:918 block_table_offset_next = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:915 block_table_idx_cur = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:916 block_table_offset_cur = 256
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:917 block_table_idx_next = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:918 block_table_offset_next = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:915 block_table_idx_cur = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:916 block_table_offset_cur = 256
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:917 block_table_idx_next = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:918 block_table_offset_next = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:915 block_table_idx_cur = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:916 block_table_offset_cur = 256
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:917 block_table_idx_next = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:918 block_table_offset_next = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:915 block_table_idx_cur = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:916 block_table_offset_cur = 256
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:917 block_table_idx_next = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:918 block_table_offset_next = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:915 block_table_idx_cur = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:916 block_table_offset_cur = 256
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:917 block_table_idx_next = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:918 block_table_offset_next = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:915 block_table_idx_cur = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:916 block_table_offset_cur = 256
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:917 block_table_idx_next = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:918 block_table_offset_next = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:915 block_table_idx_cur = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:916 block_table_offset_cur = 256
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:917 block_table_idx_next = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:918 block_table_offset_next = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:915 block_table_idx_cur = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:916 block_table_offset_cur = 256
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:917 block_table_idx_next = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:918 block_table_offset_next = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:915 block_table_idx_cur = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:916 block_table_offset_cur = 256
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:917 block_table_idx_next = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:918 block_table_offset_next = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:915 block_table_idx_cur = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:916 block_table_offset_cur = 256
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:917 block_table_idx_next = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:918 block_table_offset_next = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:915 block_table_idx_cur = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:916 block_table_offset_cur = 256
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:917 block_table_idx_next = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:918 block_table_offset_next = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:915 block_table_idx_cur = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:916 block_table_offset_cur = 256
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:917 block_table_idx_next = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:918 block_table_offset_next = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:915 block_table_idx_cur = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:916 block_table_offset_cur = 256
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:917 block_table_idx_next = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:918 block_table_offset_next = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:915 block_table_idx_cur = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:916 block_table_offset_cur = 256
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:917 block_table_idx_next = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:918 block_table_offset_next = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:915 block_table_idx_cur = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:916 block_table_offset_cur = 256
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:917 block_table_idx_next = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_kernel.h:918 block_table_offset_next = 0
+alty
+
+251 tokens generated (73.02835989170303 token/s)
+
+test models::llama::tests::test_llama_model ... ok
+
+successes:
+
+successes:
+    models::llama::tests::test_llama_model
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 10 filtered out; finished in 4.50s
+
+w_stride = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_launch_template.h:156 params.vnew_row_stride = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_launch_template.h:157 params.knew_head_stride = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_launch_template.h:158 params.vnew_head_stride = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_launch_template.h:159 params.rotary_cos_ptr = 0000000000000000
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_launch_template.h:160 params.rotary_sin_ptr = 0000000000000000
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_launch_template.h:161 params.cache_batch_idx = 0000000000000000
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_launch_template.h:162 params.block_table = 00000002844B5600
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_launch_template.h:163 params.block_table_batch_stride = 1
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_launch_template.h:164 params.page_block_size = 512
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_launch_template.h:165 params.window_size_left = 512
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_launch_template.h:166 params.window_size_right = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_launch_template.h:167 params.is_bf16 = 1
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_launch_template.h:168 params.is_causal = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_launch_template.h:169 params.is_seqlens_k_cumulative = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_launch_template.h:170 params.is_rotary_interleaved = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_launch_template.h:171 params.unpadded_lse = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_launch_template.h:172 params.seqlenq_ngroups_swapped = 0
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_launch_template.h:173 params.num_splits = 1
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_launch_template.h:174 params.alibi_slopes_ptr = 0000000000000000
+D:\Code\Work-Atoma\atoma-paged-attention\csrc\kernels\flash_fwd_launch_template.h:175 params.alibi_slopes_batch_stride = 0

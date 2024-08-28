@@ -9,6 +9,12 @@
 #include "static_switch.h"
 #include "flash.h"
 #include "flash_fwd_kernel.h"
+#include "block_info.h"
+
+
+#define myprint(data, format) { \
+    fprintf(stdout, "%s:%d %s = " format "\n", __FILE__, __LINE__, #data, data); \
+}
 
 // Determine if the architecture supports FLASH and define a macro to handle parameter modifiers
 #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
@@ -105,7 +111,7 @@ void run_flash_fwd(Flash_fwd_params &params, cudaStream_t stream) {
 }
 
 template<typename Kernel_traits, bool Is_causal>
-void run_flash_splitkv_fwd(Flash_fwd_params &params, cudaStream_t stream) {
+void run_flash_splitkv_fwd(Flash_fwd_params &params, cudaStream_t stream, bool show) {
     static_assert(!Kernel_traits::Is_Q_in_regs, "SplitKV implementation does not support Is_Q_in_regs");
     static_assert(!Kernel_traits::Share_Q_K_smem, "SplitKV implementation does not support Share_Q_K_smem");
     constexpr size_t smem_size = Kernel_traits::kSmemSize;
@@ -113,6 +119,68 @@ void run_flash_splitkv_fwd(Flash_fwd_params &params, cudaStream_t stream) {
     dim3 grid(num_m_block, params.num_splits > 1 ? params.num_splits : params.b, params.num_splits > 1 ? params.b * params.h : params.h);
     const bool is_even_MN = params.cu_seqlens_q == nullptr && params.cu_seqlens_k == nullptr && params.seqlen_k % Kernel_traits::kBlockN == 0 && params.seqlen_q % Kernel_traits::kBlockM == 0;
     const bool is_even_K = params.d == Kernel_traits::kHeadDim;
+    if (show) {
+        myprint(is_even_MN, "%d");
+        myprint(is_even_K, "%d");
+        myprint(grid.x,"%u");
+        myprint(grid.y,"%u");
+        myprint(grid.z,"%u");
+        myprint(smem_size, "%zu");
+        myprint(params.o_ptr, "%p");
+        myprint(params.oaccum_ptr, "%p");
+        myprint(params.o_batch_stride, "%d");
+        myprint(params.o_row_stride, "%d");
+        myprint(params.o_head_stride, "%d");
+        myprint(params.p_ptr, "%p");
+        myprint(params.softmax_lse_ptr, "%p");
+        myprint(params.softmax_lseaccum_ptr, "%p");
+        myprint(params.b, "%d");
+        myprint(params.seqlen_q, "%d");
+        myprint(params.seqlen_k, "%d");
+        myprint(params.seqlen_knew, "%d");
+        myprint(params.d, "%d");
+        myprint(params.seqlen_q_rounded, "%d");
+        myprint(params.seqlen_k_rounded, "%d");
+        myprint(params.d_rounded, "%d");
+        myprint(params.rotary_dim, "%d");
+        myprint(params.total_q, "%d");
+        myprint(params.cu_seqlens_q, "%p");
+        myprint(params.cu_seqlens_k, "%p");
+        myprint(params.seqused_k, "%p");
+        myprint(params.blockmask, "%p");
+        myprint(params.knew_ptr, "%p");
+        myprint(params.vnew_ptr, "%p");
+        myprint(params.knew_batch_stride, "%d");
+        myprint(params.vnew_batch_stride, "%d");
+        myprint(params.knew_row_stride, "%d");
+        myprint(params.vnew_row_stride, "%d");
+        myprint(params.knew_head_stride, "%d");
+        myprint(params.vnew_head_stride, "%d");
+        myprint(params.rotary_cos_ptr, "%p");
+        myprint(params.rotary_sin_ptr, "%p");
+        myprint(params.cache_batch_idx, "%p");
+        myprint(params.block_table, "%p");
+        myprint(params.block_table_batch_stride, "%d");
+        myprint(params.page_block_size, "%d");
+        myprint(params.window_size_left, "%d");
+        myprint(params.window_size_right, "%d");
+        myprint(params.is_bf16, "%d");
+        myprint(params.is_causal, "%d");
+        myprint(params.is_seqlens_k_cumulative, "%d");
+        myprint(params.is_rotary_interleaved, "%d");
+        myprint(params.unpadded_lse, "%d");
+        myprint(params.seqlenq_ngroups_swapped, "%d");
+        myprint(params.num_splits, "%d");
+        myprint(params.alibi_slopes_ptr, "%p");
+        myprint(params.alibi_slopes_batch_stride, "%d");
+        // const int bidb = 0;
+        // const flash::BlockInfo<true> binfo(params, bidb);
+        // myprint(binfo.sum_s_q, "%d");
+        // myprint(binfo.sum_s_k, "%d");
+        // myprint(binfo.actual_seqlen_q, "%d");
+        // myprint(binfo.seqlen_k_cache, "%d");
+        // myprint(binfo.actual_seqlen_k, "%d");
+    }
     BOOL_SWITCH(is_even_MN, IsEvenMNConst, [&] {
         EVENK_SWITCH(is_even_K, IsEvenKConst, [&] {
             LOCAL_SWITCH((params.window_size_left >= 0 || params.window_size_right >= 0) && !Is_causal, Is_local, [&] {
@@ -130,6 +198,7 @@ void run_flash_splitkv_fwd(Flash_fwd_params &params, cudaStream_t stream) {
                                     CUDA_CHECK(cudaFuncSetAttribute(
                                         kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, smem_size));
                                 }
+
                                 kernel<<<grid, Kernel_traits::kNThreads, smem_size, stream>>>(params);
                                 CUDA_CHECK(cudaGetLastError());
                             });
@@ -167,13 +236,19 @@ void run_flash_splitkv_fwd(Flash_fwd_params &params, cudaStream_t stream) {
 }
 
 template<typename T, int Headdim, bool Is_causal>
-void run_mha_fwd_splitkv_dispatch(Flash_fwd_params &params, cudaStream_t stream) {
+void run_mha_fwd_splitkv_dispatch(Flash_fwd_params &params, cudaStream_t stream, bool show) {
     constexpr static int kBlockM = 64;  // Fixed for all head dimensions
     // TD [2023-08-28]: nvcc segfaults for headdim 96 with block size 64 x 256,
     // and for headdim 192 with block size 64 x 128.
     // Also for headdim 160 with block size 64 x 128 after the rotary addition.
     constexpr static int kBlockN = Headdim <= 64 ? 256 : (Headdim <= 128 ? 128 : 64);
-    run_flash_splitkv_fwd<Flash_fwd_kernel_traits<Headdim, kBlockM, kBlockN, 4, false, false, T>, Is_causal>(params, stream);
+    if (show) {
+        myprint(Headdim, "%d");
+        myprint(kBlockM, "%d");
+        myprint(kBlockN, "%d");
+        myprint(Is_causal, "%d");
+    }
+    run_flash_splitkv_fwd<Flash_fwd_kernel_traits<Headdim, kBlockM, kBlockN, 4, false, false, T>, Is_causal>(params, stream, show);
 }
 
 template<typename T, bool Is_causal>

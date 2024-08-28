@@ -34,12 +34,13 @@ macro_rules! print_tensor_with_type {
             _ => candle_core::bail!("block_table must be a cuda tensor"),
         };
         println!(
-            "{}:{} - {} dtype {:?} dims {:?} contiguous {} ptr {:?}",
+            "{}:{} - {} dtype {:?} dims {:?} stride {:?} contiguous {} ptr {:?}",
             file!(),
             line!(),
             stringify!($x),
             $x.dtype(),
             $x.dims(),
+            $x.stride(),
             $x.is_contiguous(),
             ptr
         );
@@ -73,6 +74,7 @@ macro_rules! print_tensor {
 macro_rules! print_tensor_no_data {
     ($x:expr, $y:expr) => {
         if $y {
+            use candle_core::cuda_backend::cudarc::driver::DevicePtr;
             use help::print_tensor_with_type;
             use help::proper_tensor_print;
             match $x.dtype() {

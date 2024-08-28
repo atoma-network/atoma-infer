@@ -8,6 +8,7 @@ use candle_core::{
     DType, Device, IndexOp, Result, Tensor,
 };
 use half::{bf16, f16};
+use help::{print_tensor, print_tensor_no_data};
 use std::collections::HashMap;
 
 /// Swaps blocks from `src` to `dst` tensors, using the block_mapping.
@@ -139,11 +140,11 @@ pub fn swap_blocks(
 ///  * `key_caches` - A vector of `Tensor`s to copy the blocks to.
 ///  * `value_caches` - A vector of `Tensor`s to copy the blocks to.
 ///  * `block_mapping` - A `Tensor` of shape `[num_pairs, 2]` that maps the block indices
-///  *  to be copied, where `num_pairs` is the number of block pairs to be copied. 
+///  *  to be copied, where `num_pairs` is the number of block pairs to be copied.
 ///      The `block_mapping` tensor if of dtype `u32`.
-/// 
-/// # Safety 
-/// 
+///
+/// # Safety
+///
 /// Unsafe due to dangling CUDA pointers
 pub unsafe fn copy_blocks(
     key_caches: &[&mut Tensor],
@@ -318,6 +319,7 @@ pub fn reshape_and_cache_flash(
     key_cache: &Tensor,
     value_cache: &Tensor,
     slot_mapping: &Tensor,
+    show: bool,
 ) -> Result<()> {
     if key.dtype() != value.dtype()
         || key.dtype() != key_cache.dtype()
@@ -326,13 +328,24 @@ pub fn reshape_and_cache_flash(
         candle_core::bail!("Only support f16/bf16 dtypes and key, value, key_cache and value_cache must have same dtype")
     }
 
+    print_tensor!(slot_mapping, show);
     match key.dtype() {
-        DType::F16 => {
-            reshape_and_cache_flash_t::<f16>(key, value, key_cache, value_cache, slot_mapping)?
-        }
-        DType::BF16 => {
-            reshape_and_cache_flash_t::<bf16>(key, value, key_cache, value_cache, slot_mapping)?
-        }
+        DType::F16 => reshape_and_cache_flash_t::<f16>(
+            key,
+            value,
+            key_cache,
+            value_cache,
+            slot_mapping,
+            show,
+        )?,
+        DType::BF16 => reshape_and_cache_flash_t::<bf16>(
+            key,
+            value,
+            key_cache,
+            value_cache,
+            slot_mapping,
+            show,
+        )?,
         _ => {
             candle_core::bail!("Only support f16/bf16 dtypes must have same dtype")
         }
@@ -350,6 +363,7 @@ fn reshape_and_cache_flash_t<
     key_cache: &Tensor,
     value_cache: &Tensor,
     slot_mapping: &Tensor,
+    show: bool,
 ) -> Result<()> {
     let dtype = match key.dtype() {
         DType::F16 => 0,
@@ -366,6 +380,12 @@ fn reshape_and_cache_flash_t<
 
     let key_stride = key.stride()[0];
     let value_stride = value.stride()[0];
+    if show {
+        dbg!(key_stride);
+        dbg!(value_stride);
+        print_tensor_no_data!(key, show);
+        print_tensor_no_data!(value, show);
+    }
     let block_stride = key_cache.stride()[0];
     let k_rank = key.rank();
     let v_rank = value.rank();
@@ -471,6 +491,15 @@ fn reshape_and_cache_flash_t<
     };
 
     unsafe {
+        if show {
+            dbg!(block_stride);
+            dbg!(num_tokens);
+            dbg!(num_heads);
+            dbg!(head_size);
+            dbg!(block_size);
+            dbg!(key_stride);
+            dbg!(value_stride);
+        }
         ffi::reshape_and_cache_flash(
             k_ptr,
             v_ptr,

@@ -99,7 +99,7 @@ fn main() -> Result<()> {
     };
     println!("cargo:warning=Build directory: {:?}", build_dir.display());
 
-    compile_cuda_files(&build_dir)?;
+    compile_cuda_files(&build_dir)? ;
 
     // Link libraries
     println!("cargo:rustc-link-search={}", build_dir.display());

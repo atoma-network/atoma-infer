@@ -5,6 +5,7 @@
 #pragma once
 
 #include <cuda.h>
+
 #include <vector>
 
 constexpr int TOTAL_DIM = 0;
@@ -35,16 +36,15 @@ struct Qkv_params {
     int h, h_k;
     // In the case of multi-query and grouped-query attention (MQA/GQA), nheads_k could be
     // different from nheads (query).
-    int h_h_k_ratio; // precompute h / h_k,
+    int h_h_k_ratio;  // precompute h / h_k,
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
 struct Flash_fwd_params : public Qkv_params {
-
     // The O matrix (output).
-    void * __restrict__ o_ptr;
-    void * __restrict__ oaccum_ptr;
+    void *__restrict__ o_ptr;
+    void *__restrict__ oaccum_ptr;
 
     // The stride between rows of O.
     index_t o_batch_stride;
@@ -52,11 +52,11 @@ struct Flash_fwd_params : public Qkv_params {
     index_t o_head_stride;
 
     // The pointer to the P matrix.
-    void * __restrict__ p_ptr;
+    void *__restrict__ p_ptr;
 
     // The pointer to the softmax sum.
-    void * __restrict__ softmax_lse_ptr;
-    void * __restrict__ softmax_lseaccum_ptr;
+    void *__restrict__ softmax_lse_ptr;
+    void *__restrict__ softmax_lseaccum_ptr;
 
     // The dimensions.
     int b, seqlen_q, seqlen_k, seqlen_knew, d, seqlen_q_rounded, seqlen_k_rounded, d_rounded, rotary_dim, total_q;
@@ -66,17 +66,17 @@ struct Flash_fwd_params : public Qkv_params {
     float scale_softmax_log2;
 
     // array of length b+1 holding starting offset of each sequence.
-    int * __restrict__ cu_seqlens_q;
-    int * __restrict__ cu_seqlens_k;
+    int *__restrict__ cu_seqlens_q;
+    int *__restrict__ cu_seqlens_k;
 
     // If provided, the actual length of each k sequence.
-    int * __restrict__ seqused_k;
+    int *__restrict__ seqused_k;
 
     int *__restrict__ blockmask;
 
     // The K_new and V_new matrices.
-    void * __restrict__ knew_ptr;
-    void * __restrict__ vnew_ptr;
+    void *__restrict__ knew_ptr;
+    void *__restrict__ vnew_ptr;
 
     // The stride between rows of the Q, K and V matrices.
     index_t knew_batch_stride;
@@ -87,14 +87,14 @@ struct Flash_fwd_params : public Qkv_params {
     index_t vnew_head_stride;
 
     // The cos and sin matrices for rotary embedding.
-    void * __restrict__ rotary_cos_ptr;
-    void * __restrict__ rotary_sin_ptr;
+    void *__restrict__ rotary_cos_ptr;
+    void *__restrict__ rotary_sin_ptr;
 
     // The indices to index into the KV cache.
-    int * __restrict__ cache_batch_idx;
+    int *__restrict__ cache_batch_idx;
 
     // Paged KV cache
-    int * __restrict__ block_table;
+    int *__restrict__ block_table;
     index_t block_table_batch_stride;
     int page_block_size;
 
@@ -123,17 +123,16 @@ struct Flash_fwd_params : public Qkv_params {
 
     int num_splits;  // For split-KV version
 
-    void * __restrict__ alibi_slopes_ptr;
+    void *__restrict__ alibi_slopes_ptr;
     index_t alibi_slopes_batch_stride;
 
-    bool unpadded_lse;  // For varlen paths: LSE is in [nheads, total_seqlen_q] format instead of [b, nheads, seqlen_q].
+    bool unpadded_lse;             // For varlen paths: LSE is in [nheads, total_seqlen_q] format instead of [b, nheads, seqlen_q].
     bool seqlenq_ngroups_swapped;  // q has been transposed from (b, 1, (nheads_kv ngroups), d) to (b, ngroups, nheads_kv, d).
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
 struct Flash_bwd_params : public Flash_fwd_params {
-
     // The dO and dQKV matrices.
     void *__restrict__ do_ptr;
     void *__restrict__ dq_ptr;
@@ -174,7 +173,10 @@ struct Flash_bwd_params : public Flash_fwd_params {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-template<typename T, int Headdim, bool Is_causal> void run_mha_fwd_(Flash_fwd_params &params, cudaStream_t stream);
-template<typename T, int Headdim, bool Is_causal> void run_mha_fwd_splitkv_dispatch(Flash_fwd_params &params, cudaStream_t stream);
+template <typename T, int Headdim, bool Is_causal>
+void run_mha_fwd_(Flash_fwd_params &params, cudaStream_t stream);
+template <typename T, int Headdim, bool Is_causal>
+void run_mha_fwd_splitkv_dispatch(Flash_fwd_params &params, cudaStream_t stream, bool show);
 
-template<typename T, int Headdim> void run_mha_bwd_(Flash_bwd_params &params, cudaStream_t stream);
+template <typename T, int Headdim>
+void run_mha_bwd_(Flash_bwd_params &params, cudaStream_t stream);

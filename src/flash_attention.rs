@@ -1,9 +1,10 @@
-use candle_core::{DType, Device, IndexOp, Result, Tensor};
+use candle_core::{cuda::cudarc::driver::DevicePtr, DType, Device, IndexOp, Result, Tensor};
 use csrc::{
     copy_blocks, flash_attn_kv_cache_full, flash_attn_varlen, flash_attn_varlen_with_block_table,
     reshape_and_cache_flash, swap_blocks,
 };
-use std::collections::HashMap;
+use help::{print_tensor, print_tensor_no_data};
+use std::{collections::HashMap, thread::sleep, time::Duration};
 
 /// `FlashAttentionDecodingMetadata` - Structure wrapping the metadata
 /// required for running flash and paged attention kernels for decoding
@@ -324,6 +325,7 @@ impl FlashAttention {
         v: &Tensor,
         kv_cache: &Tensor,
         attention_metadata: &FlashAttentionMetadata,
+        show: bool,
     ) -> Result<Tensor> {
         let (q_num_tokens, q_num_heads, q_hidden_dim) = q.dims3()?;
         let (k_num_tokens, k_num_heads, k_hidden_dim) = k.dims3()?;
@@ -355,9 +357,24 @@ impl FlashAttention {
         }
 
         // Reshape the input keys and values and store them in the cache.
+        print_tensor!(attention_metadata.slot_mapping, show);
         let (k_cache, v_cache) = self.split_kv_cache(kv_cache)?;
-        reshape_and_cache_flash(k, v, &k_cache, &v_cache, &attention_metadata.slot_mapping)?;
+        print_tensor_no_data!(k, show);
+        print_tensor_no_data!(v, show);
+        print_tensor_no_data!(k_cache, show);
+        print_tensor_no_data!(v_cache, show);
+        reshape_and_cache_flash(
+            k,
+            v,
+            &k_cache,
+            &v_cache,
+            &attention_metadata.slot_mapping,
+            show,
+        )?;
+        // print_tensor!(k, show);
+        // print_tensor!(v, show);
 
+        print_tensor!(attention_metadata.slot_mapping, show);
         let num_prefill_tokens = attention_metadata.num_prefill_tokens;
         let num_decoding_tokens = attention_metadata.num_decoding_tokens;
 
@@ -373,6 +390,9 @@ impl FlashAttention {
 
         // Query for decode
         // KV is not needed because it is already cached
+        if show {
+            dbg!(num_prefill_tokens);
+        }
         let decode_q = q.i(num_prefill_tokens..)?;
         // QKV for prefill
         let q = q.i(..num_prefill_tokens)?;
@@ -404,6 +424,7 @@ impl FlashAttention {
                     prefill_metadata.max_prefill_sequence_length,
                     self.softmax_scale,
                     q_num_tokens > 1,
+                    show,
                 )?;
                 output.slice_assign(
                     &[..num_prefill_tokens, ..output.dims()[1], ..output.dims()[2]],
@@ -446,6 +467,7 @@ impl FlashAttention {
                     self.sliding_window,
                     None,
                     prefill_metadata.block_tables.as_ref(),
+                    show,
                 )?;
                 output.slice_assign(
                     &[..num_prefill_tokens, ..output.dims()[1], ..output.dims()[2]],
@@ -458,6 +480,27 @@ impl FlashAttention {
 
         let output = if let Some(decoding_metadata) = &attention_metadata.decoding_metadata {
             // Decoding inference forward pass
+            print_tensor_no_data!(decode_q, show);
+            print_tensor_no_data!(k_cache, show);
+            print_tensor_no_data!(v_cache, show);
+            print_tensor!(attention_metadata.slot_mapping, show);
+            if let Some(block_tables) = &decoding_metadata.block_tables {
+                print_tensor!(block_tables, show);
+            }
+            if let Some(alibi_slopes) = &self.alibi_slopes {
+                print_tensor!(alibi_slopes, show);
+            }
+            if let Some(sequence_lengths) = &decoding_metadata.sequence_lengths {
+                print_tensor!(sequence_lengths, show);
+            }
+            print_tensor!(attention_metadata.slot_mapping, show);
+            if let Some(block_tables) = decoding_metadata.block_tables.as_ref() {
+                print_tensor!(block_tables, show);
+            }
+            print_tensor!(attention_metadata.slot_mapping, show);
+            print_tensor!(attention_metadata.slot_mapping, show);
+            print_tensor!(attention_metadata.slot_mapping, show);
+            print_tensor!(attention_metadata.slot_mapping, show);
             let out = flash_attn_kv_cache_full(
                 &decode_q.unsqueeze(1)?, // in decoding phase, each batch sequence has length 1
                 &k_cache,
@@ -468,7 +511,12 @@ impl FlashAttention {
                 decoding_metadata.sequence_lengths.as_ref(),
                 None,
                 true,
+                show,
             )?;
+            if show {
+                dbg!();
+            }
+            print_tensor!(attention_metadata.slot_mapping, show);
             output.slice_assign(&[num_prefill_tokens.., 0.., 0..], &out.squeeze(1)?)?
         } else {
             output
@@ -620,7 +668,7 @@ mod tests {
             num_decoding_tokens: 5,
         };
 
-        let result = flash_attention.forward(&q, &k, &v, &kv_cache, &attention_metadata);
+        let result = flash_attention.forward(&q, &k, &v, &kv_cache, &attention_metadata, false);
 
         assert!(result.is_ok());
 
@@ -685,7 +733,7 @@ mod tests {
         let v = v.transpose(0, 1).unwrap();
 
         let result = flash_attention
-            .forward(&q, &k, &v, &kv_cache, &attention_metadata)
+            .forward(&q, &k, &v, &kv_cache, &attention_metadata, false)
             .expect("Failed to compute attention")
             .reshape((2, 3, 8))
             .unwrap()

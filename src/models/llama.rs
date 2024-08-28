@@ -1,6 +1,7 @@
 use candle_core::{DType, Device, Module, Result, Tensor};
 use candle_nn::{embedding, Embedding, VarBuilder};
 use candle_transformers::models::with_tracing::{linear_no_bias as linear, Linear, RmsNorm};
+use help::{print_tensor, print_tensor_no_data};
 use serde::{Deserialize, Serialize};
 
 use crate::flash_attention::{FlashAttention, FlashAttentionMetadata};
@@ -180,7 +181,9 @@ impl CausalSelfAttention {
         input_positions: &Tensor,
         kv_cache: &Tensor,
         attention_metadata: &FlashAttentionMetadata,
+        show: bool,
     ) -> Result<Tensor> {
+        print_tensor!(attention_metadata.slot_mapping, show);
         let (batch_size, num_total_tokens, _hidden_size) = x.dims3()?;
         if batch_size != 1 {
             candle_core::bail!(
@@ -194,6 +197,9 @@ impl CausalSelfAttention {
         let k = self.k_proj.forward(x)?;
         let v = self.v_proj.forward(x)?;
 
+        if show {
+            dbg!();
+        }
         let q = q
             .reshape((
                 batch_size,
@@ -225,11 +231,13 @@ impl CausalSelfAttention {
         // transpose the matrices back to [sequence_length, num_heads, head_dim]
         let q = q.transpose(1, 2)?.squeeze(0)?.contiguous()?;
         let k = k.transpose(1, 2)?.squeeze(0)?.contiguous()?;
-        let v = v.squeeze(0)?;
+        let v = v.squeeze(0)?.contiguous()?;
 
+        print_tensor!(attention_metadata.slot_mapping, show);
         let o = self
             .attention
-            .forward(&q, &k, &v, kv_cache, attention_metadata)?;
+            .forward(&q, &k, &v, kv_cache, attention_metadata, show)?;
+        print_tensor!(attention_metadata.slot_mapping, show);
 
         let o = o.unsqueeze(0)?;
         let out = self.o_proj.forward(&o)?;
@@ -320,16 +328,22 @@ impl Block {
         input_positions: &Tensor,
         cache: &Tensor,
         attention_metadata: &FlashAttentionMetadata,
+        show: bool,
     ) -> Result<Tensor> {
         let _enter = self.span.enter();
         let residual = x;
         let x = self.rms_1.forward(x)?;
+        print_tensor!(attention_metadata.slot_mapping, show);
         let x = (self
             .attn
-            .forward(&x, input_positions, cache, attention_metadata)?
+            .forward(&x, input_positions, cache, attention_metadata, show)?
             + residual)?;
+        print_tensor!(attention_metadata.slot_mapping, show);
         let residual = &x;
         let x = (self.mlp.forward(&self.rms_2.forward(&x)?)? + residual)?;
+        if show {
+            dbg!();
+        }
         Ok(x)
     }
 
@@ -384,6 +398,7 @@ impl Llama {
         selected_token_indices: &Tensor,
         kv_caches: &[&mut Tensor],
         attention_metadata: FlashAttentionMetadata,
+        show: bool,
     ) -> Result<Tensor> {
         if x.dims()[0] != 1 {
             candle_core::bail!(
@@ -392,8 +407,24 @@ impl Llama {
             );
         }
         let mut x = self.wte.forward(x)?;
+        print_tensor!(attention_metadata.slot_mapping, show);
         for (i, block) in self.blocks.iter_mut().enumerate() {
-            x = block.forward(&x, input_positions, kv_caches[i], &attention_metadata)?;
+            if show {
+                dbg!(i);
+            }
+            x = block.forward(
+                &x,
+                input_positions,
+                kv_caches[i],
+                &attention_metadata,
+                show && i == 0,
+            )?;
+            if show {
+                dbg!(i);
+            }
+        }
+        if show {
+            dbg!();
         }
         let x = self.ln_f.forward(&x)?;
         let x = x.index_select(selected_token_indices, 1)?.contiguous()?;
@@ -439,6 +470,7 @@ mod tests {
     #[test]
     #[serial]
     fn test_llama_model() -> Result<()> {
+        dbg!();
         let prompt = "The capital of France is ".to_string();
 
         let dtype = DType::BF16;
@@ -489,13 +521,14 @@ mod tests {
             LogitsProcessor::from_sampling(42, sampling)
         };
 
-        let sample_len = 32;
         let start_gen = std::time::Instant::now();
         let mut token_generated = 0;
 
         // kv cache
         let num_blocks = 100;
         let block_size = 16;
+        let sample_len = 251;
+        let shift = 0 * block_size;
         let num_key_value_heads = config.num_key_value_heads;
         let head_dim = config.hidden_size / config.num_attention_heads;
         let mut kv_cache = std::iter::repeat_with(|| {
@@ -515,7 +548,7 @@ mod tests {
         let input = Tensor::new(&tokens[..], &device)?.unsqueeze(0)?;
         let attention_metadata = FlashAttentionMetadata {
             context_lengths: Some(Tensor::from_vec(vec![tokens.len() as u32], (1,), &device)?),
-            slot_mapping: Tensor::arange(0, tokens.len() as i64, &device)?,
+            slot_mapping: Tensor::arange(shift as i64, (tokens.len() + shift) as i64, &device)?,
             decoding_metadata: None,
             num_prefill_tokens: tokens.len(),
             num_decoding_tokens: 0,
@@ -542,6 +575,7 @@ mod tests {
             &Tensor::new(vec![tokens.len() as u32 - 1], &device)?,
             &kv_cache,
             attention_metadata,
+            false,
         )?;
         let logits = logits.squeeze(0)?.squeeze(0)?;
 
@@ -555,22 +589,32 @@ mod tests {
         }
 
         // decoding loop
-        for _ in 1..sample_len {
+        for sss in 1..sample_len {
             let input = Tensor::new(&[next_token], &device)?.unsqueeze(0)?;
             let input_positions = Tensor::new(&[tokens.len() as i64 - 1], &device)?.unsqueeze(0)?;
             let selected_token_indices = Tensor::new(&[0u32], &device)?;
+            dbg!(tokens.len());
             let num_blocks = (tokens.len() / block_size) as i64 + 1;
+
             let attention_metadata = FlashAttentionMetadata {
                 context_lengths: None,
-                slot_mapping: Tensor::new(&[tokens.len() as i64 - 1], &device)?,
+                slot_mapping: Tensor::new(&[tokens.len() as i64 - 1 + shift as i64], &device)?,
                 decoding_metadata: Some(FlashAttentionDecodingMetadata {
                     block_tables: Some(
-                        Tensor::arange(0, num_blocks, &device)?
-                            .to_dtype(DType::U32)?
-                            .reshape((1, num_blocks as usize))?,
+                        Tensor::arange(
+                            (shift / block_size) as i64,
+                            num_blocks + (shift / block_size) as i64,
+                            &device,
+                        )?
+                        .to_dtype(DType::U32)?
+                        .reshape((1, num_blocks as usize))?,
                     ),
                     max_decoding_sequence_length: tokens.len(),
-                    sequence_lengths: Some(Tensor::new(&[tokens.len() as u32], &device)?),
+                    sequence_lengths: Some(Tensor::from_vec(
+                        vec![tokens.len() as u32],
+                        (1,),
+                        &device,
+                    )?),
                 }),
                 prefill_metadata: None,
                 num_prefill_tokens: 0,
@@ -583,6 +627,7 @@ mod tests {
                     &selected_token_indices,
                     &kv_cache,
                     attention_metadata,
+                    sss >= sample_len - 5,
                 )?
                 .squeeze(0)?
                 .squeeze(0)?;
@@ -591,9 +636,9 @@ mod tests {
             token_generated += 1;
             tokens.push(next_token);
 
-            if Some(next_token) == eos_token_id {
-                break;
-            }
+            // if Some(next_token) == eos_token_id {
+            //     break;
+            // }
             if let Some(t) = tokenizer.next_token(next_token)? {
                 print!("{t}");
                 std::io::stdout().flush()?;
@@ -812,6 +857,7 @@ mod tests {
                 &selected_token_indices,
                 &kv_caches,
                 attention_metadata,
+                true,
             )?
             .squeeze(0)?;
 
@@ -907,6 +953,8 @@ mod tests {
                 &device,
             )?);
 
+            dbg!(max_decoding_sequence_length);
+            dbg!(num_active);
             let attention_metadata = FlashAttentionMetadata {
                 context_lengths: None,
                 slot_mapping,
@@ -926,6 +974,7 @@ mod tests {
                     &selected_token_indices,
                     &kv_caches,
                     attention_metadata,
+                    true,
                 )?
                 .squeeze(0)?;
 

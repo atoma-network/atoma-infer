@@ -6,5 +6,5 @@
 
 template<>
 void run_mha_fwd_<cutlass::half_t, 256, true>(Flash_fwd_params &params, cudaStream_t stream) {
-    run_mha_fwd_hdim256<cutlass::half_t, true>(params, stream);
+    printf("%s unimplemented!\n", __FILE__);
 }

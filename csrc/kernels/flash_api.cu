@@ -5,14 +5,14 @@
 #include "flash.h"
 #include "static_switch.h"
 
-void run_mha_fwd(Flash_fwd_params &params, cudaStream_t stream, bool force_split_kernel = false) {
+void run_mha_fwd(Flash_fwd_params &params, cudaStream_t stream, bool force_split_kernel, bool show) {
     FP16_SWITCH(!params.is_bf16, [&] {
         HEADDIM_SWITCH(params.d, [&] {
             BOOL_SWITCH(params.is_causal, Is_causal, [&] {
                 if (params.num_splits <= 1 && !force_split_kernel) {  // If we don't set it num_splits == 0
                     run_mha_fwd_<elem_type, kHeadDim, Is_causal>(params, stream);
                 } else {
-                    run_mha_fwd_splitkv_dispatch<elem_type, kHeadDim, Is_causal>(params, stream);
+                    run_mha_fwd_splitkv_dispatch<elem_type, kHeadDim, Is_causal>(params, stream, show);
                 }
             });
         });
@@ -20,6 +20,7 @@ void run_mha_fwd(Flash_fwd_params &params, cudaStream_t stream, bool force_split
 }
 
 extern "C" void run_mha(
+    bool show,
     void *q_ptr,
     void *k_ptr,
     void *v_ptr,
@@ -149,5 +150,5 @@ extern "C" void run_mha(
     params.unpadded_lse = unpadded_lse;
 
     cudaStream_t stream = 0; // Use the default stream.
-    run_mha_fwd(params, stream, force_split_kernel);
+    run_mha_fwd(params, stream, force_split_kernel, show);
 }

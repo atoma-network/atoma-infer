@@ -1,0 +1,21 @@
+{
+  "files.associations": {
+    "chrono": "cpp",
+    "complex": "cpp",
+    "functional": "cpp",
+    "optional": "cpp",
+    "system_error": "cpp",
+    "type_traits": "cpp",
+    "xlocmon": "cpp",
+    "xlocnum": "cpp",
+    "xtr1common": "cpp",
+    "__functional_base": "cpp",
+    "limits": "cpp",
+    "tuple": "cpp",
+    "array": "cpp",
+    "vector": "cpp",
+    "xstring": "cpp",
+    "xutility": "cpp",
+    "format": "cpp"
+  }
+}
