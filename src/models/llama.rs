@@ -958,7 +958,7 @@ mod tests {
 
         // decoding loop
         for _ in 1..sample_len {
-            if tokens.len() % 16 == 0 {
+            if tokens.len() % 16 == 1 {
                 let mut num = rng.gen_range(0..100);
                 while allocated_blocks.contains(&num) {
                     num = rng.gen_range(0..100);
@@ -969,12 +969,12 @@ mod tests {
             let input = Tensor::new(&[next_token], &device)?.unsqueeze(0)?;
             let input_positions = Tensor::new(&[tokens.len() as i64 - 1], &device)?.unsqueeze(0)?;
             let selected_token_indices = Tensor::new(&[0u32], &device)?;
-            let num_blocks = (tokens.len() / block_size) as i64 + 1;
+            let num_blocks = allocated_blocks.len();
 
             let context_lengths = Tensor::new(&[0u32], &device)?;
             let last_allocated_block = *allocated_blocks.last().unwrap();
             let slot_mapping = Tensor::new(
-                &[(last_allocated_block as i64) * (block_size as i64) + (tokens.len() % block_size as usize) as i64],
+                &[(last_allocated_block as i64) * (block_size as i64) + ((tokens.len() - 1) % block_size as usize) as i64],
                 &device,
             )?;
             let query_start_locations = Tensor::new(&[0u32, 1], &device)?;
