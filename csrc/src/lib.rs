@@ -1565,19 +1565,19 @@ impl FlashAttentionKvCache {
         }
 
         if let Some(w) = window_size_left {
-            if w >= seqlen_k {
+            if w >= seqlen_k as i32 {
                 window_size_left = Some(-1);
             }
         }
         if let Some(w) = window_size_right {
-            if w >= seqlen_k {
+            if w >= seqlen_k as i32 {
                 window_size_right = Some(-1);
             }
         }
 
         let mut window_size_left = window_size_left.unwrap_or(-1);
         let mut window_size_right = window_size_right.unwrap_or(-1);
-        
+
         let mut is_causal = window_size_left < 0 && window_size_right == 0;
         // causal=true is the same as causal=false in this case
         if seqlen_q == 1 && alibi_slopes.is_none() {
@@ -1746,7 +1746,7 @@ impl FlashAttentionKvCache {
                 kc_stride[0] as u32,
                 vc_stride[0] as u32,
                 out_stride[0] as u32,
-                alibi_slopes_batch_stride,
+                alibi_slopes_batch_stride as u32,
                 q_stride[q_rank - 3] as u32,
                 /* k_row_stride   */ k_stride[k_rank - 3] as u32,
                 /* v_row_stride   */ v_stride[v_rank - 3] as u32,
@@ -1765,14 +1765,14 @@ impl FlashAttentionKvCache {
                 self.softmax_scale * std::f32::consts::LOG2_E,
                 block_table_ptr,
                 block_table_batch_stride,
-                page_block_size,
+                page_block_size as i32,
                 std::ptr::null(),
                 seqlen_q as u32,
                 seqlen_k as u32,
                 seqlen_q_rounded as u32,
                 seqlen_k_rounded as u32,
                 is_bf16,
-                is_causal,
+                is_causal as i32,
                 window_size_left,
                 window_size_right,
                 0.0,
