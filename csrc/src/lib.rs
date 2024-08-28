@@ -1575,14 +1575,15 @@ impl FlashAttentionKvCache {
             }
         }
 
+        let mut window_size_left = window_size_left.unwrap_or(-1);
+        let mut window_size_right = window_size_right.unwrap_or(-1);
+        
         let mut is_causal = window_size_left < 0 && window_size_right == 0;
         // causal=true is the same as causal=false in this case
         if seqlen_q == 1 && alibi_slopes.is_none() {
             is_causal = false;
         }
 
-        let mut window_size_left = window_size_left.unwrap_or(-1);
-        let mut window_size_right = window_size_right.unwrap_or(-1);
         if window_size_left < 0 && window_size_right >= 0 {
             window_size_left = seqlen_k as i32;
         }
