@@ -1604,10 +1604,12 @@ impl FlashAttentionKvCache {
         let q_stride = q_l.stride();
         let kc_stride = kc_l.stride();
         let vc_stride = vc_l.stride();
+        let o_stride = out_l.stride();
 
         let q_rank = q_stride.len();
         let kc_rank = kc_stride.len();
         let vc_rank = vc_stride.len();
+        let o_rank = o_stride.len();
 
         if q_rank != 4 || kc_rank != 4 || vc_rank != 4 {
             candle_core::bail!(
@@ -1718,7 +1720,6 @@ impl FlashAttentionKvCache {
                 std::ptr::null()
             };
             let is_seqlens_k_cumulative = self.seqlens_k.is_none();
-            let out_stride = out_l.stride();
             let num_splits = utils::compute_num_splits(
                 batch_size,
                 num_heads,
@@ -1748,12 +1749,12 @@ impl FlashAttentionKvCache {
                 out_stride[0] as u32,
                 alibi_slopes_batch_stride as u32,
                 q_stride[q_rank - 3] as u32,
-                /* k_row_stride   */ k_stride[k_rank - 3] as u32,
-                /* v_row_stride   */ v_stride[v_rank - 3] as u32,
+                /* k_row_stride   */ kc_stride[kc_rank - 3] as u32,
+                /* v_row_stride   */ vc_stride[vc_rank - 3] as u32,
                 /* o_row_stride   */ o_stride[o_rank - 3] as u32,
                 /* q_head_stride  */ q_stride[q_rank - 2] as u32,
-                /* k_head_stride  */ k_stride[k_rank - 2] as u32,
-                /* v_head_stride  */ v_stride[v_rank - 2] as u32,
+                /* k_head_stride  */ kc_stride[kc_rank - 2] as u32,
+                /* v_head_stride  */ vc_stride[vc_rank - 2] as u32,
                 /* o_head_stride  */ o_stride[o_rank - 2] as u32,
                 num_splits,
                 batch_size as u32,
