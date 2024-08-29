@@ -8,7 +8,31 @@ use crate::flash_attention::{FlashAttention, FlashAttentionMetadata};
 /// Maximum input sequence token length
 const MAX_SEQ_LEN: usize = 4096;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize, Default)]
+pub enum Llama3RopeType {
+    #[serde(rename = "llama3")]
+    Llama3,
+    #[default]
+    #[serde(rename = "default")]
+    Default,
+}
+
+#[derive(Debug, Clone, serde::Deserialize, Default)]
+pub struct Llama3RopeConfig {
+    pub factor: f32,
+    pub low_freq_factor: f32,
+    pub high_freq_factor: f32,
+    pub original_max_position_embeddings: usize,
+    pub rope_type: Llama3RopeType,
+}
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(untagged)]
+pub enum LlamaEosToks {
+    Single(u32),
+    Multiple(Vec<u32>),
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
 pub struct LlamaConfig {
     pub hidden_size: usize,
     pub intermediate_size: usize,
@@ -20,7 +44,9 @@ pub struct LlamaConfig {
     #[serde(default = "default_rope")]
     pub rope_theta: f32,
     pub bos_token_id: Option<u32>,
-    pub eos_token_id: Option<u32>,
+    pub eos_token_id: Option<LlamaEosToks>,
+    pub rope_scaling: Option<Llama3RopeConfig>,
+    pub max_position_embeddings: usize,
 }
 
 impl LlamaConfig {
@@ -34,7 +60,7 @@ fn default_rope() -> f32 {
 }
 
 impl LlamaConfig {
-    pub fn into_config(self) -> Config {
+    pub fn into_config(self, use_flash_attn: bool) -> Config {
         Config {
             hidden_size: self.hidden_size,
             intermediate_size: self.intermediate_size,
@@ -44,8 +70,11 @@ impl LlamaConfig {
             num_key_value_heads: self.num_key_value_heads(),
             rms_norm_eps: self.rms_norm_eps,
             rope_theta: self.rope_theta,
+            use_flash_attn,
             bos_token_id: self.bos_token_id,
             eos_token_id: self.eos_token_id,
+            rope_scaling: self.rope_scaling,
+            max_position_embeddings: self.max_position_embeddings,
         }
     }
 }
@@ -58,14 +87,17 @@ pub struct Config {
     pub num_hidden_layers: usize,
     pub num_attention_heads: usize,
     pub num_key_value_heads: usize,
+    pub use_flash_attn: bool,
     pub rms_norm_eps: f64,
     pub rope_theta: f32,
     pub bos_token_id: Option<u32>,
-    pub eos_token_id: Option<u32>,
+    pub eos_token_id: Option<LlamaEosToks>,
+    pub rope_scaling: Option<Llama3RopeConfig>,
+    pub max_position_embeddings: usize,
 }
 
 impl Config {
-    pub fn config_7b_v1() -> Self {
+    pub fn config_7b_v1(use_flash_attn: bool) -> Self {
         Self {
             hidden_size: 4096,
             intermediate_size: 11008,
@@ -73,14 +105,17 @@ impl Config {
             num_hidden_layers: 32,
             num_attention_heads: 32,
             num_key_value_heads: 32,
+            use_flash_attn,
             rms_norm_eps: 1e-6,
             rope_theta: 10_000.0,
             bos_token_id: None,
             eos_token_id: None,
+            rope_scaling: None,
+            max_position_embeddings: DEFAULT_MAX_SEQ_LEN,
         }
     }
 
-    pub fn config_7b_v2() -> Self {
+    pub fn config_7b_v2(use_flash_attn: bool) -> Self {
         Self {
             hidden_size: 4096,
             intermediate_size: 11008,
@@ -88,10 +123,13 @@ impl Config {
             num_hidden_layers: 32,
             num_attention_heads: 32,
             num_key_value_heads: 32,
+            use_flash_attn,
             rms_norm_eps: 1e-5,
             rope_theta: 10_000.0,
             bos_token_id: None,
             eos_token_id: None,
+            rope_scaling: None,
+            max_position_embeddings: DEFAULT_MAX_SEQ_LEN,
         }
     }
 }

@@ -1551,6 +1551,10 @@ impl FlashAttentionKvCache {
             (0, 1, seqlen_k, num_heads_k)
         };
 
+        if !block_table_ptr.is_null() && page_block_size % 16 != 0 { 
+            candle_core::bail!("page_block_size must be a multiple of 16 when block_table is provided")
+        }
+
         let batch_size_cache = if !block_table_ptr.is_null() {
             batch_size
         } else {

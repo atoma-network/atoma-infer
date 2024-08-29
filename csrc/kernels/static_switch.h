@@ -4,8 +4,11 @@
 
 #pragma once
 
-// Disable dropout for now
+// Disable dropout, softcap, local and uneven K for now
 #define FLASHATTENTION_DISABLE_DROPOUT
+#define FLASHATTENTION_DISABLE_SOFTCAP
+#define FLASHATTENTION_DISABLE_LOCAL
+#define FLASHATTENTION_DISABLE_UNEVEN_K
 
 /// @param COND       - a boolean expression to switch by
 /// @param CONST_NAME - a name given for the constexpr bool variable.
