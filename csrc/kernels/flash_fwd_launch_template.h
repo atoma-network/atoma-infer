@@ -161,7 +161,7 @@ void run_flash_splitkv_fwd(Flash_fwd_params &params, cudaStream_t stream) {
             } else if (params.num_splits <= 128) {
                 flash_fwd_splitkv_combine_kernel<Kernel_traits, kBlockM, 7, IsEvenKConst><<<grid_combine, Kernel_traits::kNThreads, 0, stream>>>(params);
             }
-            CUDA_CHECK(cudaGetLastError());
+            C10_CUDA_KERNEL_LAUNCH_CHECK();
         });
     }
 }
