@@ -1,7 +1,6 @@
 use candle_core::{DType, Device, Module, Result, Tensor};
 use candle_nn::{embedding, Embedding, VarBuilder};
 use candle_transformers::models::with_tracing::{linear_no_bias as linear, Linear, RmsNorm};
-use serde::{Deserialize, Serialize};
 use std::f32::consts::PI;
 
 use crate::flash_attention::{FlashAttention, FlashAttentionMetadata};
