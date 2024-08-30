@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::flash_attention::{FlashAttention, FlashAttentionMetadata};
 
 /// Maximum input sequence token length
-const MAX_SEQ_LEN: usize = 4096;
+const DEFAULT_MAX_SEQ_LEN: usize = 4096;
 
 #[derive(Debug, Clone, serde::Deserialize, Default)]
 pub enum Llama3RopeType {
@@ -137,24 +137,76 @@ pub struct Cache {
     sin: Tensor,
 }
 
+fn calculate_default_inv_freq(cfg: &Config) -> Vec<f32> {
+    let head_dim = cfg.hidden_size / cfg.num_attention_heads;
+    (0..head_dim)
+        .step_by(2)
+        .map(|i| 1f32 / cfg.rope_theta.powf(i as f32 / head_dim as f32))
+        .collect()
+}
+
 impl Cache {
-    /// Constructor
-    pub fn new(config: &Config, device: &Device, dtype: DType) -> Result<Self> {
-        // Precomputed frequency tensor for complex exponentials (cis)
-        let n_elem = config.hidden_size / config.num_attention_heads;
-        let theta: Vec<_> = (0..n_elem)
-            .step_by(2)
-            .map(|i| 1f32 / config.rope_theta.powf(i as f32 / n_elem as f32))
-            .collect();
-        let theta = Tensor::new(theta.as_slice(), device)?;
-        let idx_theta = Tensor::arange(0, MAX_SEQ_LEN as u32, device)?
+    pub fn new(use_kv_cache: bool, dtype: DType, config: &Config, device: &Device) -> Result<Self> {
+        // precompute freqs_cis
+        let theta = match &config.rope_scaling {
+            None
+            | Some(Llama3RopeConfig {
+                rope_type: Llama3RopeType::Default,
+                ..
+            }) => calculate_default_inv_freq(config),
+            Some(rope_scaling) => {
+                let low_freq_wavelen = rope_scaling.original_max_position_embeddings as f32
+                    / rope_scaling.low_freq_factor;
+                let high_freq_wavelen = rope_scaling.original_max_position_embeddings as f32
+                    / rope_scaling.high_freq_factor;
+
+                calculate_default_inv_freq(config)
+                    .into_iter()
+                    .map(|freq| {
+                        let wavelen = 2. * PI / freq;
+                        if wavelen < high_freq_wavelen {
+                            freq
+                        } else if wavelen > low_freq_wavelen {
+                            freq / rope_scaling.factor
+                        } else {
+                            let smooth = (rope_scaling.original_max_position_embeddings as f32
+                                / wavelen
+                                - rope_scaling.low_freq_factor)
+                                / (rope_scaling.high_freq_factor - rope_scaling.low_freq_factor);
+                            (1. - smooth) * freq / rope_scaling.factor + smooth * freq
+                        }
+                    })
+                    .collect::<Vec<_>>()
+            }
+        };
+
+        let theta = Tensor::new(theta, device)?;
+
+        let idx_theta = Tensor::arange(0, config.max_position_embeddings as u32, device)?
             .to_dtype(DType::F32)?
-            .reshape((MAX_SEQ_LEN, 1))?
+            .reshape((config.max_position_embeddings, 1))?
             .matmul(&theta.reshape((1, theta.elem_count()))?)?;
+        // This is different from the paper, see:
+        // https://github.com/huggingface/transformers/blob/6112b1c6442aaf7affd2b0676a1cd4eee30c45cf/src/transformers/models/llama/modeling_llama.py#L112
         let cos = idx_theta.cos()?.to_dtype(dtype)?;
         let sin = idx_theta.sin()?.to_dtype(dtype)?;
+        Ok(Self {
+            cos,
+            sin,
+        })
+    }
 
-        Ok(Self { cos, sin })
+    fn mask(&mut self, t: usize) -> Result<Tensor> {
+        if let Some(mask) = self.masks.get(&t) {
+            Ok(mask.clone())
+        } else {
+            let mask: Vec<_> = (0..t)
+                .flat_map(|i| (0..t).map(move |j| u8::from(j > i)))
+                .collect();
+            let mask = Tensor::from_slice(&mask, (t, t), &self.device)?;
+            self.masks.insert(t, mask.clone());
+            Ok(mask)
+        }
     }
 }
 
