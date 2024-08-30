@@ -2,6 +2,7 @@ use candle_core::{DType, Device, Module, Result, Tensor};
 use candle_nn::{embedding, Embedding, VarBuilder};
 use candle_transformers::models::with_tracing::{linear_no_bias as linear, Linear, RmsNorm};
 use serde::{Deserialize, Serialize};
+use std::f32::consts::PI;
 
 use crate::flash_attention::{FlashAttention, FlashAttentionMetadata};
 
@@ -146,7 +147,7 @@ fn calculate_default_inv_freq(cfg: &Config) -> Vec<f32> {
 }
 
 impl Cache {
-    pub fn new(use_kv_cache: bool, dtype: DType, config: &Config, device: &Device) -> Result<Self> {
+    pub fn new(dtype: DType, config: &Config, device: &Device) -> Result<Self> {
         // precompute freqs_cis
         let theta = match &config.rope_scaling {
             None
@@ -190,10 +191,7 @@ impl Cache {
         // https://github.com/huggingface/transformers/blob/6112b1c6442aaf7affd2b0676a1cd4eee30c45cf/src/transformers/models/llama/modeling_llama.py#L112
         let cos = idx_theta.cos()?.to_dtype(dtype)?;
         let sin = idx_theta.sin()?.to_dtype(dtype)?;
-        Ok(Self {
-            cos,
-            sin,
-        })
+        Ok(Self { cos, sin })
     }
 
     fn mask(&mut self, t: usize) -> Result<Tensor> {
@@ -558,7 +556,8 @@ mod tests {
             Tokenizer::from_file(tokenizer_filename).expect("Failed to load the tokenizer");
         let eos_token_id = config
             .eos_token_id
-            .or_else(|| tokenizer.token_to_id(EOS_TOKEN));
+            .clone()
+            .or_else(|| tokenizer.token_to_id(EOS_TOKEN).map(LlamaEosToks::Single));
 
         let mut tokens = tokenizer
             .encode(prompt.clone(), true)
@@ -678,8 +677,16 @@ mod tests {
             token_generated += 1;
             tokens.push(next_token);
 
-            if Some(next_token) == eos_token_id {
-                break;
+            match eos_token_id {
+                Some(model::LlamaEosToks::Single(eos_tok_id)) if next_token == eos_tok_id => {
+                    break;
+                }
+                Some(model::LlamaEosToks::Multiple(ref eos_ids))
+                    if eos_ids.contains(&next_token) =>
+                {
+                    break;
+                }
+                _ => (),
             }
             if let Some(t) = tokenizer.next_token(next_token)? {
                 print!("{t}");
@@ -736,7 +743,8 @@ mod tests {
             Tokenizer::from_file(tokenizer_filename).expect("Failed to load the tokenizer");
         let eos_token_id = config
             .eos_token_id
-            .or_else(|| tokenizer.token_to_id(EOS_TOKEN));
+            .clone()
+            .or_else(|| tokenizer.token_to_id(EOS_TOKEN).map(LlamaEosToks::Single));
 
         let mut tokens = tokenizer
             .encode(prompt.clone(), true)
@@ -882,8 +890,16 @@ mod tests {
             token_generated += 1;
             tokens.push(next_token);
 
-            if Some(next_token) == eos_token_id {
-                break;
+            match eos_token_id {
+                Some(model::LlamaEosToks::Single(eos_tok_id)) if next_token == eos_tok_id => {
+                    break;
+                }
+                Some(model::LlamaEosToks::Multiple(ref eos_ids))
+                    if eos_ids.contains(&next_token) =>
+                {
+                    break;
+                }
+                _ => (),
             }
             if let Some(t) = tokenizer.next_token(next_token)? {
                 print!("{t}");
@@ -940,7 +956,8 @@ mod tests {
             Tokenizer::from_file(tokenizer_filename).expect("Failed to load the tokenizer");
         let eos_token_id = config
             .eos_token_id
-            .or_else(|| tokenizer.token_to_id(EOS_TOKEN));
+            .clone()
+            .or_else(|| tokenizer.token_to_id(EOS_TOKEN).map(LlamaEosToks::Single));
 
         let mut tokens = tokenizer
             .encode(prompt.clone(), true)
@@ -1111,8 +1128,16 @@ mod tests {
             token_generated += 1;
             tokens.push(next_token);
 
-            if Some(next_token) == eos_token_id {
-                break;
+            match eos_token_id {
+                Some(model::LlamaEosToks::Single(eos_tok_id)) if next_token == eos_tok_id => {
+                    break;
+                }
+                Some(model::LlamaEosToks::Multiple(ref eos_ids))
+                    if eos_ids.contains(&next_token) =>
+                {
+                    break;
+                }
+                _ => (),
             }
             if let Some(t) = tokenizer.next_token(next_token)? {
                 print!("{t}");
@@ -1180,7 +1205,8 @@ mod tests {
             Tokenizer::from_file(tokenizer_filename).expect("Failed to load the tokenizer");
         let eos_token_id = config
             .eos_token_id
-            .or_else(|| tokenizer.token_to_id(EOS_TOKEN));
+            .clone()
+            .or_else(|| tokenizer.token_to_id(EOS_TOKEN).map(LlamaEosToks::Single));
 
         let mut tokens = prompts
             .iter()
