@@ -193,19 +193,6 @@ impl Cache {
         let sin = idx_theta.sin()?.to_dtype(dtype)?;
         Ok(Self { cos, sin })
     }
-
-    fn mask(&mut self, t: usize) -> Result<Tensor> {
-        if let Some(mask) = self.masks.get(&t) {
-            Ok(mask.clone())
-        } else {
-            let mask: Vec<_> = (0..t)
-                .flat_map(|i| (0..t).map(move |j| u8::from(j > i)))
-                .collect();
-            let mask = Tensor::from_slice(&mask, (t, t), &self.device)?;
-            self.masks.insert(t, mask.clone());
-            Ok(mask)
-        }
-    }
 }
 
 struct CausalSelfAttention {
@@ -1486,10 +1473,22 @@ mod tests {
 
                 tokens[i].push(next_token);
 
-                if Some(next_token) != eos_token_id {
-                    new_active_indices.push(i);
-                } else {
-                    finished_sequences.push(tokens[i].clone());
+                match eos_token_id {
+                    Some(model::LlamaEosToks::Single(eos_tok_id)) => {
+                        if next_token != eos_tok_id {
+                            new_active_indices.push(i);
+                        } else {
+                            finished_sequences.push(tokens[i].clone());
+                        }
+                    }
+                    Some(model::LlamaEosToks::Multiple(ref eos_ids)) => {
+                        if eos_ids.contains(&next_token) {
+                            finished_sequences.push(tokens[i].clone());
+                        } else {
+                            new_active_indices.push(i);
+                        }
+                    }
+                    _ => (),
                 }
             }
 
