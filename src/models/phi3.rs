@@ -294,7 +294,7 @@ mod tests {
 
     #[test]
     #[serial]
-    fn test_phy3_model() -> Result<()> {
+    fn test_phi3_model() -> Result<()> {
         let prompt = "The capital of France is ".to_string();
 
         let dtype = DType::BF16;
@@ -318,7 +318,7 @@ mod tests {
         let filenames = vec![api
             .get("model.safetensors")
             .expect("Failed to get model.safetensors")];
-        let mut phy3_model = {
+        let mut phi3_model = {
             let vb = unsafe { VarBuilder::from_mmaped_safetensors(&filenames, dtype, &device)? };
             Model::new(&config, vb, &device).expect("Failed to load the model")
         };
@@ -374,7 +374,7 @@ mod tests {
                 sequence_lengths: Some(Tensor::from_vec(vec![tokens.len() as u32], (1,), &device)?),
             }),
         };
-        let logits = phy3_model.forward(
+        let logits = phi3_model.forward(
             &input,
             &input_positions,
             &attention_metadata,
@@ -412,7 +412,7 @@ mod tests {
                 num_prefill_tokens: 0,
                 num_decoding_tokens: 1,
             };
-            let logits = phy3_model
+            let logits = phi3_model
                 .forward(
                     &input,
                     &input_positions,
