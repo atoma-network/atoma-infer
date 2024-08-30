@@ -340,7 +340,7 @@ impl CausalSelfAttention {
                 dtype,
                 device.clone(),
             )?,
-            cos_sin_cache: Cache::new(cfg, device, dtype)?,
+            cos_sin_cache: Cache::new(dtype, cfg, device)?,
         })
     }
 }
@@ -665,10 +665,10 @@ mod tests {
             tokens.push(next_token);
 
             match eos_token_id {
-                Some(model::LlamaEosToks::Single(eos_tok_id)) if next_token == eos_tok_id => {
+                Some(LlamaEosToks::Single(eos_tok_id)) if next_token == eos_tok_id => {
                     break;
                 }
-                Some(model::LlamaEosToks::Multiple(ref eos_ids))
+                Some(LlamaEosToks::Multiple(ref eos_ids))
                     if eos_ids.contains(&next_token) =>
                 {
                     break;
@@ -878,10 +878,10 @@ mod tests {
             tokens.push(next_token);
 
             match eos_token_id {
-                Some(model::LlamaEosToks::Single(eos_tok_id)) if next_token == eos_tok_id => {
+                Some(LlamaEosToks::Single(eos_tok_id)) if next_token == eos_tok_id => {
                     break;
                 }
-                Some(model::LlamaEosToks::Multiple(ref eos_ids))
+                Some(LlamaEosToks::Multiple(ref eos_ids))
                     if eos_ids.contains(&next_token) =>
                 {
                     break;
@@ -1116,10 +1116,10 @@ mod tests {
             tokens.push(next_token);
 
             match eos_token_id {
-                Some(model::LlamaEosToks::Single(eos_tok_id)) if next_token == eos_tok_id => {
+                Some(LlamaEosToks::Single(eos_tok_id)) if next_token == eos_tok_id => {
                     break;
                 }
-                Some(model::LlamaEosToks::Multiple(ref eos_ids))
+                Some(LlamaEosToks::Multiple(ref eos_ids))
                     if eos_ids.contains(&next_token) =>
                 {
                     break;
@@ -1474,14 +1474,14 @@ mod tests {
                 tokens[i].push(next_token);
 
                 match eos_token_id {
-                    Some(model::LlamaEosToks::Single(eos_tok_id)) => {
+                    Some(LlamaEosToks::Single(eos_tok_id)) => {
                         if next_token != eos_tok_id {
                             new_active_indices.push(i);
                         } else {
                             finished_sequences.push(tokens[i].clone());
                         }
                     }
-                    Some(model::LlamaEosToks::Multiple(ref eos_ids)) => {
+                    Some(LlamaEosToks::Multiple(ref eos_ids)) => {
                         if eos_ids.contains(&next_token) {
                             finished_sequences.push(tokens[i].clone());
                         } else {
