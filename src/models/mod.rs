@@ -2,4 +2,4 @@ pub mod llama;
 pub mod phy3;
 
 pub use llama::Llama;
-pub use phy3::Model as Phi3;
+pub use phi3::Model as Phi3;
