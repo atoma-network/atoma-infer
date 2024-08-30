@@ -58,11 +58,11 @@ impl RotaryEmbedding {
         &self,
         q: &Tensor,
         k: &Tensor,
-        seqlen_offset: usize,
+        input_positions: &Tensor,
     ) -> Result<(Tensor, Tensor)> {
         let (_b_sz, _h, seq_len, _n_embd) = q.dims4()?;
-        let cos = self.cos.narrow(0, seqlen_offset, seq_len)?;
-        let sin = self.sin.narrow(0, seqlen_offset, seq_len)?;
+        let cos = self.cos.index_select(&input_positions.flatten(0, 1)?, 0)?;
+        let sin = self.sin.index_select(&input_positions.flatten(0, 1)?, 0)?;
         let q_embed = candle_nn::rotary_emb::rope(&q.contiguous()?, &cos, &sin)?;
         let k_embed = candle_nn::rotary_emb::rope(&k.contiguous()?, &cos, &sin)?;
         Ok((q_embed, k_embed))
@@ -78,7 +78,6 @@ struct Attention {
     num_kv_groups: usize,
     head_dim: usize,
     rotary_emb: Arc<RotaryEmbedding>,
-    kv_cache: Option<(Tensor, Tensor)>,
     attention: FlashAttention,
 }
 
@@ -95,7 +94,6 @@ impl Attention {
             qkv_proj,
             o_proj,
             rotary_emb,
-            kv_cache: None,
             num_heads,
             num_kv_heads,
             num_kv_groups: num_heads / num_kv_heads,
@@ -116,8 +114,7 @@ impl Attention {
     fn forward(
         &mut self,
         xs: &Tensor,
-        attention_mask: Option<&Tensor>,
-        seqlen_offset: usize,
+        input_positions: &Tensor,
         attention_metadata: &FlashAttentionMetadata,
     ) -> Result<Tensor> {
         let (b_sz, q_len, _) = xs.dims3()?;
@@ -144,32 +141,18 @@ impl Attention {
 
         let (query_states, key_states) =
             self.rotary_emb
-                .apply_rotary_emb_qkv(&query_states, &key_states, seqlen_offset)?;
-
-        let (key_states, value_states) = match &self.kv_cache {
-            None => (key_states, value_states),
-            Some((prev_k, prev_v)) => {
-                let key_states = Tensor::cat(&[prev_k, &key_states], 2)?;
-                let value_states = Tensor::cat(&[prev_v, &value_states], 2)?;
-                (key_states, value_states)
-            }
-        };
-        self.kv_cache = Some((key_states.clone(), value_states.clone()));
+                .apply_rotary_emb_qkv(&query_states, &key_states, input_positions)?;
 
         let key_states = crate::utils::repeat_kv(key_states, self.num_kv_groups)?.contiguous()?;
         let value_states =
             crate::utils::repeat_kv(value_states, self.num_kv_groups)?.contiguous()?;
 
-        let attn_output = self.attention.forward(&query_states, &key_states, &value_states, &self.kv_cache.as_ref().unwrap().0, attention_metadata)?;
+        let attn_output = self.attention.forward(&query_states, &key_states, &value_states, &key_states, attention_metadata)?;
 
         attn_output
             .transpose(1, 2)?
             .reshape((b_sz, q_len, ()))?
             .apply(&self.o_proj)
-    }
-
-    fn clear_kv_cache(&mut self) {
-        self.kv_cache = None
     }
 }
 
@@ -236,21 +219,16 @@ impl DecoderLayer {
     fn forward(
         &mut self,
         xs: &Tensor,
-        attention_mask: Option<&Tensor>,
-        seqlen_offset: usize,
+        input_positions: &Tensor,
         attention_metadata: &FlashAttentionMetadata,
     ) -> Result<Tensor> {
         let residual = xs;
         let xs = self.input_layernorm.forward(xs)?;
-        let xs = self.self_attn.forward(&xs, attention_mask, seqlen_offset, attention_metadata)?;
+        let xs = self.self_attn.forward(&xs, input_positions, attention_metadata)?;
         let xs = (xs + residual)?;
         let residual = &xs;
         let xs = xs.apply(&self.post_attention_layernorm)?.apply(&self.mlp)?;
         residual + xs
-    }
-
-    fn clear_kv_cache(&mut self) {
-        self.self_attn.clear_kv_cache()
     }
 }
 
@@ -288,46 +266,14 @@ impl Model {
         })
     }
 
-    pub fn forward(&mut self, input_ids: &Tensor, seqlen_offset: usize, attention_metadata: &FlashAttentionMetadata) -> Result<Tensor> {
+    pub fn forward(&mut self, input_ids: &Tensor, input_positions: &Tensor, attention_metadata: &FlashAttentionMetadata) -> Result<Tensor> {
         let (b_size, seq_len) = input_ids.dims2()?;
-        let attention_mask = if seq_len <= 1 {
-            None
-        } else {
-            let mask = self.prepare_decoder_attention_mask(b_size, seq_len, seqlen_offset)?;
-            Some(mask)
-        };
         let mut xs = self.embed_tokens.forward(input_ids)?;
         for layer in self.layers.iter_mut() {
-            xs = layer.forward(&xs, attention_mask.as_ref(), seqlen_offset, attention_metadata)?
+            xs = layer.forward(&xs, input_positions, attention_metadata)?
         }
         xs.narrow(1, seq_len - 1, 1)?
             .apply(&self.norm)?
             .apply(&self.lm_head)
-    }
-
-    pub fn clear_kv_cache(&mut self) {
-        for layer in self.layers.iter_mut() {
-            layer.clear_kv_cache()
-        }
-    }
-
-    fn prepare_decoder_attention_mask(
-        &self,
-        b_size: usize,
-        tgt_len: usize,
-        seqlen_offset: usize,
-    ) -> Result<Tensor> {
-        let mask: Vec<_> = (0..tgt_len)
-            .flat_map(|i| (0..tgt_len).map(move |j| if i < j { f32::NEG_INFINITY } else { 0. }))
-            .collect();
-        let mask = Tensor::from_slice(&mask, (tgt_len, tgt_len), &self.device)?;
-        let mask = if seqlen_offset > 0 {
-            let mask0 = Tensor::zeros((tgt_len, seqlen_offset), DType::F32, &self.device)?;
-            Tensor::cat(&[&mask0, &mask], D::Minus1)?
-        } else {
-            mask
-        };
-        mask.expand((b_size, 1, tgt_len, tgt_len + seqlen_offset))?
-            .to_dtype(self.dtype)
     }
 }
