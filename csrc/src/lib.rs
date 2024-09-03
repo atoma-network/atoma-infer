@@ -272,19 +272,19 @@ impl FlashAttention {
                 /* cu_seqlens_q_ptr */ std::ptr::null(),
                 /* cu_seqlens_k_ptr */ std::ptr::null(),
                 /* is_seqlens_k_cumulative */ true,
-                /* q_batch_stride */ q_batch_stride,
-                /* k_batch_stride */ k_stride[0] as u32,
-                /* v_batch_stride */ v_stride[0] as u32,
-                /* o_batch_stride */ o_batch_stride,
-                /* alibi_slopes_batch_stride */ alibi_slopes_batch_stride as u32,
-                /* q_row_stride   */ q_stride[q_rank - 3] as u32,
-                /* k_row_stride   */ k_stride[k_rank - 3] as u32,
-                /* v_row_stride   */ v_stride[v_rank - 3] as u32,
-                /* o_row_stride   */ o_stride[o_rank - 3] as u32,
-                /* q_head_stride  */ q_stride[q_rank - 2] as u32,
-                /* k_head_stride  */ k_stride[k_rank - 2] as u32,
-                /* v_head_stride  */ v_stride[v_rank - 2] as u32,
-                /* o_head_stride  */ o_stride[o_rank - 2] as u32,
+                /* q_batch_stride */ q_batch_stride as i64,
+                /* k_batch_stride */ k_stride[0] as i64,
+                /* v_batch_stride */ v_stride[0] as i64,
+                /* o_batch_stride */ o_batch_stride as i64,
+                /* alibi_slopes_batch_stride */ alibi_slopes_batch_stride as i64,
+                /* q_row_stride   */ q_stride[q_rank - 3] as i64,
+                /* k_row_stride   */ k_stride[k_rank - 3] as i64,
+                /* v_row_stride   */ v_stride[v_rank - 3] as i64,
+                /* o_row_stride   */ o_stride[o_rank - 3] as i64,
+                /* q_head_stride  */ q_stride[q_rank - 2] as i64,
+                /* k_head_stride  */ k_stride[k_rank - 2] as i64,
+                /* v_head_stride  */ v_stride[v_rank - 2] as i64,
+                /* o_head_stride  */ o_stride[o_rank - 2] as i64,
                 /* num_splits */ num_splits,
                 /* b */ b_sz as u32,
                 /* h */ num_heads as u32,
@@ -1005,19 +1005,19 @@ impl FlashAttentionVarLen {
                 /* cu_seqlens_q_ptr */ seqlens_q_ptr,
                 /* cu_seqlens_k_ptr */ seqlens_k_ptr,
                 /* is_seqlens_k_cumulative */ true,
-                /* q_batch_stride */ q_batch_stride,
-                /* k_batch_stride */ k_batch_stride,
-                /* v_batch_stride */ v_batch_stride,
-                /* o_batch_stride */ o_batch_stride,
-                /* alibi_slopes_batch_stride */ alibi_slopes_batch_stride as u32,
-                /* q_row_stride   */ q_stride[q_rank - 3] as u32,
-                /* k_row_stride   */ k_stride[k_rank - 3] as u32,
-                /* v_row_stride   */ v_stride[v_rank - 3] as u32,
-                /* o_row_stride   */ o_stride[o_rank - 3] as u32,
-                /* q_head_stride  */ q_stride[q_rank - 2] as u32,
-                /* k_head_stride  */ k_stride[k_rank - 2] as u32,
-                /* v_head_stride  */ v_stride[v_rank - 2] as u32,
-                /* o_head_stride  */ o_stride[o_rank - 2] as u32,
+                /* q_batch_stride */ q_batch_stride as i64,
+                /* k_batch_stride */ k_batch_stride as i64,
+                /* v_batch_stride */ v_batch_stride as i64,
+                /* o_batch_stride */ o_batch_stride as i64,
+                /* alibi_slopes_batch_stride */ alibi_slopes_batch_stride as i64,
+                /* q_row_stride   */ q_stride[q_rank - 3] as i64,
+                /* k_row_stride   */ k_stride[k_rank - 3] as i64,
+                /* v_row_stride   */ v_stride[v_rank - 3] as i64,
+                /* o_row_stride   */ o_stride[o_rank - 3] as i64,
+                /* q_head_stride  */ q_stride[q_rank - 2] as i64,
+                /* k_head_stride  */ k_stride[k_rank - 2] as i64,
+                /* v_head_stride  */ v_stride[v_rank - 2] as i64,
+                /* o_head_stride  */ o_stride[o_rank - 2] as i64,
                 /* num_splits */ num_splits,
                 /* b */ batch_size as u32,
                 /* h */ num_heads as u32,
@@ -1027,7 +1027,7 @@ impl FlashAttentionVarLen {
                 /* softmax_scale*/ softmax_scale,
                 /* scale_softmatx_log2 */ scale_softmatx_log2,
                 /* block_table */ block_table_ptr,
-                /* block_table_batch_stride */ block_table_batch_stride,
+                /* block_table_batch_stride */ block_table_batch_stride as i64,
                 /* page_block_size */ page_block_size as i32,
                 /* seqused_k */ seqused_k,
                 /* seqlen_q */ self.max_seqlen_q as u32,
@@ -1524,7 +1524,6 @@ impl FlashAttentionKvCache {
         };
 
         let (batch_size, seqlen_q, num_heads, head_size_og) = q_l.shape().dims4()?;
-
         let max_num_blocks_per_sequence = if let Some(layout) = block_table_layout {
             let (b_sz, max_num_blocks_per_sequence) = layout.shape().dims2()?;
             if b_sz != batch_size {
@@ -1538,115 +1537,67 @@ impl FlashAttentionKvCache {
         } else {
             0
         };
-        let (batch_size_cache, num_blocks, page_block_size, seqlens_k, num_heads_k, _head_size) =
-            if !block_table_ptr.is_null() {
-                let (num_blocks, page_block_size, num_heads_k, _head_size) =
-                    kc_l.shape().dims4()?;
-                (
-                    batch_size,
-                    num_blocks,
-                    page_block_size,
-                    max_num_blocks_per_sequence * page_block_size,
-                    num_heads_k,
-                    _head_size,
-                )
-            } else {
-                let (batch_size_cache, seqlen_k, num_heads_k, _head_size) = kc_l.shape().dims4()?;
-                (batch_size_cache, 0, 1, seqlen_k, num_heads_k, _head_size)
-            };
 
-        match block_table_layout {
-            Some(_) => {
-                let expected_shape = (num_blocks, page_block_size, num_heads_k, head_size_og);
-                if kc_l.shape().dims4()? != expected_shape {
-                    candle_core::bail!(
-                        "shape mismatch of k_cache (got {:?}) expected {:?})",
-                        kc_l.shape(),
-                        expected_shape
-                    )
-                }
-                if vc_l.shape().dims4()? != expected_shape {
-                    candle_core::bail!(
-                        "shape mismatch of v_cache (got {:?}) expected {:?})",
-                        vc_l.shape(),
-                        expected_shape
-                    )
-                }
-            }
-            None => {
-                let expected_shape = (batch_size_cache, seqlens_k, num_heads_k, head_size_og);
-                if kc_l.shape().dims4()? != expected_shape {
-                    candle_core::bail!(
-                        "shape mismatch of k_cache (got {:?}) expected {:?})",
-                        kc_l.shape(),
-                        expected_shape
-                    )
-                }
-                if vc_l.shape().dims4()? != expected_shape {
-                    candle_core::bail!(
-                        "shape mismatch of v_cache (got {:?}) expected {:?})",
-                        vc_l.shape(),
-                        expected_shape
-                    )
-                }
-            }
-        }
-
-        if batch_size == 0 {
-            candle_core::bail!("batch_size must be > 0")
-        }
-        if head_size_og > 256 {
-            candle_core::bail!("only supports head dimension at most 256 (got {head_size_og})")
-        }
-        if head_size_og % 8 != 0 {
-            // TODO: Handle head sizes that are not a multiple of 8 via some padding.
-            candle_core::bail!(
-                "only supports head sizes that are a multiple of 8 (got {head_size_og})"
-            )
-        }
-        if num_heads % num_heads_k != 0 {
-            candle_core::bail!("number of k_cache/v_cache heads {num_heads_k} must divide number of heads in query {num_heads}")
-        }
-
-        if !block_table_ptr.is_null() && page_block_size % 16 != 0 {
-            // NOTE: We are following the vLLM flash attention fork, where the paged
-            // block size must be divisible by 16. In the actual flash attention
-            // repository, the paged block size must be divisible by 256, instead.
-            // TODO: benchmark the performance of block sizes such as
-            // [16, 32, 64, 128, 256]
-            candle_core::bail!("page_block_size must be a multiple of 16, got {page_block_size}")
-        }
-
-        let seqlenq_ngroups_swapped = seqlen_q == 1
-            && num_heads > num_heads_k
-            && self.window_size_left.is_none()
-            && self.window_size_right.is_none()
-            && head_size_og % 8 == 0
-            && self.alibi_slopes.is_none();
-        let (q_l, out_l, out_shape, seqlen_q, num_heads) = if seqlenq_ngroups_swapped {
-            let ngroups = num_heads / num_heads_k;
-            let new_shape = Shape::from((batch_size, ngroups, num_heads_k, head_size_og));
-
-            // Create new layout for q, maintaining the original start_offset
-            let new_q_l = Layout::contiguous_with_offset(&new_shape, q_l.start_offset());
-            // TODO: use `Layout` reshape
+        let (num_blocks, page_block_size, seqlen_k, num_heads_k) = if !block_table_ptr.is_null() {
+            let (num_blocks, page_block_size, num_heads_k, _head_size) = kc_l.shape().dims4()?;
             (
-                new_q_l,
-                Layout::contiguous(&new_shape),
-                new_shape,
-                ngroups,
+                num_blocks,
+                page_block_size,
+                max_num_blocks_per_sequence * page_block_size,
                 num_heads_k,
             )
         } else {
-            let out_shape = q_l.shape().clone();
-            (
-                q_l.clone(),
-                Layout::contiguous(&out_shape),
-                out_shape,
-                seqlen_q,
-                num_heads,
-            )
+            let (batch_size_cache, seqlen_k, num_heads_k, _head_size) = kc_l.shape().dims4()?;
+            (0, 1, seqlen_k, num_heads_k)
         };
+
+        if !block_table_ptr.is_null() && page_block_size % 16 != 0 {
+            candle_core::bail!(
+                "page_block_size must be a multiple of 16 when block_table is provided"
+            )
+        }
+
+        let batch_size_cache = if !block_table_ptr.is_null() {
+            batch_size
+        } else {
+            kc_l.dims()[0]
+        };
+
+        let mut window_size_left = self.window_size_left.map(|i| i as i32);
+        let mut window_size_right = self.window_size_right.map(|i| i as i32);
+
+        if let Some(w) = window_size_left {
+            if w >= seqlen_k as i32 {
+                window_size_left = Some(-1);
+            }
+        }
+        if let Some(w) = window_size_right {
+            if w >= seqlen_k as i32 {
+                window_size_right = Some(-1);
+            }
+        }
+
+        let mut window_size_left = window_size_left.unwrap_or(-1);
+        let mut window_size_right = window_size_right.unwrap_or(-1);
+
+        let mut is_causal = window_size_left < 0 && window_size_right == 0;
+        // causal=true is the same as causal=false in this case
+        if seqlen_q == 1 && self.alibi_slopes.is_none() {
+            is_causal = false;
+        }
+        if is_causal {
+            window_size_right = 0;
+        }
+
+        if window_size_left < 0 && window_size_right >= 0 {
+            window_size_left = seqlen_k as i32;
+        }
+        if window_size_right < 0 && window_size_left >= 0 {
+            window_size_right = seqlen_k as i32;
+        }
+
+        let out_shape = q_l.shape().clone();
+        let out_l = Layout::contiguous(&out_shape);
 
         let q = q.as_cuda_slice::<T>()?;
         let kc = kc.as_cuda_slice::<T>()?;
@@ -1658,10 +1609,12 @@ impl FlashAttentionKvCache {
         let q_stride = q_l.stride();
         let kc_stride = kc_l.stride();
         let vc_stride = vc_l.stride();
+        let o_stride = out_l.stride();
 
         let q_rank = q_stride.len();
         let kc_rank = kc_stride.len();
         let vc_rank = vc_stride.len();
+        let o_rank = o_stride.len();
 
         if q_rank != 4 || kc_rank != 4 || vc_rank != 4 {
             candle_core::bail!(
@@ -1720,58 +1673,10 @@ impl FlashAttentionKvCache {
                 (std::ptr::null(), 0)
             };
 
-        // if window_size_left > self.max_seqlen_k or None => -1
-        let mut window_size_left = self
-            .window_size_left
-            .filter(|v| v <= &seqlens_k)
-            .map(|v| v as i32)
-            .unwrap_or(-1);
-
-        // if window_size_right > self.max_seqlen_k or None => -1
-        let mut window_size_right = self
-            .window_size_right
-            .filter(|v| v <= &seqlens_k)
-            .map(|v| v as i32)
-            .unwrap_or(-1);
-
         let head_size = utils::round_multiple(head_size_og, 8);
         let head_size_rounded = utils::round_multiple(head_size, 32);
         let seqlen_q_rounded = utils::round_multiple(seqlen_q, 128);
-        let seqlen_k_rounded = utils::round_multiple(seqlens_k, 128);
-
-        let cu_seqlens_k_ptr = if let Some(seqlens_k) = &self.seqlens_k {
-            if seqlens_k.dims() != [batch_size] {
-                candle_core::bail!(
-                    "shape mismatch of seqlens_k (got {:?}) expected {:?})",
-                    seqlens_k.dims(),
-                    [batch_size]
-                )
-            }
-            if seqlens_k.dtype() != DType::U32 {
-                candle_core::bail!(
-                    "DType mismatch seqlens_k {:?}, expected {:?}",
-                    seqlens_k.dtype(),
-                    DType::U32
-                );
-            }
-            let (seqlens_k, seqlens_k_layout) = seqlens_k.storage_and_layout();
-            let seqlens_k = match &*seqlens_k {
-                candle_core::Storage::Cuda(c) => c.as_cuda_slice::<u32>()?,
-                _ => candle_core::bail!("seqlens_k must be a cuda tensor"),
-            };
-            let seqlens_k = seqlens_k.slice(seqlens_k_layout.start_offset()..);
-            let seqlens_k_stride = seqlens_k_layout.stride();
-            let seqlens_k_rank = seqlens_k_stride.len();
-            if seqlens_k_stride[seqlens_k_rank - 1] != 1 {
-                candle_core::bail!(
-                    "the last dim of seqlens_k must be contiguous {seqlens_k_stride:?}"
-                )
-            }
-            *seqlens_k.device_ptr() as *const core::ffi::c_int
-        } else {
-            std::ptr::null()
-        };
-        let is_seqlens_k_cumulative = self.seqlens_k.is_none();
+        let seqlen_k_rounded = utils::round_multiple(seqlen_k, 128);
 
         let elem_count = out_shape.elem_count();
         let dst = unsafe { dev.alloc::<T>(elem_count) }.w()?;
@@ -1781,73 +1686,57 @@ impl FlashAttentionKvCache {
 
         let is_bf16 = if is_bf16 { 1 } else { 0 };
 
-        // Causal is the special case where window_size_right == 0 and window_size_left < 0.
-        // Local is the more general case where window_size_right >= 0 or window_size_left >= 0.
-        let mut is_causal = if window_size_left < 0 && window_size_right == 0 {
-            1
-        } else {
-            0
-        };
-
-        if seqlen_q == 1 && self.alibi_slopes.is_none() {
-            // is_causal = true is the same as is_causal = false, in this case
-            is_causal = 0;
-        }
-
-        if window_size_left < 0 && window_size_right >= 0 {
-            window_size_left = seqlens_k as i32;
-        }
-        if window_size_left >= 0 && window_size_right < 0 {
-            window_size_right = seqlens_k as i32;
-        }
-
-        let num_splits = utils::compute_num_splits(
-            batch_size,
-            num_heads,
-            head_size,
-            seqlens_k,
-            seqlen_q,
-            dev.ordinal(),
-        )?;
-
-        let mut softcap = self.softcap.unwrap_or(0.0);
-        let (softmax_scale, scale_softmatx_log2) = if softcap > 0.0 {
-            softcap = self.softmax_scale / softcap;
-            (softcap, softcap * std::f32::consts::LOG2_E)
-        } else {
-            // Remove potential NaN
-            softcap = 0.0;
-            (
-                self.softmax_scale,
-                self.softmax_scale * std::f32::consts::LOG2_E,
-            )
-        };
-
         unsafe {
             let q_ptr = *q.device_ptr() as *const core::ffi::c_void;
             let kc_ptr = *kc.device_ptr() as *const core::ffi::c_void;
             let vc_ptr = *vc.device_ptr() as *const core::ffi::c_void;
+            let dst_ptr = *dst.device_ptr() as *const core::ffi::c_void;
+            let softmax_lse_ptr = *softmax_lse.device_ptr() as *const core::ffi::c_void;
+            let cu_seqlens_k_ptr = if let Some(seqlens_k) = &self.seqlens_k {
+                if seqlens_k.dims() != [batch_size] {
+                    candle_core::bail!(
+                        "shape mismatch of seqlens_k (got {:?}) expected {:?})",
+                        seqlens_k.dims(),
+                        [batch_size]
+                    )
+                }
+                if seqlens_k.dtype() != DType::U32 {
+                    candle_core::bail!(
+                        "DType mismatch seqlens_k {:?}, expected {:?}",
+                        seqlens_k.dtype(),
+                        DType::U32
+                    );
+                }
+                let (seqlens_k, seqlens_k_layout) = seqlens_k.storage_and_layout();
+                let seqlens_k = match &*seqlens_k {
+                    candle_core::Storage::Cuda(c) => c.as_cuda_slice::<u32>()?,
+                    _ => candle_core::bail!("seqlens_k must be a cuda tensor"),
+                };
+                let seqlens_k = seqlens_k.slice(seqlens_k_layout.start_offset()..);
+                let seqlens_k_stride = seqlens_k_layout.stride();
+                let seqlens_k_rank = seqlens_k_stride.len();
+                if seqlens_k_stride[seqlens_k_rank - 1] != 1 {
+                    candle_core::bail!(
+                        "the last dim of seqlens_k must be contiguous {seqlens_k_stride:?}"
+                    )
+                }
+                *seqlens_k.device_ptr() as *const core::ffi::c_int
+            } else {
+                std::ptr::null()
+            };
+            let is_seqlens_k_cumulative = self.seqlens_k.is_none();
+            let num_splits = utils::compute_num_splits(
+                batch_size,
+                num_heads,
+                head_size,
+                seqlen_k,
+                seqlen_q,
+                dev.ordinal(),
+            )?;
             let block_table_batch_stride = if let Some(layout) = block_table_layout {
                 layout.stride()[0] as u32
             } else {
                 0
-            };
-            let dst_ptr = *dst.device_ptr() as *const core::ffi::c_void;
-            let softmax_lse_ptr = *softmax_lse.device_ptr() as *const core::ffi::c_void;
-            let (k_batch_stride, v_batch_stride) = block_table_layout
-                .as_ref()
-                .map(|_| (kc_stride[0] as u32, vc_stride[0] as u32))
-                .unwrap_or((0, 0));
-
-            let o_stride = out_l.stride();
-            let o_rank = o_stride.len();
-            let (q_batch_stride, o_batch_stride) = if !seqlenq_ngroups_swapped {
-                (q_stride[0] as u32, o_stride[0] as u32)
-            } else {
-                (
-                    (q_stride[0] * seqlen_q) as u32,
-                    (o_stride[0] * seqlen_q) as u32,
-                )
             };
             ffi::run_mha(
                 q_ptr,
@@ -1855,54 +1744,48 @@ impl FlashAttentionKvCache {
                 vc_ptr,
                 dst_ptr,
                 softmax_lse_ptr,
-                /* alibi_slopes_ptr */ alibi_slopes_ptr,
-                /* cu_seqlens_q_ptr */ std::ptr::null(),
-                /* cu_seqlens_k_ptr */ cu_seqlens_k_ptr,
-                /* is_seqlens_k_cumulative */ is_seqlens_k_cumulative,
-                /* q_batch_stride */ q_batch_stride,
-                /* k_batch_stride */ k_batch_stride,
-                /* v_batch_stride */ v_batch_stride,
-                /* o_batch_stride */ o_batch_stride,
-                /* alibi_slopes_batch_stride */ alibi_slopes_batch_stride as u32,
-                /* q_row_stride   */ q_stride[q_rank - 3] as u32,
-                /* k_row_stride   */ kc_stride[kc_rank - 3] as u32,
-                /* v_row_stride   */ vc_stride[vc_rank - 3] as u32,
-                /* o_row_stride   */ o_stride[o_rank - 3] as u32,
-                /* q_head_stride  */ q_stride[q_rank - 2] as u32,
-                /* k_head_stride  */ kc_stride[kc_rank - 2] as u32,
-                /* v_head_stride  */ vc_stride[vc_rank - 2] as u32,
-                /* o_head_stride  */ o_stride[o_rank - 2] as u32,
-                /* num_splits */ num_splits,
-                /* b */ batch_size as u32,
-                /* h */ num_heads as u32,
-                /* h_k */ num_heads_k as u32,
-                /* d */ head_size as u32,
-                /* d_rounded */ head_size_rounded as u32,
-                /* softmax_scale*/ softmax_scale,
-                /* scale_softmatx_log2 */ scale_softmatx_log2,
-                /* block_table */ block_table_ptr,
-                /* block_table_batch_stride */ block_table_batch_stride,
-                /* page_block_size */ page_block_size as i32,
-                /* seqused_k */ std::ptr::null(),
-                /* seqlen_q */ seqlen_q as u32,
-                /* seqlen_k */ seqlens_k as u32,
-                /* seqlen_q_rounded */ seqlen_q_rounded as u32,
-                /* seqlen_k_rounded */ seqlen_k_rounded as u32,
-                /* is_bf16 */ is_bf16,
-                /* is_causal */ is_causal,
-                /* window_size_left */ window_size_left,
-                /* window_size_right */ window_size_right,
-                /* softcap */ softcap,
-                /* unpadded_lse */ false,
-                /* force_split_kernel */ !block_table_ptr.is_null(),
+                alibi_slopes_ptr,
+                std::ptr::null(),
+                cu_seqlens_k_ptr,
+                is_seqlens_k_cumulative,
+                q_stride[0] as i64,
+                kc_stride[0] as i64,
+                vc_stride[0] as i64,
+                o_stride[0] as i64,
+                alibi_slopes_batch_stride as i64,
+                q_stride[q_rank - 3] as i64,
+                /* k_row_stride   */ kc_stride[kc_rank - 3] as i64,
+                /* v_row_stride   */ vc_stride[vc_rank - 3] as i64,
+                /* o_row_stride   */ o_stride[o_rank - 3] as i64,
+                /* q_head_stride  */ q_stride[q_rank - 2] as i64,
+                /* k_head_stride  */ kc_stride[kc_rank - 2] as i64,
+                /* v_head_stride  */ vc_stride[vc_rank - 2] as i64,
+                /* o_head_stride  */ o_stride[o_rank - 2] as i64,
+                num_splits,
+                batch_size as u32,
+                num_heads as u32,
+                num_heads_k as u32,
+                head_size as u32,
+                head_size_rounded as u32,
+                self.softmax_scale,
+                self.softmax_scale * std::f32::consts::LOG2_E,
+                block_table_ptr,
+                block_table_batch_stride as i64,
+                page_block_size as i32,
+                std::ptr::null(),
+                seqlen_q as u32,
+                seqlen_k as u32,
+                seqlen_q_rounded as u32,
+                seqlen_k_rounded as u32,
+                is_bf16,
+                is_causal as i32,
+                window_size_left,
+                window_size_right,
+                0.0,
+                false,
+                !block_table_ptr.is_null(),
             )
         }
-
-        let out_shape = if seqlenq_ngroups_swapped {
-            Shape::from((batch_size, 1, num_heads_k * seqlen_q, head_size_og))
-        } else {
-            out_shape
-        };
 
         let dst = candle_core::CudaStorage::wrap_cuda_slice(dst, dev.clone());
         Ok((dst, out_shape))
@@ -2239,7 +2122,7 @@ pub(crate) mod utils {
         let cuda_multiprocessor_count = get_multiprocessor_count(device_ordinal)?;
         let num_splits = num_splits_heuristic(
             batch_size * num_heads * num_m_blocks,
-            cuda_multiprocessor_count,
+            cuda_multiprocessor_count * 2,
             num_n_blocks,
             128,
         );

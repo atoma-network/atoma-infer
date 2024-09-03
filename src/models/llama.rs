@@ -1,14 +1,38 @@
 use candle_core::{DType, Device, Module, Result, Tensor};
 use candle_nn::{embedding, Embedding, VarBuilder};
 use candle_transformers::models::with_tracing::{linear_no_bias as linear, Linear, RmsNorm};
-use serde::{Deserialize, Serialize};
+use std::f32::consts::PI;
 
 use crate::flash_attention::{FlashAttention, FlashAttentionMetadata};
 
 /// Maximum input sequence token length
-const MAX_SEQ_LEN: usize = 4096;
+const DEFAULT_MAX_SEQ_LEN: usize = 4096;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize, Default)]
+pub enum Llama3RopeType {
+    #[serde(rename = "llama3")]
+    Llama3,
+    #[default]
+    #[serde(rename = "default")]
+    Default,
+}
+
+#[derive(Debug, Clone, serde::Deserialize, Default)]
+pub struct Llama3RopeConfig {
+    pub factor: f32,
+    pub low_freq_factor: f32,
+    pub high_freq_factor: f32,
+    pub original_max_position_embeddings: usize,
+    pub rope_type: Llama3RopeType,
+}
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(untagged)]
+pub enum LlamaEosToks {
+    Single(u32),
+    Multiple(Vec<u32>),
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
 pub struct LlamaConfig {
     pub hidden_size: usize,
     pub intermediate_size: usize,
@@ -20,7 +44,9 @@ pub struct LlamaConfig {
     #[serde(default = "default_rope")]
     pub rope_theta: f32,
     pub bos_token_id: Option<u32>,
-    pub eos_token_id: Option<u32>,
+    pub eos_token_id: Option<LlamaEosToks>,
+    pub rope_scaling: Option<Llama3RopeConfig>,
+    pub max_position_embeddings: usize,
 }
 
 impl LlamaConfig {
@@ -46,6 +72,8 @@ impl LlamaConfig {
             rope_theta: self.rope_theta,
             bos_token_id: self.bos_token_id,
             eos_token_id: self.eos_token_id,
+            rope_scaling: self.rope_scaling,
+            max_position_embeddings: self.max_position_embeddings,
         }
     }
 }
@@ -61,7 +89,9 @@ pub struct Config {
     pub rms_norm_eps: f64,
     pub rope_theta: f32,
     pub bos_token_id: Option<u32>,
-    pub eos_token_id: Option<u32>,
+    pub eos_token_id: Option<LlamaEosToks>,
+    pub rope_scaling: Option<Llama3RopeConfig>,
+    pub max_position_embeddings: usize,
 }
 
 impl Config {
@@ -77,6 +107,8 @@ impl Config {
             rope_theta: 10_000.0,
             bos_token_id: None,
             eos_token_id: None,
+            rope_scaling: None,
+            max_position_embeddings: DEFAULT_MAX_SEQ_LEN,
         }
     }
 
@@ -92,6 +124,8 @@ impl Config {
             rope_theta: 10_000.0,
             bos_token_id: None,
             eos_token_id: None,
+            rope_scaling: None,
+            max_position_embeddings: DEFAULT_MAX_SEQ_LEN,
         }
     }
 }
@@ -103,23 +137,59 @@ pub struct Cache {
     sin: Tensor,
 }
 
+fn calculate_default_inv_freq(cfg: &Config) -> Vec<f32> {
+    let head_dim = cfg.hidden_size / cfg.num_attention_heads;
+    (0..head_dim)
+        .step_by(2)
+        .map(|i| 1f32 / cfg.rope_theta.powf(i as f32 / head_dim as f32))
+        .collect()
+}
+
 impl Cache {
-    /// Constructor
-    pub fn new(config: &Config, device: &Device, dtype: DType) -> Result<Self> {
-        // Precomputed frequency tensor for complex exponentials (cis)
-        let n_elem = config.hidden_size / config.num_attention_heads;
-        let theta: Vec<_> = (0..n_elem)
-            .step_by(2)
-            .map(|i| 1f32 / config.rope_theta.powf(i as f32 / n_elem as f32))
-            .collect();
-        let theta = Tensor::new(theta.as_slice(), device)?;
-        let idx_theta = Tensor::arange(0, MAX_SEQ_LEN as u32, device)?
+    pub fn new(dtype: DType, config: &Config, device: &Device) -> Result<Self> {
+        // precompute freqs_cis
+        let theta = match &config.rope_scaling {
+            None
+            | Some(Llama3RopeConfig {
+                rope_type: Llama3RopeType::Default,
+                ..
+            }) => calculate_default_inv_freq(config),
+            Some(rope_scaling) => {
+                let low_freq_wavelen = rope_scaling.original_max_position_embeddings as f32
+                    / rope_scaling.low_freq_factor;
+                let high_freq_wavelen = rope_scaling.original_max_position_embeddings as f32
+                    / rope_scaling.high_freq_factor;
+
+                calculate_default_inv_freq(config)
+                    .into_iter()
+                    .map(|freq| {
+                        let wavelen = 2. * PI / freq;
+                        if wavelen < high_freq_wavelen {
+                            freq
+                        } else if wavelen > low_freq_wavelen {
+                            freq / rope_scaling.factor
+                        } else {
+                            let smooth = (rope_scaling.original_max_position_embeddings as f32
+                                / wavelen
+                                - rope_scaling.low_freq_factor)
+                                / (rope_scaling.high_freq_factor - rope_scaling.low_freq_factor);
+                            (1. - smooth) * freq / rope_scaling.factor + smooth * freq
+                        }
+                    })
+                    .collect::<Vec<_>>()
+            }
+        };
+
+        let theta = Tensor::new(theta, device)?;
+
+        let idx_theta = Tensor::arange(0, config.max_position_embeddings as u32, device)?
             .to_dtype(DType::F32)?
-            .reshape((MAX_SEQ_LEN, 1))?
+            .reshape((config.max_position_embeddings, 1))?
             .matmul(&theta.reshape((1, theta.elem_count()))?)?;
+        // This is different from the paper, see:
+        // https://github.com/huggingface/transformers/blob/6112b1c6442aaf7affd2b0676a1cd4eee30c45cf/src/transformers/models/llama/modeling_llama.py#L112
         let cos = idx_theta.cos()?.to_dtype(dtype)?;
         let sin = idx_theta.sin()?.to_dtype(dtype)?;
-
         Ok(Self { cos, sin })
     }
 }
@@ -269,7 +339,7 @@ impl CausalSelfAttention {
                 dtype,
                 device.clone(),
             )?,
-            cos_sin_cache: Cache::new(cfg, device, dtype)?,
+            cos_sin_cache: Cache::new(dtype, cfg, device)?,
         })
     }
 }
@@ -472,7 +542,8 @@ mod tests {
             Tokenizer::from_file(tokenizer_filename).expect("Failed to load the tokenizer");
         let eos_token_id = config
             .eos_token_id
-            .or_else(|| tokenizer.token_to_id(EOS_TOKEN));
+            .clone()
+            .or_else(|| tokenizer.token_to_id(EOS_TOKEN).map(LlamaEosToks::Single));
 
         let mut tokens = tokenizer
             .encode(prompt.clone(), true)
@@ -592,8 +663,16 @@ mod tests {
             token_generated += 1;
             tokens.push(next_token);
 
-            if Some(next_token) == eos_token_id {
-                break;
+            match eos_token_id {
+                Some(LlamaEosToks::Single(eos_tok_id)) if next_token == eos_tok_id => {
+                    break;
+                }
+                Some(LlamaEosToks::Multiple(ref eos_ids))
+                    if eos_ids.contains(&next_token) =>
+                {
+                    break;
+                }
+                _ => (),
             }
             if let Some(t) = tokenizer.next_token(next_token)? {
                 print!("{t}");
@@ -650,7 +729,8 @@ mod tests {
             Tokenizer::from_file(tokenizer_filename).expect("Failed to load the tokenizer");
         let eos_token_id = config
             .eos_token_id
-            .or_else(|| tokenizer.token_to_id(EOS_TOKEN));
+            .clone()
+            .or_else(|| tokenizer.token_to_id(EOS_TOKEN).map(LlamaEosToks::Single));
 
         let mut tokens = tokenizer
             .encode(prompt.clone(), true)
@@ -796,8 +876,16 @@ mod tests {
             token_generated += 1;
             tokens.push(next_token);
 
-            if Some(next_token) == eos_token_id {
-                break;
+            match eos_token_id {
+                Some(LlamaEosToks::Single(eos_tok_id)) if next_token == eos_tok_id => {
+                    break;
+                }
+                Some(LlamaEosToks::Multiple(ref eos_ids))
+                    if eos_ids.contains(&next_token) =>
+                {
+                    break;
+                }
+                _ => (),
             }
             if let Some(t) = tokenizer.next_token(next_token)? {
                 print!("{t}");
@@ -854,7 +942,8 @@ mod tests {
             Tokenizer::from_file(tokenizer_filename).expect("Failed to load the tokenizer");
         let eos_token_id = config
             .eos_token_id
-            .or_else(|| tokenizer.token_to_id(EOS_TOKEN));
+            .clone()
+            .or_else(|| tokenizer.token_to_id(EOS_TOKEN).map(LlamaEosToks::Single));
 
         let mut tokens = tokenizer
             .encode(prompt.clone(), true)
@@ -974,7 +1063,8 @@ mod tests {
             let context_lengths = Tensor::new(&[0u32], &device)?;
             let last_allocated_block = *allocated_blocks.last().unwrap();
             let slot_mapping = Tensor::new(
-                &[(last_allocated_block as i64) * (block_size as i64) + ((tokens.len() - 1) % block_size as usize) as i64],
+                &[(last_allocated_block as i64) * (block_size as i64)
+                    + ((tokens.len() - 1) % block_size as usize) as i64],
                 &device,
             )?;
             let query_start_locations = Tensor::new(&[0u32, 1], &device)?;
@@ -1024,8 +1114,16 @@ mod tests {
             token_generated += 1;
             tokens.push(next_token);
 
-            if Some(next_token) == eos_token_id {
-                break;
+            match eos_token_id {
+                Some(LlamaEosToks::Single(eos_tok_id)) if next_token == eos_tok_id => {
+                    break;
+                }
+                Some(LlamaEosToks::Multiple(ref eos_ids))
+                    if eos_ids.contains(&next_token) =>
+                {
+                    break;
+                }
+                _ => (),
             }
             if let Some(t) = tokenizer.next_token(next_token)? {
                 print!("{t}");
@@ -1093,7 +1191,8 @@ mod tests {
             Tokenizer::from_file(tokenizer_filename).expect("Failed to load the tokenizer");
         let eos_token_id = config
             .eos_token_id
-            .or_else(|| tokenizer.token_to_id(EOS_TOKEN));
+            .clone()
+            .or_else(|| tokenizer.token_to_id(EOS_TOKEN).map(LlamaEosToks::Single));
 
         let mut tokens = prompts
             .iter()
@@ -1373,10 +1472,22 @@ mod tests {
 
                 tokens[i].push(next_token);
 
-                if Some(next_token) != eos_token_id {
-                    new_active_indices.push(i);
-                } else {
-                    finished_sequences.push(tokens[i].clone());
+                match eos_token_id {
+                    Some(LlamaEosToks::Single(eos_tok_id)) => {
+                        if next_token != eos_tok_id {
+                            new_active_indices.push(i);
+                        } else {
+                            finished_sequences.push(tokens[i].clone());
+                        }
+                    }
+                    Some(LlamaEosToks::Multiple(ref eos_ids)) => {
+                        if eos_ids.contains(&next_token) {
+                            finished_sequences.push(tokens[i].clone());
+                        } else {
+                            new_active_indices.push(i);
+                        }
+                    }
+                    _ => (),
                 }
             }
 

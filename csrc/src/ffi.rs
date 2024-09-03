@@ -14,21 +14,21 @@ extern "C" {
 
         is_seqlens_k_cumulative: bool,
 
-        q_batch_stride: u32,
-        k_batch_stride: u32,
-        v_batch_stride: u32,
-        o_batch_stride: u32,
-        alibi_slopes_batch_stride: u32,
+        q_batch_stride: i64,
+        k_batch_stride: i64,
+        v_batch_stride: i64,
+        o_batch_stride: i64,
+        alibi_slopes_batch_stride: i64,
 
-        q_row_stride: u32,
-        k_row_stride: u32,
-        v_row_stride: u32,
-        o_row_stride: u32,
+        q_row_stride: i64,
+        k_row_stride: i64,
+        v_row_stride: i64,
+        o_row_stride: i64,
 
-        q_head_stride: u32,
-        k_head_stride: u32,
-        v_head_stride: u32,
-        o_head_stride: u32,
+        q_head_stride: i64,
+        k_head_stride: i64,
+        v_head_stride: i64,
+        o_head_stride: i64,
 
         num_splits: u32,
 
@@ -41,7 +41,7 @@ extern "C" {
         scale_softmatx_log2: f32,
 
         block_table: *const c_int,
-        block_table_batch_stride: u32,
+        block_table_batch_stride: i64,
         page_block_size: c_int,
 
         seqused_k: *const c_int,
