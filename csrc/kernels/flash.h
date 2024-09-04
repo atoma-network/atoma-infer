@@ -7,6 +7,8 @@
 #include <cuda.h>
 #include <vector>
 
+
+
 constexpr int TOTAL_DIM = 0;
 constexpr int H_DIM = 1;
 constexpr int D_DIM = 2;
@@ -14,7 +16,8 @@ constexpr int D_DIM = 2;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
 struct Qkv_params {
-    using index_t = uint32_t;
+    using index_t = int64_t;
+
     // The QKV matrices.
     void *__restrict__ q_ptr;
     void *__restrict__ k_ptr;
