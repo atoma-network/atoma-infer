@@ -588,12 +588,12 @@ mod reshape_and_cache {
                 .unwrap();
             assert_eq!(key.flatten_all().unwrap().to_vec1::<half::f16>().unwrap(), reshaped_key_slice);
 
-            let reshaped_value_slice = reshaped_value
+            let reshaped_value_slice = value_cache
                 .i(i)
                 .unwrap()
                 .flatten_all()
                 .unwrap()
-                .to_vec1::<f16>()
+                .to_vec1::<half::f16>()
                 .unwrap();
             assert_eq!(value.flatten_all().unwrap().to_vec1::<half::f16>().unwrap(), reshaped_value_slice);
         }
@@ -627,7 +627,7 @@ mod reshape_and_cache {
        
         // Check that data has been copied correctly (you might want to check a few elements)
         for i in 0..num_tokens {
-            let reshaped_key_slice = reshaped_key
+            let reshaped_key_slice = key_cache
                 .i(i)
                 .unwrap()
                 .flatten_all()
@@ -636,7 +636,7 @@ mod reshape_and_cache {
                 .unwrap();
             assert_eq!(key.flatten_all().unwrap().to_vec1::<half::bf16>().unwrap(), reshaped_key_slice);
 
-            let reshaped_value_slice = reshaped_value
+            let reshaped_value_slice = value_cache
                 .i(i)
                 .unwrap()
                 .flatten_all()
