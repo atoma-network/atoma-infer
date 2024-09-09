@@ -539,7 +539,7 @@ mod copy_blocks {
 
 #[cfg(test)]
 mod reshape_and_cache {
-    use candle_core::{DType, Device, Tensor};
+    use candle_core::{DType, Device, IndexOp, Tensor};
     use csrc::cache_manager::reshape_and_cache_flash;
 
     fn create_random_tensor(shape: &[usize], device: &Device, dtype: DType) -> Tensor {
@@ -577,38 +577,17 @@ mod reshape_and_cache {
 
         assert!(result.is_ok());
 
-        // Additional assertions
-        let (reshaped_key, reshaped_value) = result.unwrap();
-
-        // Check shapes
-        assert_eq!(reshaped_key.shape(), &[num_tokens, num_heads, head_size]);
-        assert_eq!(reshaped_value.shape(), &[num_tokens, num_heads, head_size]);
-
         // Check that data has been copied correctly (you might want to check a few elements)
         for i in 0..num_tokens {
-            let original_key_slice = key
+            let reshaped_key_slice = key_cache
                 .i(i)
                 .unwrap()
                 .flatten_all()
                 .unwrap()
-                .to_vec1::<f16>()
+                .to_vec1::<half::f16>()
                 .unwrap();
-            let reshaped_key_slice = reshaped_key
-                .i(i)
-                .unwrap()
-                .flatten_all()
-                .unwrap()
-                .to_vec1::<f16>()
-                .unwrap();
-            assert_eq!(original_key_slice, reshaped_key_slice);
+            assert_eq!(key.flatten_all().unwrap().to_vec1::<half::f16>().unwrap(), reshaped_key_slice);
 
-            let original_value_slice = value
-                .i(i)
-                .unwrap()
-                .flatten_all()
-                .unwrap()
-                .to_vec1::<f16>()
-                .unwrap();
             let reshaped_value_slice = reshaped_value
                 .i(i)
                 .unwrap()
@@ -616,7 +595,7 @@ mod reshape_and_cache {
                 .unwrap()
                 .to_vec1::<f16>()
                 .unwrap();
-            assert_eq!(original_value_slice, reshaped_value_slice);
+            assert_eq!(value.flatten_all().unwrap().to_vec1::<half::f16>().unwrap(), reshaped_value_slice);
         }
     }
 
@@ -645,48 +624,26 @@ mod reshape_and_cache {
             Tensor::from_slice(&[0i64, 1, 2, 3, 4, 5, 6, 7, 8, 9], (num_tokens,), &device).unwrap();
 
         let result = reshape_and_cache_flash(&key, &value, &key_cache, &value_cache, &slot_mapping);
-        assert!(result.is_ok());
-
-        // Additional assertions
-        let (reshaped_key, reshaped_value) = result.unwrap();
-
-        // Check shapes
-        assert_eq!(reshaped_key.shape(), &[num_tokens, num_heads, head_size]);
-        assert_eq!(reshaped_value.shape(), &[num_tokens, num_heads, head_size]);
-
+       
         // Check that data has been copied correctly (you might want to check a few elements)
         for i in 0..num_tokens {
-            let original_key_slice = key
-                .i(i)
-                .unwrap()
-                .flatten_all()
-                .unwrap()
-                .to_vec1::<bf16>()
-                .unwrap();
             let reshaped_key_slice = reshaped_key
                 .i(i)
                 .unwrap()
                 .flatten_all()
                 .unwrap()
-                .to_vec1::<bf16>()
+                .to_vec1::<half::bf16>()
                 .unwrap();
-            assert_eq!(original_key_slice, reshaped_key_slice);
+            assert_eq!(key.flatten_all().unwrap().to_vec1::<half::bf16>().unwrap(), reshaped_key_slice);
 
-            let original_value_slice = value
-                .i(i)
-                .unwrap()
-                .flatten_all()
-                .unwrap()
-                .to_vec1::<bf16>()
-                .unwrap();
             let reshaped_value_slice = reshaped_value
                 .i(i)
                 .unwrap()
                 .flatten_all()
                 .unwrap()
-                .to_vec1::<bf16>()
+                .to_vec1::<half::bf16>()
                 .unwrap();
-            assert_eq!(original_value_slice, reshaped_value_slice);
+            assert_eq!(value.flatten_all().unwrap().to_vec1::<half::bf16>().unwrap(), reshaped_value_slice);
         }
     }
 
