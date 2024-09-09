@@ -1,9 +1,10 @@
 /// A Rust implementation of the Phi3 model, a transformer-based language model.
-use ccandle::{DType, Device, Module, Result, Tensor, D};
+use candle::{DType, Device, Module, Result, Tensor, D};
 use candle_nn::VarBuilder;
 use std::sync::Arc;
 
-use super::with_tracing::{linear_no_bias as linear, Linear, RmsNorm};
+use candle_transformers::models::with_tracing::{linear_no_bias as linear, Linear, RmsNorm};
+
 use crate::flash_attention::{FlashAttention, FlashAttentionMetadata};
 use candle_transformers::utils;
 
@@ -295,6 +296,8 @@ mod tests {
 
     #[test]
     #[serial]
+
+  //  cargo test test_phi3_model -- --exact
     fn test_phi3_model() -> Result<()> {
         let prompt = "The capital of France is ".to_string();
 
