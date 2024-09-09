@@ -291,7 +291,7 @@ mod tests {
     use tokenizers::Tokenizer;
 
     const EOS_TOKEN: &str = "ӏ ";
-    const BLOCK_SIZE: usize = 16; // Adjust this value as needed
+    const BLOCK_SIZE: usize = 16;
 
     #[test]
     #[serial]
