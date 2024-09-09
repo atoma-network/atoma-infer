@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use super::with_tracing::{linear_no_bias as linear, Linear, RmsNorm};
 use crate::flash_attention::{FlashAttention, FlashAttentionMetadata};
+use candle_transformers::utils;
 
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct Phi3Config {
@@ -144,9 +145,8 @@ impl Attention {
             self.rotary_emb
                 .apply_rotary_emb_qkv(&query_states, &key_states, input_positions)?;
 
-        let key_states = crate::utils::repeat_kv(key_states, self.num_kv_groups)?.contiguous()?;
-        let value_states =
-            crate::utils::repeat_kv(value_states, self.num_kv_groups)?.contiguous()?;
+        let key_states = utils::repeat_kv(key_states, self.num_kv_groups)?.contiguous()?;
+        let value_states = utils::repeat_kv(value_states, self.num_kv_groups)?.contiguous()?;
 
         let attn_output = self.attention.forward(&query_states, &key_states, &value_states, &key_states, attention_metadata)?;
 
@@ -290,7 +290,8 @@ mod tests {
     use std::io::Write;
     use tokenizers::Tokenizer;
 
-    const EOS_TOKEN: &str = "</s>";
+    const EOS_TOKEN: &str = "ӏ ";
+    const BLOCK_SIZE: usize = 16; // Adjust this value as needed
 
     #[test]
     #[serial]
@@ -395,7 +396,7 @@ mod tests {
             let input = Tensor::new(&[next_token], &device)?.unsqueeze(0)?;
             let input_positions = Tensor::new(&[tokens.len() as i64 - 1], &device)?.unsqueeze(0)?;
             let selected_token_indices = Tensor::new(&[0u32], &device)?;
-            let num_blocks = (tokens.len() / block_size) as i64 + 1;
+            let num_blocks = (tokens.len() / BLOCK_SIZE) as i64 + 1;
             let attention_metadata = FlashAttentionMetadata {
                 context_lengths: None,
                 slot_mapping: Tensor::new(&[tokens.len() as i64 - 1], &device)?,
@@ -621,7 +622,7 @@ mod tests {
         };
         let selected_token_indices =
             Tensor::from_vec(selected_token_indices, (tokens.len(),), &device)?;
-        let logits = phy3_model
+        let logits = phi3_model
             .forward(
                 &input,
                 &input_positions,
@@ -679,7 +680,7 @@ mod tests {
                 .unwrap();
             let num_blocks_per_sequence = active_indices
                 .iter()
-                .map(|i| ((tokens[*i].len() + 15) / block_size) as i64)
+                .map(|i| ((tokens[*i].len() + 15) / BLOCK_SIZE) as i64)
                 .collect::<Vec<_>>();
             let max_num_blocks = *num_blocks_per_sequence.iter().max().unwrap() as usize;
 
@@ -696,8 +697,8 @@ mod tests {
                 .iter()
                 .zip(num_blocks_per_sequence.iter())
                 .flat_map(|(i, num_blocks)| {
-                    let mut range = ((*i as u32 * total_num_blocks_per_sequence as u32)
-                        ..((*i as u32 * total_num_blocks_per_sequence as u32)
+                    let mut range = ((*i as u32 * max_num_blocks as u32)
+                        ..((*i as u32 * max_num_blocks as u32)
                             + *num_blocks as u32))
                         .collect::<Vec<_>>();
                     range.extend([0u32].repeat(max_num_blocks - *num_blocks as usize)); // pad to max_num_blocks
@@ -777,6 +778,199 @@ mod tests {
         for s in sentences {
             println!("{:?}", s);
         }
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn test_phi3_model_long() -> Result<()> {
+        let prompt = "The History of France starts in ".to_string();
+
+        let dtype = DType::BF16;
+        let device = Device::new_cuda(0).unwrap();
+        let model_id = "YourModelID/YourPhi3Model".to_string();  // Replace with your model ID
+        let revision = "main".to_string();
+        let api = Api::new().expect("Failed to create the HF API");
+
+        println!("loading the model weights from {model_id}");
+        let api = api.repo(Repo::with_revision(model_id, RepoType::Model, revision));
+
+        let tokenizer_filename = api
+            .get("tokenizer.json")
+            .expect("Failed to get tokenizer.json");
+        let config_filename = api.get("config.json").expect("Failed to get config.json");
+        let config: Phi3Config = serde_json::from_slice(
+            &std::fs::read(config_filename).expect("Failed to read config.json"),
+        )
+        .expect("Failed to deserialize config.json");
+
+        let filenames = vec![api
+            .get("model.safetensors")
+            .expect("Failed to get model.safetensors")];
+        let mut phi3_model = {
+            let vb = unsafe { VarBuilder::from_mmaped_safetensors(&filenames, dtype, &device)? };
+            Model::new(&config, vb, &device).expect("Failed to load the model")
+        };
+        let tokenizer =
+            Tokenizer::from_file(tokenizer_filename).expect("Failed to load the tokenizer");
+        let eos_token_id = config
+            .eos_token_id
+            .or_else(|| tokenizer.token_to_id(EOS_TOKEN));
+
+        let mut tokens = tokenizer
+            .encode(prompt.clone(), true)
+            .expect("Failed to encode the prompt")
+            .get_ids()
+            .to_vec();
+
+        let mut tokenizer = candle_examples::token_output_stream::TokenOutputStream::new(tokenizer);
+        println!("starting the inference loop");
+        print!("{prompt}");
+
+        let mut logits_processor = {
+            let temperature = 0.8;
+            let sampling = Sampling::All { temperature };
+            LogitsProcessor::from_sampling(42, sampling)
+        };
+
+        let sample_len = 512;
+        let start_gen = std::time::Instant::now();
+        let mut token_generated = 0;
+
+        // kv cache
+        let num_blocks = 100;
+        let block_size = BLOCK_SIZE;
+        let num_key_value_heads = config.num_key_value_heads;
+        let head_dim = config.head_dim();
+        let mut kv_cache = std::iter::repeat_with(|| {
+            Tensor::zeros(
+                (num_blocks, block_size, num_key_value_heads, head_dim),
+                dtype,
+                &device,
+            )
+        })
+        .take(config.num_hidden_layers)
+        .collect::<Result<Vec<_>>>()?;
+
+        let kv_cache = kv_cache.iter_mut().collect::<Vec<_>>();
+
+        // prefill forward pass
+        let input_positions = Tensor::arange(0, tokens.len() as i64, &device)?.unsqueeze(0)?;
+        let input = Tensor::new(&tokens[..], &device)?.unsqueeze(0)?;
+
+        let context_lengths = Tensor::from_vec(vec![tokens.len() as u32], (1,), &device)?;
+        let slot_mapping = Tensor::arange(0, tokens.len() as i64, &device)?;
+        let query_start_locations = Tensor::from_vec(vec![0, tokens.len() as u32], (2,), &device)?;
+        let sequence_start_locations =
+            Tensor::from_vec(vec![0, tokens.len() as u32], (2,), &device)?;
+        let sequence_lengths = Tensor::from_vec(vec![tokens.len() as u32], (1,), &device)?;
+        let block_tables = Tensor::new::<&[u32; 0]>(&[], &device)?;
+
+        let num_prefill_tokens = tokens.len();
+        let num_decoding_tokens = 0;
+        let max_query_length = tokens.len();
+        let max_decoding_sequence_length = 0;
+        let max_prefill_sequence_length = tokens.len();
+        let num_prefill_sequences = 1;
+
+        let attention_metadata = FlashAttentionMetadata {
+            context_lengths: Some(context_lengths),
+            slot_mapping,
+            decoding_metadata: None,
+            num_prefill_tokens,
+            num_decoding_tokens,
+            prefill_metadata: Some(FlashAttentionPrefillMetadata {
+                block_tables: None,
+                max_query_length: Some(max_query_length),
+                max_prefill_sequence_length,
+                query_start_locations: Some(query_start_locations),
+                sequence_start_locations: Some(sequence_start_locations),
+                sequence_lengths: Some(sequence_lengths),
+            }),
+        };
+        let logits = phi3_model.forward(
+            &input,
+            &input_positions,
+            &attention_metadata,
+        )?;
+        let logits = logits.squeeze(0)?.squeeze(0)?;
+
+        let mut next_token = logits_processor.sample(&logits)?;
+        token_generated += 1;
+        tokens.push(next_token);
+
+        if let Some(t) = tokenizer.next_token(next_token)? {
+            print!("{t}");
+            std::io::stdout().flush()?;
+        }
+
+        // decoding loop
+        for _ in 1..sample_len {
+            let input = Tensor::new(&[next_token], &device)?.unsqueeze(0)?;
+            let input_positions = Tensor::new(&[tokens.len() as i64 - 1], &device)?.unsqueeze(0)?;
+            let num_blocks = (tokens.len() / block_size) as i64 + 1;
+
+            let context_lengths = Tensor::new(&[0u32], &device)?;
+            let slot_mapping = Tensor::new(&[tokens.len() as i64 - 1], &device)?;
+            let query_start_locations = Tensor::new(&[0u32, 1], &device)?;
+            let sequence_start_locations = Tensor::new(&[0, tokens.len() as u32], &device)?;
+            let sequence_lengths = Tensor::new(&[tokens.len() as u32], &device)?;
+            let block_tables = Tensor::arange(0, num_blocks, &device)?
+                .to_dtype(DType::U32)?
+                .reshape((1, num_blocks as usize))?;
+
+            let num_prefill_tokens = 0;
+            let num_decoding_tokens = 1;
+            let max_query_length = 1;
+            let max_decoding_sequence_length = tokens.len();
+            let max_prefill_sequence_length = 0;
+            let num_prefill_sequences = 0;
+
+            let attention_metadata = FlashAttentionMetadata {
+                context_lengths: None,
+                slot_mapping,
+                decoding_metadata: Some(FlashAttentionDecodingMetadata {
+                    block_tables: Some(block_tables),
+                    max_decoding_sequence_length,
+                    sequence_lengths: Some(sequence_lengths),
+                }),
+                prefill_metadata: None,
+                num_prefill_tokens,
+                num_decoding_tokens,
+            };
+            let logits = phi3_model
+                .forward(
+                    &input,
+                    &input_positions,
+                    &attention_metadata,
+                )?
+                .squeeze(0)?
+                .squeeze(0)?;
+
+            next_token = logits_processor.sample(&logits)?;
+            token_generated += 1;
+            tokens.push(next_token);
+
+            if Some(next_token) == eos_token_id {
+                break;
+            }
+            if let Some(t) = tokenizer.next_token(next_token)? {
+                print!("{t}");
+                std::io::stdout().flush()?;
+            }
+        }
+
+        if let Some(rest) = tokenizer.decode_rest().unwrap() {
+            print!("{rest}");
+        }
+
+        let dt = start_gen.elapsed();
+        println!(
+            "\n\n{} tokens generated ({} token/s)\n",
+            token_generated,
+            (token_generated - 1) as f64 / dt.as_secs_f64(),
+        );
 
         Ok(())
     }
