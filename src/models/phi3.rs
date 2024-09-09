@@ -1,5 +1,5 @@
 /// A Rust implementation of the Phi3 model, a transformer-based language model.
-use candle::{DType, Device, Module, Result, Tensor, D};
+use ccandle::{DType, Device, Module, Result, Tensor, D};
 use candle_nn::VarBuilder;
 use std::sync::Arc;
 
@@ -789,7 +789,7 @@ mod tests {
 
         let dtype = DType::BF16;
         let device = Device::new_cuda(0).unwrap();
-        let model_id = "YourModelID/YourPhi3Model".to_string();  // Replace with your model ID
+        let model_id = "TinyLlama/TinyLlama-1.1B-Chat-v1.0".to_string();  
         let revision = "main".to_string();
         let api = Api::new().expect("Failed to create the HF API");
 
