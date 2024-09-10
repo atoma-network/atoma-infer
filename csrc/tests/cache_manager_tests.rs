@@ -253,7 +253,7 @@ mod copy_blocks {
         let original_value_caches = value_caches.clone();
 
         // (0, 1, 2, 3) -> (0, 1, 0, 3) -> (0, 1, 0, 1)
-        let block_mapping = Tensor::from_slice(&[0u32, 2, 1, 3], (NUM_PAIRS, 2), &device).unwrap();
+        let block_mapping = Tensor::from_slice(&[0i64, 2, 1, 3], (NUM_PAIRS, 2), &device).unwrap();
 
         let key_caches_refs: Vec<_> = key_caches.iter_mut().collect();
         let value_caches_refs: Vec<_> = value_caches.iter_mut().collect();
@@ -360,7 +360,7 @@ mod copy_blocks {
         let original_key_caches = key_caches.clone();
         let original_value_caches = value_caches.clone();
 
-        let block_mapping = Tensor::from_slice(&[0u32, 2, 1, 3], (NUM_PAIRS, 2), &device).unwrap();
+        let block_mapping = Tensor::from_slice(&[0i64, 2, 1, 3], (NUM_PAIRS, 2), &device).unwrap();
 
         let key_caches_refs: Vec<_> = key_caches.iter_mut().collect();
         let value_caches_refs: Vec<_> = value_caches.iter_mut().collect();
@@ -462,7 +462,7 @@ mod copy_blocks {
             create_test_tensor(&device, DType::F16),
             create_test_tensor(&device, DType::F16),
         ];
-        let block_mapping = Tensor::from_slice(&[0u32, 1], (1, 2), &device).unwrap();
+        let block_mapping = Tensor::from_slice(&[0i64, 1], (1, 2), &device).unwrap();
 
         let key_caches_refs: Vec<_> = key_caches.iter_mut().collect();
         let value_caches_refs: Vec<_> = value_caches.iter_mut().collect();
@@ -478,7 +478,7 @@ mod copy_blocks {
         let device = Device::Cpu;
         let mut key_caches = vec![create_test_tensor(&device, DType::F16)];
         let mut value_caches = vec![create_test_tensor(&device, DType::F16)];
-        let block_mapping = Tensor::from_slice(&[0u32, 1], (1, 2), &device).unwrap();
+        let block_mapping = Tensor::from_slice(&[0i64, 1], (1, 2), &device).unwrap();
 
         let key_caches_refs: Vec<_> = key_caches.iter_mut().collect();
         let value_caches_refs: Vec<_> = value_caches.iter_mut().collect();
@@ -494,7 +494,7 @@ mod copy_blocks {
         let device = Device::new_cuda(0).unwrap();
         let mut key_caches = vec![create_test_tensor(&device, DType::F16)];
         let mut value_caches = vec![create_test_tensor(&device, DType::BF16)];
-        let block_mapping = Tensor::from_slice(&[0u32, 1], (1, 2), &device).unwrap();
+        let block_mapping = Tensor::from_slice(&[0i64, 1], (1, 2), &device).unwrap();
 
         let key_caches_refs: Vec<_> = key_caches.iter_mut().collect();
         let value_caches_refs: Vec<_> = value_caches.iter_mut().collect();
@@ -510,7 +510,7 @@ mod copy_blocks {
         let device = Device::new_cuda(0).unwrap();
         let mut key_caches = vec![create_test_tensor(&device, DType::F32)];
         let mut value_caches = vec![create_test_tensor(&device, DType::F32)];
-        let block_mapping = Tensor::from_slice(&[0u32, 1], (1, 2), &device).unwrap();
+        let block_mapping = Tensor::from_slice(&[0i64, 1], (1, 2), &device).unwrap();
 
         let key_caches_refs: Vec<_> = key_caches.iter_mut().collect();
         let value_caches_refs: Vec<_> = value_caches.iter_mut().collect();
@@ -526,7 +526,7 @@ mod copy_blocks {
         let device = Device::new_cuda(0).unwrap();
         let mut key_caches = vec![create_test_tensor(&device, DType::F16)];
         let mut value_caches = vec![create_test_tensor(&device, DType::F16)];
-        let block_mapping = Tensor::from_slice(&[0u32, 1, 2], (1, 3), &device).unwrap(); // Invalid shape
+        let block_mapping = Tensor::from_slice(&[0i64, 1, 2], (1, 3), &device).unwrap(); // Invalid shape
 
         let key_caches_refs: Vec<_> = key_caches.iter_mut().collect();
         let value_caches_refs: Vec<_> = value_caches.iter_mut().collect();
@@ -560,42 +560,61 @@ mod reshape_and_cache {
 
         let key = create_random_tensor(&[num_tokens, num_heads, head_size], &device, DType::F16);
         let value = create_random_tensor(&[num_tokens, num_heads, head_size], &device, DType::F16);
-        let key_cache = create_random_tensor(
-            &[num_blocks, block_size, num_heads, head_size],
-            &device,
+        let key_cache = Tensor::zeros(
+            (num_blocks, block_size, num_heads, head_size),
             DType::F16,
-        );
-        let value_cache = create_random_tensor(
-            &[num_blocks, block_size, num_heads, head_size],
             &device,
+        )
+        .unwrap();
+        let value_cache = Tensor::zeros(
+            (num_blocks, block_size, num_heads, head_size),
             DType::F16,
-        );
+            &device,
+        )
+        .unwrap();
         let slot_mapping =
             Tensor::from_slice(&[0i64, 1, 2, 3, 4, 5, 6, 7, 8, 9], (num_tokens,), &device).unwrap();
 
         let result = reshape_and_cache_flash(&key, &value, &key_cache, &value_cache, &slot_mapping);
-
         assert!(result.is_ok());
 
-        // Check that data has been copied correctly (you might want to check a few elements)
         for i in 0..num_tokens {
-            let reshaped_key_slice = key_cache
-                .i(i)
-                .unwrap()
-                .flatten_all()
-                .unwrap()
-                .to_vec1::<half::f16>()
-                .unwrap();
-            assert_eq!(key.flatten_all().unwrap().to_vec1::<half::f16>().unwrap(), reshaped_key_slice);
-
-            let reshaped_value_slice = value_cache
-                .i(i)
-                .unwrap()
-                .flatten_all()
-                .unwrap()
-                .to_vec1::<half::f16>()
-                .unwrap();
-            assert_eq!(value.flatten_all().unwrap().to_vec1::<half::f16>().unwrap(), reshaped_value_slice);
+            let block_num = if i < block_size { 0 } else { 1 };
+            assert_eq!(
+                key_cache
+                    .i(block_num)
+                    .unwrap()
+                    .i(i % block_size)
+                    .unwrap()
+                    .flatten_all()
+                    .unwrap()
+                    .to_vec1::<half::f16>()
+                    .unwrap(),
+                key.i(i)
+                    .unwrap()
+                    .flatten_all()
+                    .unwrap()
+                    .to_vec1::<half::f16>()
+                    .unwrap()
+            );
+            assert_eq!(
+                value_cache
+                    .i(block_num)
+                    .unwrap()
+                    .i(i % block_size)
+                    .unwrap()
+                    .flatten_all()
+                    .unwrap()
+                    .to_vec1::<half::f16>()
+                    .unwrap(),
+                value
+                    .i(i)
+                    .unwrap()
+                    .flatten_all()
+                    .unwrap()
+                    .to_vec1::<half::f16>()
+                    .unwrap()
+            );
         }
     }
 
@@ -610,40 +629,61 @@ mod reshape_and_cache {
 
         let key = create_random_tensor(&[num_tokens, num_heads, head_size], &device, DType::BF16);
         let value = create_random_tensor(&[num_tokens, num_heads, head_size], &device, DType::BF16);
-        let key_cache = create_random_tensor(
-            &[num_blocks, block_size, num_heads, head_size],
-            &device,
+        let key_cache = Tensor::zeros(
+            (num_blocks, block_size, num_heads, head_size),
             DType::BF16,
-        );
-        let value_cache = create_random_tensor(
-            &[num_blocks, block_size, num_heads, head_size],
             &device,
+        )
+        .unwrap();
+        let value_cache = Tensor::zeros(
+            (num_blocks, block_size, num_heads, head_size),
             DType::BF16,
-        );
+            &device,
+        )
+        .unwrap();
         let slot_mapping =
             Tensor::from_slice(&[0i64, 1, 2, 3, 4, 5, 6, 7, 8, 9], (num_tokens,), &device).unwrap();
 
         let result = reshape_and_cache_flash(&key, &value, &key_cache, &value_cache, &slot_mapping);
-       
-        // Check that data has been copied correctly (you might want to check a few elements)
-        for i in 0..num_tokens {
-            let reshaped_key_slice = key_cache
-                .i(i)
-                .unwrap()
-                .flatten_all()
-                .unwrap()
-                .to_vec1::<half::bf16>()
-                .unwrap();
-            assert_eq!(key.flatten_all().unwrap().to_vec1::<half::bf16>().unwrap(), reshaped_key_slice);
+        assert!(result.is_ok());
 
-            let reshaped_value_slice = value_cache
-                .i(i)
-                .unwrap()
-                .flatten_all()
-                .unwrap()
-                .to_vec1::<half::bf16>()
-                .unwrap();
-            assert_eq!(value.flatten_all().unwrap().to_vec1::<half::bf16>().unwrap(), reshaped_value_slice);
+        for i in 0..num_tokens {
+            let block_num = if i < block_size { 0 } else { 1 };
+            assert_eq!(
+                key_cache
+                    .i(block_num)
+                    .unwrap()
+                    .i(i % block_size)
+                    .unwrap()
+                    .flatten_all()
+                    .unwrap()
+                    .to_vec1::<half::bf16>()
+                    .unwrap(),
+                key.i(i)
+                    .unwrap()
+                    .flatten_all()
+                    .unwrap()
+                    .to_vec1::<half::bf16>()
+                    .unwrap()
+            );
+            assert_eq!(
+                value_cache
+                    .i(block_num)
+                    .unwrap()
+                    .i(i % block_size)
+                    .unwrap()
+                    .flatten_all()
+                    .unwrap()
+                    .to_vec1::<half::bf16>()
+                    .unwrap(),
+                value
+                    .i(i)
+                    .unwrap()
+                    .flatten_all()
+                    .unwrap()
+                    .to_vec1::<half::bf16>()
+                    .unwrap()
+            );
         }
     }
 
