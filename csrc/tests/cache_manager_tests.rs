@@ -253,7 +253,7 @@ mod copy_blocks {
         let original_value_caches = value_caches.clone();
 
         // (0, 1, 2, 3) -> (0, 1, 0, 3) -> (0, 1, 0, 1)
-        let block_mapping = Tensor::from_slice(&[0i64, 2, 1, 3], (NUM_PAIRS, 2), &device).unwrap();
+        let block_mapping = Tensor::from_slice(&[0u32, 2, 1, 3], (NUM_PAIRS, 2), &device).unwrap();
 
         let key_caches_refs: Vec<_> = key_caches.iter_mut().collect();
         let value_caches_refs: Vec<_> = value_caches.iter_mut().collect();
@@ -360,7 +360,7 @@ mod copy_blocks {
         let original_key_caches = key_caches.clone();
         let original_value_caches = value_caches.clone();
 
-        let block_mapping = Tensor::from_slice(&[0i64, 2, 1, 3], (NUM_PAIRS, 2), &device).unwrap();
+        let block_mapping = Tensor::from_slice(&[0u32, 2, 1, 3], (NUM_PAIRS, 2), &device).unwrap();
 
         let key_caches_refs: Vec<_> = key_caches.iter_mut().collect();
         let value_caches_refs: Vec<_> = value_caches.iter_mut().collect();
@@ -462,7 +462,7 @@ mod copy_blocks {
             create_test_tensor(&device, DType::F16),
             create_test_tensor(&device, DType::F16),
         ];
-        let block_mapping = Tensor::from_slice(&[0i64, 1], (1, 2), &device).unwrap();
+        let block_mapping = Tensor::from_slice(&[0u32, 1], (1, 2), &device).unwrap();
 
         let key_caches_refs: Vec<_> = key_caches.iter_mut().collect();
         let value_caches_refs: Vec<_> = value_caches.iter_mut().collect();
@@ -478,7 +478,7 @@ mod copy_blocks {
         let device = Device::Cpu;
         let mut key_caches = vec![create_test_tensor(&device, DType::F16)];
         let mut value_caches = vec![create_test_tensor(&device, DType::F16)];
-        let block_mapping = Tensor::from_slice(&[0i64, 1], (1, 2), &device).unwrap();
+        let block_mapping = Tensor::from_slice(&[0u32, 1], (1, 2), &device).unwrap();
 
         let key_caches_refs: Vec<_> = key_caches.iter_mut().collect();
         let value_caches_refs: Vec<_> = value_caches.iter_mut().collect();
@@ -494,7 +494,7 @@ mod copy_blocks {
         let device = Device::new_cuda(0).unwrap();
         let mut key_caches = vec![create_test_tensor(&device, DType::F16)];
         let mut value_caches = vec![create_test_tensor(&device, DType::BF16)];
-        let block_mapping = Tensor::from_slice(&[0i64, 1], (1, 2), &device).unwrap();
+        let block_mapping = Tensor::from_slice(&[0u32, 1], (1, 2), &device).unwrap();
 
         let key_caches_refs: Vec<_> = key_caches.iter_mut().collect();
         let value_caches_refs: Vec<_> = value_caches.iter_mut().collect();
@@ -510,7 +510,7 @@ mod copy_blocks {
         let device = Device::new_cuda(0).unwrap();
         let mut key_caches = vec![create_test_tensor(&device, DType::F32)];
         let mut value_caches = vec![create_test_tensor(&device, DType::F32)];
-        let block_mapping = Tensor::from_slice(&[0i64, 1], (1, 2), &device).unwrap();
+        let block_mapping = Tensor::from_slice(&[0u32, 1], (1, 2), &device).unwrap();
 
         let key_caches_refs: Vec<_> = key_caches.iter_mut().collect();
         let value_caches_refs: Vec<_> = value_caches.iter_mut().collect();
@@ -526,7 +526,7 @@ mod copy_blocks {
         let device = Device::new_cuda(0).unwrap();
         let mut key_caches = vec![create_test_tensor(&device, DType::F16)];
         let mut value_caches = vec![create_test_tensor(&device, DType::F16)];
-        let block_mapping = Tensor::from_slice(&[0i64, 1, 2], (1, 3), &device).unwrap(); // Invalid shape
+        let block_mapping = Tensor::from_slice(&[0u32, 1, 2], (1, 3), &device).unwrap(); // Invalid shape
 
         let key_caches_refs: Vec<_> = key_caches.iter_mut().collect();
         let value_caches_refs: Vec<_> = value_caches.iter_mut().collect();
