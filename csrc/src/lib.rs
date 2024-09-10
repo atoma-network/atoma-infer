@@ -10,7 +10,6 @@ use candle_core::cuda_backend::cudarc::driver::DevicePtr;
 use candle_core::cuda_backend::WrapErr;
 use candle_core::{CpuStorage, DType, Layout, Result, Shape, Tensor};
 use half::{bf16, f16};
-mod ffi;
 
 pub struct FlashAttention {
     pub softmax_scale: f32,
