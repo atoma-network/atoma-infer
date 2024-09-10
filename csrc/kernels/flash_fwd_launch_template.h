@@ -4,8 +4,9 @@
 
 #pragma once
 
-#include <cuda_runtime.h>
-#include <stdio.h>
+// #include <ATen/cuda/CUDAContext.h>
+
+#include "error.h"
 #include "static_switch.h"
 #include "flash.h"
 #include "flash_fwd_kernel.h"
@@ -20,15 +21,6 @@
 
 // Define a macro for unsupported architecture handling to centralize the error message
 #define FLASH_UNSUPPORTED_ARCH printf("FATAL: FlashAttention requires building with sm version sm80-sm90, but was built for < 8.0!");
-
-// Custom CUDA error checking function
-inline void checkCudaErrors(cudaError_t code, const char *file, int line) {
-    if (code != cudaSuccess) {
-        fprintf(stderr, "CUDA Error: %s %s %d\n", cudaGetErrorString(code), file, line);
-        exit(code);
-    }
-}
-#define CUDA_CHECK(ans) { checkCudaErrors((ans), __FILE__, __LINE__); }
 
 // Use a macro to clean up kernel definitions
 #define DEFINE_FLASH_FORWARD_KERNEL(kernelName, ...) \
@@ -82,12 +74,12 @@ void run_flash_fwd(Flash_fwd_params &params, cudaStream_t stream) {
                             // If return_softmax, set IsEvenMNConst to false to reduce number of templates
                             // If head dim > 128, set IsEvenMNConst to false to reduce number of templates
                             // If Is_local, set Is_causal to false
-                            auto kernel = &flash_fwd_kernel<Kernel_traits, Is_dropout && !Is_softcap, Is_causal, Is_local && !Is_causal, Has_alibi, IsEvenMNConst && IsEvenKConst && !Is_local && !ReturnSoftmaxConst && Kernel_traits::kHeadDim <= 128, IsEvenKConst, Is_softcap, ReturnSoftmaxConst && Is_dropout && !Is_softcap>;
+                            auto kernel = &flash_fwd_kernel<Kernel_traits, Is_dropout, Is_causal, Is_local && !Is_causal, Has_alibi, IsEvenMNConst && IsEvenKConst && !Is_local && !ReturnSoftmaxConst && Kernel_traits::kHeadDim <= 128, IsEvenKConst, Is_softcap, ReturnSoftmaxConst && Is_dropout>;
                             // auto kernel = &flash_fwd_kernel<Kernel_traits, false, Is_causal, false, false, true, true, false>;
                             // printf("IsEvenMNConst = %d, IsEvenKConst = %d, Is_local = %d, Is_causal = %d, ReturnSoftmaxConst = %d, Is_dropout = %d\n", int(IsEvenMNConst), int(IsEvenKConst), int(Is_local), int(Is_causal), int(ReturnSoftmaxConst), int(Is_dropout));
                             // auto kernel = &flash_fwd_kernel<Kernel_traits, false, Is_causal, false, true, true, false>;
                             if (smem_size >= 48 * 1024) {
-                                CUDA_CHECK(cudaFuncSetAttribute(
+                                C10_CUDA_CHECK(cudaFuncSetAttribute(
                                     kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, smem_size));
                             }
                             // int ctas_per_sm;
@@ -95,7 +87,7 @@ void run_flash_fwd(Flash_fwd_params &params, cudaStream_t stream) {
                             //     &ctas_per_sm, kernel, Kernel_traits::kNThreads, smem_size);
                             // printf("smem_size = %d, CTAs per SM = %d\n", int(smem_size), ctas_per_sm);
                             kernel<<<grid, Kernel_traits::kNThreads, smem_size, stream>>>(params);
-                            CUDA_CHECK(cudaGetLastError());
+                            C10_CUDA_KERNEL_LAUNCH_CHECK();
                         });
                     });
                 });
@@ -127,11 +119,11 @@ void run_flash_splitkv_fwd(Flash_fwd_params &params, cudaStream_t stream) {
                                 // auto kernel = &flash_fwd_splitkv_kernel<Kernel_traits, Is_causal, false, true, Split, Append_KV>;
                                 // auto kernel = &flash_fwd_splitkv_kernel<Kernel_traits, Is_causal, false, IsEvenKConst>;
                                 if (smem_size >= 48 * 1024) {
-                                    CUDA_CHECK(cudaFuncSetAttribute(
+                                    C10_CUDA_CHECK(cudaFuncSetAttribute(
                                         kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, smem_size));
                                 }
                                 kernel<<<grid, Kernel_traits::kNThreads, smem_size, stream>>>(params);
-                                CUDA_CHECK(cudaGetLastError());
+                                C10_CUDA_KERNEL_LAUNCH_CHECK();
                             });
                         });
                     });
@@ -161,7 +153,7 @@ void run_flash_splitkv_fwd(Flash_fwd_params &params, cudaStream_t stream) {
             } else if (params.num_splits <= 128) {
                 flash_fwd_splitkv_combine_kernel<Kernel_traits, kBlockM, 7, IsEvenKConst><<<grid_combine, Kernel_traits::kNThreads, 0, stream>>>(params);
             }
-            CUDA_CHECK(cudaGetLastError());
+            C10_CUDA_KERNEL_LAUNCH_CHECK();
         });
     }
 }
@@ -204,14 +196,16 @@ void run_mha_fwd_hdim64(Flash_fwd_params &params, cudaStream_t stream) {
     });
 }
 
+inline bool cuda_is_sm8x() {
+  //  dprops = at::cuda::getCurrentDeviceProperties();
+  //  return dprops->major == 8 && dprops->minor > 0;
+  return false;
+}
+
 template<typename T, bool Is_causal>
 void run_mha_fwd_hdim96(Flash_fwd_params &params, cudaStream_t stream) {
     constexpr static int Headdim = 96;
-    cudaDeviceProp dprops;
-    int device;
-    cudaGetDevice(&device);
-    cudaGetDeviceProperties(&dprops, device);
-    bool is_sm8x = dprops.major == 8 && dprops.minor > 0;
+    bool is_sm8x = cuda_is_sm8x();
     DROPOUT_SWITCH(params.p_dropout < 1.f, Is_dropout, [&] {
         // For sm86 or sm89, 64 x 64 is the fastest for causal (because it's square),
         if (is_sm8x) {
@@ -234,11 +228,7 @@ void run_mha_fwd_hdim96(Flash_fwd_params &params, cudaStream_t stream) {
 template<typename T, bool Is_causal>
 void run_mha_fwd_hdim128(Flash_fwd_params &params, cudaStream_t stream) {
     constexpr static int Headdim = 128;
-    cudaDeviceProp dprops;
-    int device;
-    cudaGetDevice(&device);
-    cudaGetDeviceProperties(&dprops, device);
-    bool is_sm8x = dprops.major == 8 && dprops.minor > 0;
+    bool is_sm8x = cuda_is_sm8x();
     DROPOUT_SWITCH(params.p_dropout < 1.f, Is_dropout, [&] {
         if constexpr(!Is_dropout) {
             // For sm86 or sm89, 64 x 64 is the fastest for causal (because it's square),
@@ -272,11 +262,7 @@ void run_mha_fwd_hdim128(Flash_fwd_params &params, cudaStream_t stream) {
 template<typename T, bool Is_causal>
 void run_mha_fwd_hdim160(Flash_fwd_params &params, cudaStream_t stream) {
     constexpr static int Headdim = 160;
-    cudaDeviceProp dprops;
-    int device;
-    cudaGetDevice(&device);
-    cudaGetDeviceProperties(&dprops, device);
-    bool is_sm8x = dprops.major == 8 && dprops.minor > 0;
+    bool is_sm8x = cuda_is_sm8x();
     DROPOUT_SWITCH(params.p_dropout < 1.f, Is_dropout, [&] {
         // For A100, H100, 128 x 32 is the fastest.
         // For sm86 or sm89, 64 x 64 is the fastest for causal (because it's square),
@@ -326,7 +312,7 @@ void run_mha_fwd_hdim224(Flash_fwd_params &params, cudaStream_t stream) {
     cudaError status_ = cudaDeviceGetAttribute(
         &max_smem_per_block, cudaDevAttrMaxSharedMemoryPerBlockOptin, device);
     if (status_ != cudaSuccess) {
-      CUDA_CHECK(status_);
+      C10_CUDA_CHECK(status_);
     }
     // printf("max_smem_per_block = %d\n", max_smem_per_block);
     DROPOUT_SWITCH(params.p_dropout < 1.f, Is_dropout, [&] {
@@ -355,7 +341,7 @@ void run_mha_fwd_hdim256(Flash_fwd_params &params, cudaStream_t stream) {
     status_ = cudaDeviceGetAttribute(
         &max_smem_per_block, cudaDevAttrMaxSharedMemoryPerBlockOptin, device);
     if (status_ != cudaSuccess) {
-      CUDA_CHECK(status_);
+      C10_CUDA_CHECK(status_);
     }
     // printf("max_smem_per_sm = %d, max_smem_per_block = %d\n", max_smem_per_sm, max_smem_per_block);
     DROPOUT_SWITCH(params.p_dropout < 1.f, Is_dropout, [&] {

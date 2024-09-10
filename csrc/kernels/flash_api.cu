@@ -1,22 +1,15 @@
-#include <cutlass/array.h>
-#include <cutlass/cutlass.h>
-#include <cutlass/numeric_types.h>
+#include "kernels.h"
+#include "kernel_helpers.h"
+#include "flash_fwd_launch_template.h"
 
-#include "flash.h"
-#include "static_switch.h"
-
-void run_mha_fwd(Flash_fwd_params &params, cudaStream_t stream, bool force_split_kernel = false) {
-    FP16_SWITCH(!params.is_bf16, [&] {
-        HEADDIM_SWITCH(params.d, [&] {
-            BOOL_SWITCH(params.is_causal, Is_causal, [&] {
-                if (params.num_splits <= 1 && !force_split_kernel) {  // If we don't set it num_splits == 0
-                    run_mha_fwd_<elem_type, kHeadDim, Is_causal>(params, stream);
-                } else {
-                    run_mha_fwd_splitkv_dispatch<elem_type, kHeadDim, Is_causal>(params, stream);
-                }
-            });
-        });
-    });
+void run_mha_fwd(Flash_fwd_params &params, cudaStream_t stream) {
+  FP16_SWITCH(!params.is_bf16, [&] {
+      HEADDIM_SWITCH(params.d, [&] {
+          BOOL_SWITCH(params.is_causal, Is_causal, [&] {
+              run_mha_fwd_<elem_type, kHeadDim, Is_causal>(params, stream);
+          });
+      });
+  });
 }
 
 extern "C" void run_mha(
@@ -29,8 +22,6 @@ extern "C" void run_mha(
 
     int32_t *cu_seqlens_q_ptr,
     int32_t *cu_seqlens_k_ptr,
-
-    bool is_seqlens_k_cumulative,
 
     uint32_t q_batch_stride,
     uint32_t k_batch_stride,
@@ -48,21 +39,13 @@ extern "C" void run_mha(
     uint32_t v_head_stride,
     uint32_t o_head_stride,
 
-    uint32_t num_splits,  // For split-KV version
-
     uint32_t b,
     uint32_t h,
     uint32_t h_k,
     uint32_t d,
     uint32_t d_rounded,
     float softmax_scale,
-    float scale_softmatx_log2,
 
-    int *block_table,
-    uint32_t block_table_batch_stride,
-    int page_block_size,
-
-    int *seqused_k,
     uint32_t seqlen_q,
     uint32_t seqlen_k,
     uint32_t seqlen_q_rounded,
@@ -72,10 +55,7 @@ extern "C" void run_mha(
     int is_causal,
 
     int window_size_left,
-    int window_size_right,
-    float softcap,
-    bool unpadded_lse,
-    bool force_split_kernel=false
+    int window_size_right
 ) {
     Flash_fwd_params params;
     // Reset the parameters
@@ -120,9 +100,9 @@ extern "C" void run_mha(
 
     // Set the different scale values.
     params.scale_softmax = softmax_scale;
-    params.scale_softmax_log2 = scale_softmatx_log2;
+    params.scale_softmax_log2 = softmax_scale * M_LOG2E;
 
-    params.p_dropout = 1.;  // probability to keep
+    params.p_dropout = 1.; // probability to keep
     params.p_dropout_in_uint8_t = uint8_t(std::floor(params.p_dropout * 255.0));
     params.rp_dropout = 1.f / params.p_dropout;
     params.scale_softmax_rp_dropout = params.rp_dropout * params.scale_softmax;
@@ -130,24 +110,15 @@ extern "C" void run_mha(
     params.cu_seqlens_q = cu_seqlens_q_ptr;
     params.cu_seqlens_k = cu_seqlens_k_ptr;
     params.p_ptr = nullptr; // used for `return_softmax`.
-    params.seqused_k = seqused_k;
+    params.seqused_k = nullptr;
 
     params.is_causal = is_causal;
     params.window_size_left = window_size_left;
     params.window_size_right = window_size_right;
 
-    // Paged Attention
-    params.block_table = block_table;
-    params.block_table_batch_stride = block_table_batch_stride;
-    params.page_block_size = page_block_size;
-
-    params.is_seqlens_k_cumulative = is_seqlens_k_cumulative;
-    params.num_splits = num_splits;
-
-    params.softcap = softcap;
-
-    params.unpadded_lse = unpadded_lse;
+    params.is_seqlens_k_cumulative = true;
+    params.num_splits = 1;
 
     cudaStream_t stream = 0; // Use the default stream.
-    run_mha_fwd(params, stream, force_split_kernel);
+    run_mha_fwd(params, stream);
 }

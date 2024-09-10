@@ -12,7 +12,7 @@ extern "C" {
         cu_seqlens_q_ptr: *const i32,
         cu_seqlens_k_ptr: *const i32,
 
-        is_seqlens_k_cumulative: bool,
+        // is_seqlens_k_cumulative: bool,
 
         q_batch_stride: u32,
         k_batch_stride: u32,
@@ -30,7 +30,7 @@ extern "C" {
         v_head_stride: u32,
         o_head_stride: u32,
 
-        num_splits: u32,
+        // num_splits: u32,
 
         b: u32,
         h: u32,
@@ -38,13 +38,13 @@ extern "C" {
         d: u32,
         d_rounded: u32,
         softmax_scale: f32,
-        scale_softmatx_log2: f32,
+        // scale_softmatx_log2: f32,
 
-        block_table: *const c_int,
-        block_table_batch_stride: u32,
-        page_block_size: c_int,
+        // block_table: *const c_int,
+        // block_table_batch_stride: u32,
+        // page_block_size: c_int,
 
-        seqused_k: *const c_int,
+        // seqused_k: *const c_int,
         seqlen_q: u32,
         seqlen_k: u32,
         seqlen_q_rounded: u32,
@@ -55,9 +55,10 @@ extern "C" {
 
         window_size_left: c_int,
         window_size_right: c_int,
-        softcap: f32,
-        unpadded_lse: bool,
-        force_split_kernel: bool,
+        
+        // softcap: f32,
+        // unpadded_lse: bool,
+        // force_split_kernel: bool,
     );
 
     pub(crate) fn copy_blocks_f16(
