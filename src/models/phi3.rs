@@ -352,7 +352,7 @@ mod tests {
 
         let dtype = DType::BF16;
         let device = Device::new_cuda(0).unwrap();
-        let model_id = "YourModelID/YourPhi3Model".to_string();  // Replace with your model ID
+        let model_id = "TinyLlama/TinyLlama-1.1B-Chat-v1.0".to_string();  // Replace with your model ID
         let revision = "main".to_string();
         let api = Api::new().expect("Failed to create the HF API");
 
@@ -518,7 +518,7 @@ mod tests {
 
         let dtype = DType::BF16;
         let device = Device::new_cuda(0).unwrap();
-        let model_id = "YourModelID/YourPhi3Model".to_string();  // Replace with your model ID
+        let model_id = "TinyLlama/TinyLlama-1.1B-Chat-v1.0".to_string();  // Replace with your model ID
         let revision = "main".to_string();
         let api = Api::new().expect("Failed to create the HF API");
 
@@ -840,7 +840,7 @@ mod tests {
 
         let dtype = DType::BF16;
         let device = Device::new_cuda(0).unwrap();
-        let model_id = "microsoft/Phi-3-mini-4k-instruct".to_string();  
+        let model_id = "microsoft/phi-2".to_string();  // Changed model ID
         let revision = "main".to_string();
         let api = Api::new().expect("Failed to create the HF API");
 
