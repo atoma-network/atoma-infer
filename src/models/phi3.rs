@@ -74,7 +74,6 @@ impl RotaryEmbedding {
 
 use std::fmt;
 
-// Remove the derive attributes
 struct Attention {
     qkv_proj: Linear,
     o_proj: Linear,
@@ -84,6 +83,8 @@ struct Attention {
     head_dim: usize,
     rotary_emb: Arc<RotaryEmbedding>,
     attention: FlashAttention,
+    dtype: DType,
+    device: Device,
 }
 
 // Manually implement Debug
@@ -97,6 +98,8 @@ impl fmt::Debug for Attention {
             .field("num_kv_groups", &self.num_kv_groups)
             .field("head_dim", &self.head_dim)
             .field("rotary_emb", &self.rotary_emb)
+            .field("dtype", &self.dtype)
+            .field("device", &self.device)
             .finish_non_exhaustive()
     }
 }
@@ -119,15 +122,17 @@ impl Clone for Attention {
                 1f32 / (self.head_dim as f32).sqrt(),
                 None,
                 None,
-                self.qkv_proj.weight().dtype(),
-                self.qkv_proj.weight().device().clone(),
+                self.dtype,
+                self.device.clone(),
             ).unwrap(),
+            dtype: self.dtype,
+            device: self.device.clone(),
         }
     }
 }
 
 impl Attention {
-    fn new(rotary_emb: Arc<RotaryEmbedding>, cfg: &Phi3Config, vb: VarBuilder, dtype: DType, device: &Device) -> Result<Self> {
+    fn new(rotary_emb: Arc<RotaryEmbedding>, cfg: &Phi3Config, vb: VarBuilder, dtype: DType, device: Device) -> Result<Self> {
         let num_heads = cfg.num_attention_heads;
         let num_kv_heads = cfg.num_key_value_heads;
         let head_dim = cfg.head_dim();
@@ -153,6 +158,8 @@ impl Attention {
                 dtype,
                 device.clone(),
             )?,
+            dtype,
+            device,
         })
     }
 
@@ -243,7 +250,7 @@ struct DecoderLayer {
 
 impl DecoderLayer {
     fn new(rotary_emb: Arc<RotaryEmbedding>, cfg: &Phi3Config, vb: VarBuilder, dtype: DType, device: &Device) -> Result<Self> {
-        let self_attn = Attention::new(rotary_emb, cfg, vb.pp("self_attn"), dtype, device)?;
+        let self_attn = Attention::new(rotary_emb, cfg, vb.pp("self_attn"), dtype, device.clone())?;
         let mlp = Mlp::new(cfg, vb.pp("mlp"))?;
         let input_layernorm =
             RmsNorm::new(cfg.hidden_size, cfg.rms_norm_eps, vb.pp("input_layernorm"))?;
