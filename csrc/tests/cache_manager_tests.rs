@@ -575,9 +575,7 @@ mod reshape_and_cache {
         let slot_mapping =
             Tensor::from_slice(&[0i64, 1, 2, 3, 4, 5, 6, 7, 8, 9], (num_tokens,), &device).unwrap();
 
-        let result = reshape_and_cache_flash(&key, &value, &key_cache, &value_cache, &slot_mapping);
-        assert!(result.is_ok());
-
+        reshape_and_cache_flash(&key, &value, &key_cache, &value_cache, &slot_mapping).unwrap();
         for i in 0..num_tokens {
             let block_num = if i < block_size { 0 } else { 1 };
             assert_eq!(
@@ -644,9 +642,7 @@ mod reshape_and_cache {
         let slot_mapping =
             Tensor::from_slice(&[0i64, 1, 2, 3, 4, 5, 6, 7, 8, 9], (num_tokens,), &device).unwrap();
 
-        let result = reshape_and_cache_flash(&key, &value, &key_cache, &value_cache, &slot_mapping);
-        assert!(result.is_ok());
-
+        reshape_and_cache_flash(&key, &value, &key_cache, &value_cache, &slot_mapping).unwrap();
         for i in 0..num_tokens {
             let block_num = if i < block_size { 0 } else { 1 };
             assert_eq!(
