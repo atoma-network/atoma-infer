@@ -11,7 +11,7 @@ use candle_transformers::utils;
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct Phi3Config {
     pub vocab_size: usize,
-    pub hidden_act: candle_nn::Activation,
+    pub hidden_act: String,
     pub hidden_size: usize,
     pub intermediate_size: usize,
     pub num_hidden_layers: usize,
@@ -21,8 +21,18 @@ pub struct Phi3Config {
     pub rope_theta: f64,
     pub bos_token_id: Option<u32>,
     pub eos_token_id: Option<u32>,
-    pub rope_scaling: Option<String>,
+    pub rope_scaling: Option<serde_json::Value>,
     pub max_position_embeddings: usize,
+    pub attention_dropout: f64,
+    pub embd_pdrop: f64,
+    pub resid_pdrop: f64,
+    pub sliding_window: usize,
+    pub use_cache: bool,
+    pub attention_bias: bool,
+    pub original_max_position_embeddings: usize,
+    pub pad_token_id: Option<u32>,
+    pub initializer_range: f64,
+    pub torch_dtype: Option<String>,
 }
 
 impl Phi3Config {
@@ -46,7 +56,8 @@ impl RotaryEmbedding {
             .map(|i| 1f32 / cfg.rope_theta.powf(i as f64 / dim as f64) as f32)
             .collect();
         let inv_freq_len = inv_freq.len();
-        let inv_freq = Tensor::from_vec(inv_freq, (1, inv_freq_len), dev)?.to_dtype(dtype)?;
+        let inv_freq = Tensor::from_vec(inv_freq, (1, inv_freq_len), dev)?
+            .to_dtype(dtype)?;
         let t = Tensor::arange(0u32, max_seq_len as u32, dev)?
             .to_dtype(dtype)?
             .reshape((max_seq_len, 1))?;
@@ -221,10 +232,14 @@ impl Mlp {
         let i_size = cfg.intermediate_size;
         let gate_up_proj = linear(hidden_size, 2 * i_size, vb.pp("gate_up_proj"))?;
         let down_proj = linear(i_size, hidden_size, vb.pp("down_proj"))?;
+        let act_fn = match cfg.hidden_act.as_str() {
+            "silu" => candle_nn::Activation::Silu,
+            _ => return Err(candle_core::Error::Msg(format!("Unsupported activation function: {}", cfg.hidden_act))),
+        };
         Ok(Self {
             gate_up_proj,
             down_proj,
-            act_fn: cfg.hidden_act,
+            act_fn,
             i_size,
         })
     }
@@ -345,8 +360,6 @@ mod tests {
 
     #[test]
     #[serial]
-
-  //  cargo test test_phi3_model -- --exact
     fn test_phi3_model() -> Result<()> {
         let prompt = "The capital of France is ".to_string();
 
