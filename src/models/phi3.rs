@@ -72,7 +72,9 @@ impl RotaryEmbedding {
     }
 }
 
-#[derive(Debug, Clone)]
+use std::fmt;
+
+// Remove the derive attributes
 struct Attention {
     qkv_proj: Linear,
     o_proj: Linear,
@@ -84,8 +86,48 @@ struct Attention {
     attention: FlashAttention,
 }
 
+// Manually implement Debug
+impl fmt::Debug for Attention {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Attention")
+            .field("qkv_proj", &self.qkv_proj)
+            .field("o_proj", &self.o_proj)
+            .field("num_heads", &self.num_heads)
+            .field("num_kv_heads", &self.num_kv_heads)
+            .field("num_kv_groups", &self.num_kv_groups)
+            .field("head_dim", &self.head_dim)
+            .field("rotary_emb", &self.rotary_emb)
+            .finish_non_exhaustive()
+    }
+}
+
+// Manually implement Clone
+impl Clone for Attention {
+    fn clone(&self) -> Self {
+        Self {
+            qkv_proj: self.qkv_proj.clone(),
+            o_proj: self.o_proj.clone(),
+            num_heads: self.num_heads,
+            num_kv_heads: self.num_kv_heads,
+            num_kv_groups: self.num_kv_groups,
+            head_dim: self.head_dim,
+            rotary_emb: self.rotary_emb.clone(),
+            attention: FlashAttention::new(
+                self.num_heads,
+                self.num_kv_heads,
+                self.head_dim,
+                1f32 / (self.head_dim as f32).sqrt(),
+                None,
+                None,
+                self.qkv_proj.weight().dtype(),
+                self.qkv_proj.weight().device().clone(),
+            ).unwrap(),
+        }
+    }
+}
+
 impl Attention {
-    fn new(rotary_emb: Arc<RotaryEmbedding>, cfg: &Phi3Config, vb: VarBuilder, device: &Device) -> Result<Self> {
+    fn new(rotary_emb: Arc<RotaryEmbedding>, cfg: &Phi3Config, vb: VarBuilder, dtype: DType, device: &Device) -> Result<Self> {
         let num_heads = cfg.num_attention_heads;
         let num_kv_heads = cfg.num_key_value_heads;
         let head_dim = cfg.head_dim();
@@ -108,7 +150,7 @@ impl Attention {
                 1f32 / (head_dim as f32).sqrt(),
                 None,
                 None,
-                device.dtype(),
+                dtype,
                 device.clone(),
             )?,
         })
@@ -200,8 +242,8 @@ struct DecoderLayer {
 }
 
 impl DecoderLayer {
-    fn new(rotary_emb: Arc<RotaryEmbedding>, cfg: &Phi3Config, vb: VarBuilder, device: &Device) -> Result<Self> {
-        let self_attn = Attention::new(rotary_emb, cfg, vb.pp("self_attn"), device)?;
+    fn new(rotary_emb: Arc<RotaryEmbedding>, cfg: &Phi3Config, vb: VarBuilder, dtype: DType, device: &Device) -> Result<Self> {
+        let self_attn = Attention::new(rotary_emb, cfg, vb.pp("self_attn"), dtype, device)?;
         let mlp = Mlp::new(cfg, vb.pp("mlp"))?;
         let input_layernorm =
             RmsNorm::new(cfg.hidden_size, cfg.rms_norm_eps, vb.pp("input_layernorm"))?;
@@ -253,7 +295,7 @@ impl Model {
         let mut layers = Vec::with_capacity(cfg.num_hidden_layers);
         let vb_l = vb_m.pp("layers");
         for layer_idx in 0..cfg.num_hidden_layers {
-            let layer = DecoderLayer::new(rotary_emb.clone(), cfg, vb_l.pp(layer_idx), device)?;
+            let layer = DecoderLayer::new(rotary_emb.clone(), cfg, vb_l.pp(layer_idx), vb.dtype(), vb.device())?;
             layers.push(layer)
         }
         let norm = RmsNorm::new(cfg.hidden_size, cfg.rms_norm_eps, vb_m.pp("norm"))?;
@@ -422,8 +464,7 @@ mod tests {
                     &input_positions,
                     &attention_metadata,
                 )?
-                .squeeze(0)?
-                .squeeze(0)?;
+                .squeeze(0)?.squeeze(0)?;
 
             next_token = logits_processor.sample(&logits)?;
             token_generated += 1;
@@ -948,8 +989,7 @@ mod tests {
                     &input_positions,
                     &attention_metadata,
                 )?
-                .squeeze(0)?
-                .squeeze(0)?;
+                .squeeze(0)?.squeeze(0)?;
 
             next_token = logits_processor.sample(&logits)?;
             token_generated += 1;
