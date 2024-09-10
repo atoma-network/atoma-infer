@@ -251,7 +251,7 @@ unsafe fn copy_blocks_t<
     let (block_mapping_storage, block_mapping_layout) = block_mapping.storage_and_layout();
     let block_mapping_ptr = match &*block_mapping_storage {
         candle_core::Storage::Cuda(c) => {
-            let cuda_slice = c.as_cuda_slice::<u32>()?;
+            let cuda_slice = c.as_cuda_slice::<i64>()?;
             let cuda_slice = cuda_slice.slice(block_mapping_layout.start_offset()..);
             *cuda_slice.device_ptr() as *const core::ffi::c_void
         }
