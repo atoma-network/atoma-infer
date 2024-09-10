@@ -93,6 +93,6 @@ extern "C" {
         block_size: i64,
         key_stride: i64,
         value_stride: i64,
-        dtype: i32,
+        dtype: u32,
     );
 }
