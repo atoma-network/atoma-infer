@@ -17,6 +17,7 @@ pub struct Phi3Config {
     pub num_hidden_layers: usize,
     pub num_attention_heads: usize,
     pub num_key_value_heads: usize,
+    #[serde(default = "default_rms_norm_eps")]
     pub rms_norm_eps: f64,
     pub rope_theta: f64,
     pub bos_token_id: Option<u32>,
@@ -26,13 +27,17 @@ pub struct Phi3Config {
     pub attention_dropout: f64,
     pub embd_pdrop: f64,
     pub resid_pdrop: f64,
-    pub sliding_window: usize,
+    pub sliding_window: Option<usize>,
     pub use_cache: bool,
     pub attention_bias: bool,
-    pub original_max_position_embeddings: usize,
+    pub original_max_position_embeddings: Option<usize>,
     pub pad_token_id: Option<u32>,
     pub initializer_range: f64,
     pub torch_dtype: Option<String>,
+}
+
+fn default_rms_norm_eps() -> f64 {
+    1e-6
 }
 
 impl Phi3Config {
@@ -864,6 +869,11 @@ mod tests {
             .get("tokenizer.json")
             .expect("Failed to get tokenizer.json");
         let config_filename = api.get("config.json").expect("Failed to get config.json");
+        
+        // Print the contents of config.json
+        let config_contents = std::fs::read_to_string(&config_filename).expect("Failed to read config.json");
+        println!("Contents of config.json:\n{}", config_contents);
+
         let config: Phi3Config = serde_json::from_slice(
             &std::fs::read(config_filename).expect("Failed to read config.json"),
         )
