@@ -15,22 +15,22 @@ namespace vllm {
 template <typename scalar_t>
 __global__ void copy_blocks_kernel(int64_t* key_cache_ptrs,
                                    int64_t* value_cache_ptrs,
-                                   const int64_t* __restrict__ block_mapping,
-                                   const int64_t numel_per_block) {
+                                   const uint32_t* __restrict__ block_mapping,
+                                   const uint32_t numel_per_block) {
     const int layer_idx = blockIdx.x;
     const int pair_idx = blockIdx.y;
 
     scalar_t* key_cache = reinterpret_cast<scalar_t*>(key_cache_ptrs[layer_idx]);
     scalar_t* value_cache =
         reinterpret_cast<scalar_t*>(value_cache_ptrs[layer_idx]);
-    int64_t src_block_number = block_mapping[2 * pair_idx];
-    int64_t dst_block_number = block_mapping[2 * pair_idx + 1];
+    uint32_t src_block_number = block_mapping[2 * pair_idx];
+    uint32_t dst_block_number = block_mapping[2 * pair_idx + 1];
 
-    const int64_t src_block_offset = src_block_number * numel_per_block;
-    const int64_t dst_block_offset = dst_block_number * numel_per_block;
+    const uint32_t src_block_offset = src_block_number * numel_per_block;
+    const uint32_t dst_block_offset = dst_block_number * numel_per_block;
     for (int i = threadIdx.x; i < numel_per_block; i += blockDim.x) {
-        int64_t src_offset = src_block_offset + i;
-        int64_t dst_offset = dst_block_offset + i;
+        int64_t src_offset = static_cast<int64_t>(src_block_offset) + i;
+        int64_t dst_offset = static_cast<int64_t>(dst_block_offset) + i;
         key_cache[dst_offset] = key_cache[src_offset];
         value_cache[dst_offset] = value_cache[src_offset];
     }
@@ -47,15 +47,15 @@ void copy_blocks_f16(
     const void* block_mapping,
     int64_t num_layers,
     int64_t num_pairs,
-    int64_t numel_per_block,
+    uint32_t numel_per_block,
     cudaStream_t stream) {
     dim3 grid(num_layers, num_pairs);
-    dim3 block(std::min(int64_t(1024), numel_per_block));
+    dim3 block(std::min(int64_t(1024), int64_t(numel_per_block)));
 
     vllm::copy_blocks_kernel<int16_t><<<grid, block, 0, stream>>>(
         (int64_t*)key_cache_ptrs,
         (int64_t*)value_cache_ptrs,
-        (const int64_t*)block_mapping,
+        (const uint32_t*)block_mapping,
         numel_per_block);
 }
 }
@@ -67,15 +67,15 @@ void copy_blocks_bf16(
     const void* block_mapping,
     int64_t num_layers,
     int64_t num_pairs,
-    int64_t numel_per_block,
+    uint32_t numel_per_block,
     cudaStream_t stream) {
     dim3 grid(num_layers, num_pairs);
-    dim3 block(std::min(int64_t(1024), numel_per_block));
+    dim3 block(std::min(int64_t(1024), int64_t(numel_per_block)));
 
     vllm::copy_blocks_kernel<int16_t><<<grid, block, 0, stream>>>(
         (int64_t*)key_cache_ptrs,
         (int64_t*)value_cache_ptrs,
-        (const int64_t*)block_mapping,
+        (const uint32_t*)block_mapping,
         numel_per_block);
 }
 }
