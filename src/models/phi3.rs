@@ -17,27 +17,23 @@ pub struct Phi3Config {
     pub num_hidden_layers: usize,
     pub num_attention_heads: usize,
     pub num_key_value_heads: usize,
-    #[serde(default = "default_rms_norm_eps")]
-    pub rms_norm_eps: f64,
+    pub layer_norm_eps: f64,
+    pub max_position_embeddings: usize,
     pub rope_theta: f64,
+    pub partial_rotary_factor: f64,
+    pub qk_layernorm: bool,
     pub bos_token_id: Option<u32>,
     pub eos_token_id: Option<u32>,
-    pub rope_scaling: Option<serde_json::Value>,
-    pub max_position_embeddings: usize,
-    pub attention_dropout: f64,
-    pub embd_pdrop: f64,
-    pub resid_pdrop: f64,
-    pub sliding_window: Option<usize>,
+    pub tie_word_embeddings: bool,
     pub use_cache: bool,
-    pub attention_bias: bool,
-    pub original_max_position_embeddings: Option<usize>,
-    pub pad_token_id: Option<u32>,
-    pub initializer_range: f64,
+    pub resid_pdrop: f64,
+    pub embd_pdrop: Option<f64>,
+    pub attn_pdrop: Option<f64>,
+    pub model_type: String,
     pub torch_dtype: Option<String>,
-}
-
-fn default_rms_norm_eps() -> f64 {
-    1e-6
+    pub rope_scaling: Option<serde_json::Value>,
+    #[serde(default)]
+    pub attention_bias: bool,
 }
 
 impl Phi3Config {
@@ -54,7 +50,7 @@ pub struct RotaryEmbedding {
 
 impl RotaryEmbedding {
     pub fn new(dtype: DType, cfg: &Phi3Config, dev: &Device) -> Result<Self> {
-        let dim = cfg.head_dim();
+        let dim = (cfg.head_dim() as f64 * cfg.partial_rotary_factor) as usize;
         let max_seq_len = cfg.max_position_embeddings;
         let inv_freq: Vec<_> = (0..dim)
             .step_by(2)
@@ -273,10 +269,10 @@ impl DecoderLayer {
         let self_attn = Attention::new(rotary_emb, cfg, vb.pp("self_attn"), dtype, device.clone())?;
         let mlp = Mlp::new(cfg, vb.pp("mlp"))?;
         let input_layernorm =
-            RmsNorm::new(cfg.hidden_size, cfg.rms_norm_eps, vb.pp("input_layernorm"))?;
+            RmsNorm::new(cfg.hidden_size, cfg.layer_norm_eps, vb.pp("input_layernorm"))?;
         let post_attention_layernorm = RmsNorm::new(
             cfg.hidden_size,
-            cfg.rms_norm_eps,
+            cfg.layer_norm_eps,
             vb.pp("post_attention_layernorm"),
         )?;
         Ok(Self {
@@ -325,7 +321,7 @@ impl Model {
             let layer = DecoderLayer::new(rotary_emb.clone(), cfg, vb_l.pp(layer_idx), vb.dtype(), vb.device())?;
             layers.push(layer)
         }
-        let norm = RmsNorm::new(cfg.hidden_size, cfg.rms_norm_eps, vb_m.pp("norm"))?;
+        let norm = RmsNorm::new(cfg.hidden_size, cfg.layer_norm_eps, vb_m.pp("norm"))?;
         let lm_head = linear(cfg.hidden_size, cfg.vocab_size, vb.pp("lm_head"))?;
         Ok(Self {
             embed_tokens,
@@ -858,7 +854,7 @@ mod tests {
 
         let dtype = DType::BF16;
         let device = Device::new_cuda(0).unwrap();
-        let model_id = "microsoft/phi-2".to_string();  // Changed model ID
+        let model_id = "microsoft/Phi-3-mini-4k-instruct".to_string();  // Corrected model ID
         let revision = "main".to_string();
         let api = Api::new().expect("Failed to create the HF API");
 
