@@ -15,7 +15,7 @@ namespace vllm {
 template <typename scalar_t>
 __global__ void copy_blocks_kernel(int64_t* key_cache_ptrs,
                                    int64_t* value_cache_ptrs,
-                                   const uint32_t* __restrict__ block_mapping,
+                                   const int64_t* __restrict__ block_mapping,
                                    const int64_t numel_per_block) {
     const int layer_idx = blockIdx.x;
     const int pair_idx = blockIdx.y;
@@ -23,8 +23,8 @@ __global__ void copy_blocks_kernel(int64_t* key_cache_ptrs,
     scalar_t* key_cache = reinterpret_cast<scalar_t*>(key_cache_ptrs[layer_idx]);
     scalar_t* value_cache =
         reinterpret_cast<scalar_t*>(value_cache_ptrs[layer_idx]);
-    int64_t src_block_number = static_cast<int64_t>(block_mapping[2 * pair_idx]);
-    int64_t dst_block_number = static_cast<int64_t>(block_mapping[2 * pair_idx + 1]);
+    int64_t src_block_number = block_mapping[2 * pair_idx];
+    int64_t dst_block_number = block_mapping[2 * pair_idx + 1];
 
     const int64_t src_block_offset = src_block_number * numel_per_block;
     const int64_t dst_block_offset = dst_block_number * numel_per_block;
@@ -55,7 +55,7 @@ void copy_blocks_f16(
     vllm::copy_blocks_kernel<int16_t><<<grid, block, 0, stream>>>(
         (int64_t*)key_cache_ptrs,
         (int64_t*)value_cache_ptrs,
-        (const uint32_t*)block_mapping,
+        (const int64_t*)block_mapping,
         numel_per_block);
 }
 }
@@ -75,7 +75,7 @@ void copy_blocks_bf16(
     vllm::copy_blocks_kernel<int16_t><<<grid, block, 0, stream>>>(
         (int64_t*)key_cache_ptrs,
         (int64_t*)value_cache_ptrs,
-        (const uint32_t*)block_mapping,
+        (const int64_t*)block_mapping,
         numel_per_block);
 }
 }
