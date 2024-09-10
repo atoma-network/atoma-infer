@@ -51,7 +51,7 @@ pub struct RotaryEmbedding {
 
 impl RotaryEmbedding {
     pub fn new(dtype: DType, cfg: &Phi3Config, dev: &Device) -> Result<Self> {
-        let dim = (cfg.head_dim() as f64 * cfg.partial_rotary_factor) as usize;
+        let dim = cfg.head_dim();
         let max_seq_len = cfg.max_position_embeddings;
         let inv_freq: Vec<_> = (0..dim)
             .step_by(2)
