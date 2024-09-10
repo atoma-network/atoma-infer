@@ -1752,7 +1752,7 @@ impl FlashAttentionKvCache {
                 kc_stride[0] as u32,
                 vc_stride[0] as u32,
                 o_stride[0] as u32,
-                alibi_slopes_batch_stride,
+                alibi_slopes_batch_stride as u32,
                 q_stride[q_rank - 3] as u32,
                 /* k_row_stride   */ kc_stride[kc_rank - 3] as u32,
                 /* v_row_stride   */ vc_stride[vc_rank - 3] as u32,
