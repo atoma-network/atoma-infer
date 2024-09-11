@@ -170,6 +170,12 @@ unsafe fn copy_blocks_t<
     value_caches: &[&mut Tensor],
     block_mapping: Tensor,
 ) -> Result<()> {
+    let device = key_caches[0].device();
+    let cuda_device = if let Device::Cuda(device) = device {
+        device
+    } else {
+        candle_core::bail!("device must be a cuda device")
+    };
     let num_layers = key_caches.len();
     if num_layers != value_caches.len() {
         candle_core::bail!("key_caches and value_caches must have the same length")
@@ -299,6 +305,10 @@ unsafe fn copy_blocks_t<
         }
     }
 
+    cuda_device
+        .synchronize()
+        .map_err(|e| candle_core::Error::Cuda(e.into()))?;
+
     Ok(())
 }
 
@@ -351,6 +361,28 @@ fn reshape_and_cache_flash_t<
     value_cache: &Tensor,
     slot_mapping: &Tensor,
 ) -> Result<()> {
+    let device = key.device();
+    let cuda_device = if let Device::Cuda(device) = device {
+        device
+    } else {
+        candle_core::bail!("device must be a cuda device")
+    };
+
+    match (value.device(), key_cache.device(), value_cache.device()) {
+        (
+            Device::Cuda(v_cuda_device),
+            Device::Cuda(kc_cuda_device),
+            Device::Cuda(vc_cuda_device),
+        ) => {
+            if v_cuda_device.ordinal() != kc_cuda_device.ordinal()
+                || v_cuda_device.ordinal() != vc_cuda_device.ordinal()
+            {
+                candle_core::bail!("value, key_cache and value_cache must be on the same device")
+            }
+        }
+        _ => candle_core::bail!("value, key_cache and value_cache must be on the same device"),
+    }
+
     let dtype = match key.dtype() {
         DType::F16 => 0,
         DType::BF16 => 1,
@@ -487,5 +519,10 @@ fn reshape_and_cache_flash_t<
             dtype,
         )
     }
+
+    cuda_device
+        .synchronize()
+        .map_err(|e| candle_core::Error::Cuda(e.into()))?;
+
     Ok(())
 }
