@@ -94,5 +94,6 @@ extern "C" {
         key_stride: i64,
         value_stride: i64,
         dtype: u32,
+        stream: *mut c_void,
     );
 }

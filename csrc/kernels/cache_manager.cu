@@ -227,11 +227,12 @@ extern "C" void reshape_and_cache_flash(
     int64_t key_stride,
     int64_t value_stride,
 
-    uint32_t dtype  // 0 => f16; 1 => bf16
+    uint32_t dtype,  // 0 => f16; 1 => bf16
+
+    cudaStream_t stream
 ) {
     dim3 grid(num_tokens);
     dim3 block(std::min(num_heads * head_size, int64_t(512)));
-    const cudaStream_t stream = 0;
 
     if (dtype == 0) {
         CALL_RESHAPE_AND_CACHE_FLASH(uint16_t);

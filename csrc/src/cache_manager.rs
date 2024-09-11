@@ -306,7 +306,7 @@ unsafe fn copy_blocks_t<
     }
 
     cuda_device
-        .synchronize()
+        .wait_for(&stream)
         .map_err(|e| candle_core::Error::Cuda(e.into()))?;
 
     Ok(())
@@ -529,11 +529,12 @@ fn reshape_and_cache_flash_t<
             key_stride as i64,
             value_stride as i64,
             dtype,
+            stream.stream as *mut std::ffi::c_void,
         )
     }
 
     cuda_device
-        .synchronize()
+        .wait_for(&stream)
         .map_err(|e| candle_core::Error::Cuda(e.into()))?;
 
     Ok(())
