@@ -301,6 +301,7 @@ impl FlashAttention {
             .map(|kv_cache| kv_cache.i(1)?.squeeze(0))
             .collect::<Result<Vec<_>>>()?;
         let value_caches = value_caches.iter_mut().collect::<Vec<_>>();
+        let block_mapping = block_mapping.to_dtype(DType::I64)?;
         unsafe { copy_blocks(&key_caches, &value_caches, block_mapping) }
     }
 

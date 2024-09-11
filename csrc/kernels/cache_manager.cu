@@ -32,10 +32,6 @@ __global__ void copy_blocks_kernel(int64_t* key_cache_ptrs,
         int64_t src_offset = src_block_offset + i;
         int64_t dst_offset = dst_block_offset + i;
         key_cache[dst_offset] = key_cache[src_offset];
-    }
-    for (int i = threadIdx.x; i < numel_per_block; i += blockDim.x) {
-        int64_t src_offset = src_block_offset + i;
-        int64_t dst_offset = dst_block_offset + i;
         value_cache[dst_offset] = value_cache[src_offset];
     }
 }
@@ -54,7 +50,7 @@ void copy_blocks_f16(
     int64_t numel_per_block,
     cudaStream_t stream) {
     dim3 grid(num_layers, num_pairs);
-    dim3 block(std::min(int64_t(1024), numel_per_block));
+    dim3 block(std::min(int64_t(1024), int64_t(numel_per_block)));
 
     vllm::copy_blocks_kernel<int16_t><<<grid, block, 0, stream>>>(
         (int64_t*)key_cache_ptrs,
@@ -74,7 +70,7 @@ void copy_blocks_bf16(
     int64_t numel_per_block,
     cudaStream_t stream) {
     dim3 grid(num_layers, num_pairs);
-    dim3 block(std::min(int64_t(1024), numel_per_block));
+    dim3 block(std::min(int64_t(1024), int64_t(numel_per_block)));
 
     vllm::copy_blocks_kernel<int16_t><<<grid, block, 0, stream>>>(
         (int64_t*)key_cache_ptrs,
@@ -231,11 +227,12 @@ extern "C" void reshape_and_cache_flash(
     int64_t key_stride,
     int64_t value_stride,
 
-    uint32_t dtype  // 0 => f16; 1 => bf16
+    uint32_t dtype,  // 0 => f16; 1 => bf16
+
+    cudaStream_t stream
 ) {
     dim3 grid(num_tokens);
     dim3 block(std::min(num_heads * head_size, int64_t(512)));
-    const cudaStream_t stream = 0;
 
     if (dtype == 0) {
         CALL_RESHAPE_AND_CACHE_FLASH(uint16_t);

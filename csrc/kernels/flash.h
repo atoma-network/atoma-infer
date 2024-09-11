@@ -16,7 +16,7 @@ constexpr int D_DIM = 2;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
 struct Qkv_params {
-    using index_t = int64_t;
+    using index_t = uint32_t;
 
     // The QKV matrices.
     void *__restrict__ q_ptr;
