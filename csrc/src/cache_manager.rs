@@ -368,16 +368,24 @@ fn reshape_and_cache_flash_t<
         candle_core::bail!("device must be a cuda device")
     };
 
-    match (value.device(), key_cache.device(), value_cache.device()) {
+    match (
+        value.device(),
+        key_cache.device(),
+        value_cache.device(),
+        slot_mapping.device(),
+    ) {
         (
             Device::Cuda(v_cuda_device),
             Device::Cuda(kc_cuda_device),
             Device::Cuda(vc_cuda_device),
+            Device::Cuda(sm_cuda_device),
         ) => {
-            if v_cuda_device.ordinal() != kc_cuda_device.ordinal()
-                || v_cuda_device.ordinal() != vc_cuda_device.ordinal()
+            if cuda_device.ordinal() != v_cuda_device.ordinal()
+                || cuda_device.ordinal() != kc_cuda_device.ordinal()
+                || cuda_device.ordinal() != vc_cuda_device.ordinal()
+                || cuda_device.ordinal() != sm_cuda_device.ordinal()
             {
-                candle_core::bail!("value, key_cache and value_cache must be on the same device")
+                candle_core::bail!("key, value, key_cache, value_cache and slot_mapping must be on the same device")
             }
         }
         _ => candle_core::bail!("value, key_cache and value_cache must be on the same device"),
@@ -501,6 +509,10 @@ fn reshape_and_cache_flash_t<
         }
         _ => candle_core::bail!("slot_mapping must be a cuda tensor"),
     };
+
+    let stream = cuda_device
+        .fork_default_stream()
+        .map_err(|e| candle_core::Error::Cuda(e.into()))?;
 
     unsafe {
         ffi::reshape_and_cache_flash(
