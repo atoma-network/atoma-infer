@@ -667,9 +667,7 @@ mod tests {
                 Some(LlamaEosToks::Single(eos_tok_id)) if next_token == eos_tok_id => {
                     break;
                 }
-                Some(LlamaEosToks::Multiple(ref eos_ids))
-                    if eos_ids.contains(&next_token) =>
-                {
+                Some(LlamaEosToks::Multiple(ref eos_ids)) if eos_ids.contains(&next_token) => {
                     break;
                 }
                 _ => (),
@@ -880,9 +878,7 @@ mod tests {
                 Some(LlamaEosToks::Single(eos_tok_id)) if next_token == eos_tok_id => {
                     break;
                 }
-                Some(LlamaEosToks::Multiple(ref eos_ids))
-                    if eos_ids.contains(&next_token) =>
-                {
+                Some(LlamaEosToks::Multiple(ref eos_ids)) if eos_ids.contains(&next_token) => {
                     break;
                 }
                 _ => (),
@@ -1118,9 +1114,7 @@ mod tests {
                 Some(LlamaEosToks::Single(eos_tok_id)) if next_token == eos_tok_id => {
                     break;
                 }
-                Some(LlamaEosToks::Multiple(ref eos_ids))
-                    if eos_ids.contains(&next_token) =>
-                {
+                Some(LlamaEosToks::Multiple(ref eos_ids)) if eos_ids.contains(&next_token) => {
                     break;
                 }
                 _ => (),
