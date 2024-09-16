@@ -199,6 +199,7 @@ impl Attention {
         &mut self,
         xs: &Tensor,
         input_positions: &Tensor,
+        kv_cache: &Tensor,
         attention_metadata: &FlashAttentionMetadata,
     ) -> Result<Tensor> {
         let (b_sz, q_len, _) = xs.dims3()?;
@@ -234,8 +235,8 @@ impl Attention {
             &query_states,
             &key_states,
             &value_states,
+            kv_cache,
             attention_metadata,
-
         )?;
 
         attn_output
@@ -315,13 +316,14 @@ impl DecoderLayer {
         &mut self,
         xs: &Tensor,
         input_positions: &Tensor,
+        kv_cache: &Tensor,
         attention_metadata: &FlashAttentionMetadata,
     ) -> Result<Tensor> {
         let residual = xs;
         let xs = self.input_layernorm.forward(xs)?;
         let xs = self
             .self_attn
-            .forward(&xs, input_positions, attention_metadata)?;
+            .forward(&xs, input_positions, kv_cache, attention_metadata)?;
         let xs = (xs + residual)?;
         let residual = &xs;
         let xs = xs.apply(&self.post_attention_layernorm)?.apply(&self.mlp)?;
@@ -372,12 +374,13 @@ impl Phi3Model {
         &mut self,
         input_ids: &Tensor,
         input_positions: &Tensor,
+        kv_caches: &[&mut Tensor],
         attention_metadata: &FlashAttentionMetadata,
     ) -> Result<Tensor> {
         let (b_size, seq_len) = input_ids.dims2()?;
         let mut xs = self.embed_tokens.forward(input_ids)?;
-        for layer in self.layers.iter_mut() {
-            xs = layer.forward(&xs, input_positions, attention_metadata)?
+        for (layer, kv_cache) in self.layers.iter_mut().zip(kv_caches.iter()) {
+            xs = layer.forward(&xs, input_positions, kv_cache, attention_metadata)?
         }
         xs = self.norm.forward(&xs)?;
 
@@ -987,7 +990,7 @@ mod tests {
                 sequence_lengths: Some(sequence_lengths),
             }),
         };
-        let logits = phi3_model.forward(&input, &input_positions, &attention_metadata)?;
+        let logits = phi3_model.forward(&input, &input_positions, &kv_cache, &attention_metadata)?;
         let logits = logits.squeeze(0)?.squeeze(0)?;
 
         let mut next_token = logits_processor.sample(&logits)?;
@@ -1034,7 +1037,7 @@ mod tests {
                 num_decoding_tokens,
             };
             let logits = phi3_model
-                .forward(&input, &input_positions, &attention_metadata)?
+                .forward(&input, &input_positions, &kv_cache, &attention_metadata)?
                 .squeeze(0)?
                 .squeeze(0)?;
 
