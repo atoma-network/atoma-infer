@@ -340,8 +340,7 @@ pub struct Phi3Model {
 }
 
 impl Phi3Model {
-    pub fn load<C: AsRef<Phi3Config>>(vb: VarBuilder, cfg: C, dtype: DType, device: &Device) -> Result<Self> {
-        let cfg = cfg.as_ref();
+    pub fn load(vb: VarBuilder, cfg: &Phi3Config, dtype: DType, device: &Device) -> Result<Self> {
         let embed_tokens =
             candle_nn::embedding(cfg.vocab_size, cfg.hidden_size, vb.pp("model.embed_tokens"))?;
         let rotary_emb = Arc::new(RotaryEmbedding::new(vb.dtype(), cfg, vb.device())?);
