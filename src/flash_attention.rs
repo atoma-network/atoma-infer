@@ -458,7 +458,6 @@ impl FlashAttention {
                 self.softmax_scale,
                 decoding_metadata.block_tables.as_ref(),
                 decoding_metadata.sequence_lengths.as_ref(),
-                None,
                 true,
             )?;
             output.slice_set(&out.squeeze(1)?, 0, num_prefill_tokens)?;
