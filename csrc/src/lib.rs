@@ -1883,7 +1883,6 @@ pub fn flash_attn_kv_cache(
         alibi_slopes: None,
         window_size_left,
         window_size_right,
-        softcap: None,
         block_table: None,
         seqlens_k: None,
     };
@@ -1923,7 +1922,6 @@ pub fn flash_attn_kv_cache_windowed(
         alibi_slopes: None,
         window_size_left,
         window_size_right,
-        softcap: None,
         block_table: None,
         seqlens_k: seqlens_k.cloned(),
     };
@@ -1965,7 +1963,6 @@ pub fn flash_attn_kv_cache_alibi(
         alibi_slopes: Some(alibi_slopes.clone()),
         window_size_left,
         window_size_right,
-        softcap: None,
         block_table: None,
         seqlens_k: seqlens_k.cloned(),
     };
@@ -2010,7 +2007,6 @@ pub fn flash_attn_kv_cache_alibi_windowed(
         window_size_right,
         block_table: None,
         seqlens_k: None,
-        softcap: None,
     };
     q.apply_op3(k, v, op)
 }
@@ -2061,7 +2057,6 @@ pub fn flash_attn_kv_cache_full(
         window_size_right,
         block_table: block_table.cloned(),
         seqlens_k: seqlens_k.cloned(),
-        softcap,
     };
     q.apply_op3(k, v, op)
 }
