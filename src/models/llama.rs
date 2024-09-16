@@ -1221,7 +1221,7 @@ mod tests {
                 .collect::<Vec<_>>()
         };
 
-        let sample_len = 512;
+        let sample_len = 1024;
         let start_gen = std::time::Instant::now();
         let mut token_generated = 0;
 
