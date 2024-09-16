@@ -124,7 +124,8 @@ impl Clone for Attention {
                 None,
                 self.dtype,
                 self.device.clone(),
-            ).unwrap(),
+            )
+            .unwrap(),
             dtype: self.dtype,
             device: self.device.clone(),
         }
@@ -132,7 +133,13 @@ impl Clone for Attention {
 }
 
 impl Attention {
-    fn new(rotary_emb: Arc<RotaryEmbedding>, cfg: &Phi3Config, vb: VarBuilder, dtype: DType, device: Device) -> Result<Self> {
+    fn new(
+        rotary_emb: Arc<RotaryEmbedding>,
+        cfg: &Phi3Config,
+        vb: VarBuilder,
+        dtype: DType,
+        device: Device,
+    ) -> Result<Self> {
         let num_heads = cfg.num_attention_heads;
         let num_kv_heads = cfg.num_key_value_heads;
         let head_dim = cfg.head_dim();
@@ -198,7 +205,13 @@ impl Attention {
         let key_states = utils::repeat_kv(key_states, self.num_kv_groups)?.contiguous()?;
         let value_states = utils::repeat_kv(value_states, self.num_kv_groups)?.contiguous()?;
 
-        let attn_output = self.attention.forward(&query_states, &key_states, &value_states, &key_states, attention_metadata)?;
+        let attn_output = self.attention.forward(
+            &query_states,
+            &key_states,
+            &value_states,
+            &key_states,
+            attention_metadata,
+        )?;
 
         attn_output
             .transpose(1, 2)?
@@ -249,7 +262,13 @@ struct DecoderLayer {
 }
 
 impl DecoderLayer {
-    fn new(rotary_emb: Arc<RotaryEmbedding>, cfg: &Phi3Config, vb: VarBuilder, dtype: DType, device: &Device) -> Result<Self> {
+    fn new(
+        rotary_emb: Arc<RotaryEmbedding>,
+        cfg: &Phi3Config,
+        vb: VarBuilder,
+        dtype: DType,
+        device: &Device,
+    ) -> Result<Self> {
         let self_attn = Attention::new(rotary_emb, cfg, vb.pp("self_attn"), dtype, device.clone())?;
         let mlp = Mlp::new(cfg, vb.pp("mlp"))?;
         let input_layernorm =
@@ -275,7 +294,9 @@ impl DecoderLayer {
     ) -> Result<Tensor> {
         let residual = xs;
         let xs = self.input_layernorm.forward(xs)?;
-        let xs = self.self_attn.forward(&xs, input_positions, attention_metadata)?;
+        let xs = self
+            .self_attn
+            .forward(&xs, input_positions, attention_metadata)?;
         let xs = (xs + residual)?;
         let residual = &xs;
         let xs = xs.apply(&self.post_attention_layernorm)?.apply(&self.mlp)?;
@@ -302,7 +323,13 @@ impl Model {
         let mut layers = Vec::with_capacity(cfg.num_hidden_layers);
         let vb_l = vb_m.pp("layers");
         for layer_idx in 0..cfg.num_hidden_layers {
-            let layer = DecoderLayer::new(rotary_emb.clone(), cfg, vb_l.pp(layer_idx), vb.dtype(), vb.device())?;
+            let layer = DecoderLayer::new(
+                rotary_emb.clone(),
+                cfg,
+                vb_l.pp(layer_idx),
+                vb.dtype(),
+                vb.device(),
+            )?;
             layers.push(layer)
         }
         let norm = RmsNorm::new(cfg.hidden_size, cfg.rms_norm_eps, vb_m.pp("norm"))?;
@@ -329,16 +356,13 @@ impl Model {
             xs = layer.forward(&xs, input_positions, attention_metadata)?
         }
         xs = self.norm.forward(&xs)?;
-        
+
         // Squeeze the first dimension if it's 1
-        let xs = if b_size == 1 {
-            xs.squeeze(0)?
-        } else {
-            xs
-        };
+        let xs = if b_size == 1 { xs.squeeze(0)? } else { xs };
 
         // Select the last token's logits
-        let logits = xs.narrow(0, seq_len - 1, 1)?
+        let logits = xs
+            .narrow(0, seq_len - 1, 1)?
             .apply(&self.lm_head)?
             .squeeze(0)?; // Remove the sequence length dimension
 
@@ -363,13 +387,13 @@ mod tests {
     #[test]
     #[serial]
 
-  //  cargo test test_phi3_model -- --exact
+    //  cargo test test_phi3_model -- --exact
     fn test_phi3_model() -> Result<()> {
         let prompt = "The History of France ".to_string();
 
         let dtype = DType::BF16;
         let device = Device::new_cuda(0).unwrap();
-        let model_id = "TinyLlama/TinyLlama-1.1B-Chat-v1.0".to_string();
+        let model_id = "microsoft/Phi-3-mini-4k-instruct".to_string();
         let revision = "main".to_string();
         let api = Api::new().expect("Failed to create the HF API");
 
@@ -380,21 +404,19 @@ mod tests {
             .get("tokenizer.json")
             .expect("Failed to get tokenizer.json");
         let config_filename = api.get("config.json").expect("Failed to get config.json");
-        let config: LlamaConfig = serde_json::from_slice(
+        let config: Phi3Config = serde_json::from_slice(
             &std::fs::read(config_filename).expect("Failed to read config.json"),
         )
         .expect("Failed to deserialize config.json");
         let config = config.into_config();
 
         let filenames = vec![api
-            .get("model.safetensors")
+            .get("model.safetensors.index.json")
             .expect("Failed to get model.safetensors")];
-        let mut llama_model = {
+        let mut phi3_model = {
             let vb = unsafe { VarBuilder::from_mmaped_safetensors(&filenames, dtype, &device)? };
-            Llama::load(vb, &config, dtype, &device).expect("Failed to load the model")
+            Model::load(vb, &config, dtype, &device).expect("Failed to load the model")
         };
-
-
 
         //tests
         let tokenizer =
@@ -449,11 +471,7 @@ mod tests {
                 sequence_lengths: Some(Tensor::from_vec(vec![tokens.len() as u32], (1,), &device)?),
             }),
         };
-        let logits = phi3_model.forward(
-            &input,
-            &input_positions,
-            &attention_metadata,
-        )?;
+        let logits = phi3_model.forward(&input, &input_positions, &attention_metadata)?;
         let logits = logits.squeeze(0)?.squeeze(0)?;
 
         let mut next_token = logits_processor.sample(&logits)?;
@@ -488,12 +506,9 @@ mod tests {
                 num_decoding_tokens: 1,
             };
             let logits = phi3_model
-                .forward(
-                    &input,
-                    &input_positions,
-                    &attention_metadata,
-                )?
-                .squeeze(0)?.squeeze(0)?;
+                .forward(&input, &input_positions, &attention_metadata)?
+                .squeeze(0)?
+                .squeeze(0)?;
 
             next_token = logits_processor.sample(&logits)?;
             token_generated += 1;
@@ -525,12 +540,11 @@ mod tests {
     #[test]
     #[serial]
     fn test_phi3_model_batch() -> Result<()> {
-
         let prompt = "The History of France ".to_string();
 
         let dtype = DType::BF16;
         let device = Device::new_cuda(0).unwrap();
-        let model_id = "TinyLlama/TinyLlama-1.1B-Chat-v1.0".to_string();
+        let model_id = "microsoft/Phi-3-mini-4k-instruct".to_string();
         let revision = "main".to_string();
         let api = Api::new().expect("Failed to create the HF API");
 
@@ -541,18 +555,18 @@ mod tests {
             .get("tokenizer.json")
             .expect("Failed to get tokenizer.json");
         let config_filename = api.get("config.json").expect("Failed to get config.json");
-        let config: LlamaConfig = serde_json::from_slice(
+        let config: Phi3Config = serde_json::from_slice(
             &std::fs::read(config_filename).expect("Failed to read config.json"),
         )
         .expect("Failed to deserialize config.json");
         let config = config.into_config();
 
         let filenames = vec![api
-            .get("model.safetensors")
+            .get("model.safetensors.index.json")
             .expect("Failed to get model.safetensors")];
-        let mut llama_model = {
+        let mut phi3_model = {
             let vb = unsafe { VarBuilder::from_mmaped_safetensors(&filenames, dtype, &device)? };
-            Llama::load(vb, &config, dtype, &device).expect("Failed to load the model")
+            Model::load(vb, &config, dtype, &device).expect("Failed to load the model")
         };
 
         let tokenizer =
@@ -688,11 +702,7 @@ mod tests {
         let selected_token_indices =
             Tensor::from_vec(selected_token_indices, (tokens.len(),), &device)?;
         let logits = phi3_model
-            .forward(
-                &input,
-                &input_positions,
-                &attention_metadata,
-            )?
+            .forward(&input, &input_positions, &attention_metadata)?
             .squeeze(0)?;
 
         assert_eq!(logits.dims().len(), 2);
@@ -763,8 +773,7 @@ mod tests {
                 .zip(num_blocks_per_sequence.iter())
                 .flat_map(|(i, num_blocks)| {
                     let mut range = ((*i as u32 * max_num_blocks as u32)
-                        ..((*i as u32 * max_num_blocks as u32)
-                            + *num_blocks as u32))
+                        ..((*i as u32 * max_num_blocks as u32) + *num_blocks as u32))
                         .collect::<Vec<_>>();
                     range.extend([0u32].repeat(max_num_blocks - *num_blocks as usize)); // pad to max_num_blocks
                     range
@@ -796,11 +805,7 @@ mod tests {
                 num_decoding_tokens: num_active,
             };
             let logits = phi3_model
-                .forward(
-                    &input,
-                    &input_positions,
-                    &attention_metadata,
-                )?
+                .forward(&input, &input_positions, &attention_metadata)?
                 .squeeze(0)?;
 
             let mut new_active_indices = Vec::new();
@@ -850,12 +855,11 @@ mod tests {
     #[test]
     #[serial]
     fn test_phi3_model_long() -> Result<()> {
-      
         let prompt = "The History of France ".to_string();
 
         let dtype = DType::BF16;
         let device = Device::new_cuda(0).unwrap();
-        let model_id = "TinyLlama/TinyLlama-1.1B-Chat-v1.0".to_string();
+        let model_id = "microsoft/Phi-3-mini-4k-instruct".to_string();
         let revision = "main".to_string();
         let api = Api::new().expect("Failed to create the HF API");
 
@@ -866,21 +870,19 @@ mod tests {
             .get("tokenizer.json")
             .expect("Failed to get tokenizer.json");
         let config_filename = api.get("config.json").expect("Failed to get config.json");
-        let config: LlamaConfig = serde_json::from_slice(
+        let config: Phi3Config = serde_json::from_slice(
             &std::fs::read(config_filename).expect("Failed to read config.json"),
         )
         .expect("Failed to deserialize config.json");
         let config = config.into_config();
 
         let filenames = vec![api
-            .get("model.safetensors")
+            .get("model.safetensors.index.json")
             .expect("Failed to get model.safetensors")];
-        let mut llama_model = {
+        let mut phi3_model = {
             let vb = unsafe { VarBuilder::from_mmaped_safetensors(&filenames, dtype, &device)? };
-            Llama::load(vb, &config, dtype, &device).expect("Failed to load the model")
+            Model::load(vb, &config, dtype, &device).expect("Failed to load the model")
         };
-
-
         let tokenizer =
             Tokenizer::from_file(tokenizer_filename).expect("Failed to load the tokenizer");
         let eos_token_id = config
@@ -958,11 +960,7 @@ mod tests {
                 sequence_lengths: Some(sequence_lengths),
             }),
         };
-        let logits = phi3_model.forward(
-            &input,
-            &input_positions,
-            &attention_metadata,
-        )?;
+        let logits = phi3_model.forward(&input, &input_positions, &attention_metadata)?;
         let logits = logits.squeeze(0)?.squeeze(0)?;
 
         let mut next_token = logits_processor.sample(&logits)?;
@@ -1009,12 +1007,9 @@ mod tests {
                 num_decoding_tokens,
             };
             let logits = phi3_model
-                .forward(
-                    &input,
-                    &input_positions,
-                    &attention_metadata,
-                )?
-                .squeeze(0)?.squeeze(0)?;
+                .forward(&input, &input_positions, &attention_metadata)?
+                .squeeze(0)?
+                .squeeze(0)?;
 
             next_token = logits_processor.sample(&logits)?;
             token_generated += 1;
