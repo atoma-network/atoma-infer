@@ -2044,7 +2044,6 @@ pub fn flash_attn_kv_cache_full(
     softmax_scale: f32,
     block_table: Option<&Tensor>,
     seqlens_k: Option<&Tensor>,
-    softcap: Option<f32>,
     causal: bool,
 ) -> Result<Tensor> {
     let window_size_left = None;
