@@ -263,8 +263,8 @@ impl FlashAttention {
                 )
             };
             let (softmax_lseaccum_ptr, oaccum_ptr) = if num_splits > 1 {
-                let softmax_lseaccum_ptr = dev.alloc::<f32>(num_split * batch_size * num_heads * seqlen_q).w()?;
-                let oaccum_ptr = dev.alloc::<f32>(num_splits * batch_size * num_heads * seqlen_q * head_size_rounded).w()?;
+                let softmax_lseaccum_ptr = device.alloc_zeros::<f32>(num_splits as usize * b_sz * num_heads * seqlen_q).w()?;
+                let oaccum_ptr = device.alloc_zeros::<f32>(num_splits as usize * b_sz * num_heads * seqlen_q * head_size_rounded).w()?;
                 (
                     *softmax_lseaccum_ptr.device_ptr() as *const core::ffi::c_void,
                     *oaccum_ptr.device_ptr() as *const core::ffi::c_void,
@@ -1008,8 +1008,8 @@ impl FlashAttentionVarLen {
                 .unwrap_or((0, 0));
             // TODO: handle case where max_seqlen_q == 0, separately
             let (softmax_lseaccum_ptr, oaccum_ptr) = if num_splits > 1 {
-                let softmax_lseaccum_ptr = dev.alloc::<f32>(num_split * batch_size * num_heads * seqlen_q).w()?;
-                let oaccum_ptr = dev.alloc::<f32>(num_splits * batch_size * num_heads * seqlen_q * head_size_rounded).w()?;
+                let softmax_lseaccum_ptr = dev.alloc::<f32>(num_splits as usize * batch_size * num_heads * max_seqlen_q).w()?;
+                let oaccum_ptr = dev.alloc::<f32>(num_splits as usize * batch_size * num_heads * max_seqlen_q * head_size_rounded).w()?;
                 (
                     *softmax_lseaccum_ptr.device_ptr() as *const core::ffi::c_void,
                     *oaccum_ptr.device_ptr() as *const core::ffi::c_void,
@@ -1763,8 +1763,8 @@ impl FlashAttentionKvCache {
                 0
             };
             let (softmax_lseaccum_ptr, oaccum_ptr) = if num_splits > 1 {
-                let softmax_lseaccum_ptr = dev.alloc::<f32>(num_split * batch_size * num_heads * seqlen_q).w()?;
-                let oaccum_ptr = dev.alloc::<f32>(num_splits * batch_size * num_heads * seqlen_q * head_size_rounded).w()?;
+                let softmax_lseaccum_ptr = dev.alloc_zeros::<f32>(num_splits as usize * batch_size * num_heads * seqlen_q).w()?;
+                let oaccum_ptr = dev.alloc_zeros::<f32>(num_splits as usize * batch_size * num_heads * seqlen_q * head_size_rounded).w()?;
                 (
                     *softmax_lseaccum_ptr.device_ptr() as *const core::ffi::c_void,
                     *oaccum_ptr.device_ptr() as *const core::ffi::c_void,
