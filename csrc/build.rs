@@ -129,7 +129,7 @@ fn compile_cuda_files(build_dir: &Path) -> Result<()> {
         .arg("--expt-relaxed-constexpr")
         .arg("--expt-extended-lambda")
         .arg("--use_fast_math")
-        .arg("--verbose");
+        .arg("-w");
 
     println!("cargo:info={builder:?}");
 

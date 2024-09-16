@@ -301,7 +301,6 @@ impl FlashAttention {
             .map(|kv_cache| kv_cache.i(1)?.squeeze(0))
             .collect::<Result<Vec<_>>>()?;
         let value_caches = value_caches.iter_mut().collect::<Vec<_>>();
-        let block_mapping = block_mapping.to_dtype(DType::I64)?;
         unsafe { copy_blocks(&key_caches, &value_caches, block_mapping) }
     }
 
@@ -380,7 +379,7 @@ impl FlashAttention {
         let k = k.i(..num_prefill_tokens)?;
         let v = v.i(..num_prefill_tokens)?;
 
-        let output = if let Some(prefill_metadata) = &attention_metadata.prefill_metadata {
+        if let Some(prefill_metadata) = &attention_metadata.prefill_metadata {
             if prefill_metadata
                 .block_tables
                 .as_ref()
@@ -406,10 +405,7 @@ impl FlashAttention {
                     self.softmax_scale,
                     q_num_tokens > 1,
                 )?;
-                output.slice_assign(
-                    &[..num_prefill_tokens, ..output.dims()[1], ..output.dims()[2]],
-                    &out,
-                )?
+                output.slice_set(&out, 0, 0)?;
             } else {
                 // We support prefix enabled attention, in which a block table is provided.
                 let sequence_lengths = if let Some(sequence_lengths) =
@@ -448,16 +444,11 @@ impl FlashAttention {
                     None,
                     prefill_metadata.block_tables.as_ref(),
                 )?;
-                output.slice_assign(
-                    &[..num_prefill_tokens, ..output.dims()[1], ..output.dims()[2]],
-                    &out,
-                )?
+                output.slice_set(&out, 0, 0)?;
             }
-        } else {
-            output
-        };
+        }
 
-        let output = if let Some(decoding_metadata) = &attention_metadata.decoding_metadata {
+        if let Some(decoding_metadata) = &attention_metadata.decoding_metadata {
             // Decoding inference forward pass
             let out = flash_attn_kv_cache_full(
                 &decode_q.unsqueeze(1)?, // in decoding phase, each batch sequence has length 1
@@ -470,10 +461,8 @@ impl FlashAttention {
                 None,
                 true,
             )?;
-            output.slice_assign(&[num_prefill_tokens.., 0.., 0..], &out.squeeze(1)?)?
-        } else {
-            output
-        };
+            output.slice_set(&out.squeeze(1)?, 0, num_prefill_tokens)?;
+        }
 
         output.reshape((q_num_tokens, self.num_heads * self.head_dim))
     }
