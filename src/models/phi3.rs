@@ -317,15 +317,32 @@ impl Model {
         })
     }
 
-    pub fn forward(&mut self, input_ids: &Tensor, input_positions: &Tensor, attention_metadata: &FlashAttentionMetadata) -> Result<Tensor> {
+    pub fn forward(
+        &mut self,
+        input_ids: &Tensor,
+        input_positions: &Tensor,
+        attention_metadata: &FlashAttentionMetadata,
+    ) -> Result<Tensor> {
         let (b_size, seq_len) = input_ids.dims2()?;
         let mut xs = self.embed_tokens.forward(input_ids)?;
         for layer in self.layers.iter_mut() {
             xs = layer.forward(&xs, input_positions, attention_metadata)?
         }
-        xs.narrow(1, seq_len - 1, 1)?
-            .apply(&self.norm)?
-            .apply(&self.lm_head)
+        xs = self.norm.forward(&xs)?;
+        
+        // Squeeze the first dimension if it's 1
+        let xs = if b_size == 1 {
+            xs.squeeze(0)?
+        } else {
+            xs
+        };
+
+        // Select the last token's logits
+        let logits = xs.narrow(0, seq_len - 1, 1)?
+            .apply(&self.lm_head)?
+            .squeeze(0)?; // Remove the sequence length dimension
+
+        logits.to_dtype(DType::F32)
     }
 }
 
