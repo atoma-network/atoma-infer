@@ -184,12 +184,6 @@ unsafe fn copy_blocks_t<
         return Ok(());
     }
 
-    let device = key_caches[0].device();
-    let cuda_device = if let Device::Cuda(device) = device {
-        device
-    } else {
-        candle_core::bail!("device must be a cuda device")
-    };
     if !value_caches[0].device().is_cuda() {
         candle_core::bail!("key_caches and value_caches must be on the same device")
     }

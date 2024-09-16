@@ -1493,8 +1493,6 @@ struct FlashAttentionKvCache {
     /// Sequence lengths for the key tensor,
     /// of shape `[batch_size, ]`
     pub seqlens_k: Option<Tensor>,
-    /// Softcap parameter, used in Grok and Gemma2 models
-    pub softcap: Option<f32>,
 }
 
 impl FlashAttentionKvCache {
@@ -1562,7 +1560,7 @@ impl FlashAttentionKvCache {
             0
         };
 
-        let (num_blocks, page_block_size, seqlen_k, num_heads_k) = if !block_table_ptr.is_null() {
+        let (_num_blocks, page_block_size, seqlen_k, num_heads_k) = if !block_table_ptr.is_null() {
             let (num_blocks, page_block_size, num_heads_k, _head_size) = kc_l.shape().dims4()?;
             (
                 num_blocks,
@@ -1571,7 +1569,7 @@ impl FlashAttentionKvCache {
                 num_heads_k,
             )
         } else {
-            let (batch_size_cache, seqlen_k, num_heads_k, _head_size) = kc_l.shape().dims4()?;
+            let (_b_sz_c, seqlen_k, num_heads_k, _head_size) = kc_l.shape().dims4()?;
             (0, 1, seqlen_k, num_heads_k)
         };
 
@@ -1580,12 +1578,6 @@ impl FlashAttentionKvCache {
                 "page_block_size must be a multiple of 16 when block_table is provided"
             )
         }
-
-        let batch_size_cache = if !block_table_ptr.is_null() {
-            batch_size
-        } else {
-            kc_l.dims()[0]
-        };
 
         let mut window_size_left = self.window_size_left.map(|i| i as i32);
         let mut window_size_right = self.window_size_right.map(|i| i as i32);
