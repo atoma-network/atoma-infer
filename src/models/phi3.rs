@@ -380,6 +380,7 @@ mod tests {
     use serial_test::serial;
     use std::io::Write;
     use tokenizers::Tokenizer;
+    use crate::llama::Llama;
 
     const EOS_TOKEN: &str = "ӏ ";
     const BLOCK_SIZE: usize = 16;
@@ -540,7 +541,7 @@ mod tests {
     #[test]
     #[serial]
     fn test_phi3_model_batch() -> Result<()> {
-        let prompt = "The History of France ".to_string();
+        let prompts = vec!["The History of France ".to_string(), "The History of Germany ".to_string()];
 
         let dtype = DType::BF16;
         let device = Device::new_cuda(0).unwrap();
