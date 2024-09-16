@@ -254,7 +254,7 @@ struct Mlp {
 }
 
 impl Mlp {
-    fn new(cfg: &Config, vb: VarBuilder) -> Result<Self> {
+    fn new(cfg: &Phi3Config, vb: VarBuilder) -> Result<Self> {
         let hidden_size = cfg.hidden_size;
         let i_size = cfg.intermediate_size;
         let gate_up_proj = linear(hidden_size, 2 * i_size, vb.pp("gate_up_proj"))?;
@@ -340,7 +340,7 @@ pub struct Phi3Model {
 }
 
 impl Phi3Model {
-    pub fn load<C: AsRef<Config>>(vb: VarBuilder, cfg: C, dtype: DType, device: &Device) -> Result<Self> {
+    pub fn load<C: AsRef<Phi3Config>>(vb: VarBuilder, cfg: C, dtype: DType, device: &Device) -> Result<Self> {
         let cfg = cfg.as_ref();
         let embed_tokens =
             candle_nn::embedding(cfg.vocab_size, cfg.hidden_size, vb.pp("model.embed_tokens"))?;
