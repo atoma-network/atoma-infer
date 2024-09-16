@@ -906,7 +906,7 @@ mod tests {
     #[test]
     #[serial]
     fn test_llama_model_random_block_order() -> Result<()> {
-        let prompt = "The History of France ".to_string();
+        let prompt = "The History of France starts in ".to_string();
 
         let dtype = DType::BF16;
         let device = Device::new_cuda(0).unwrap();
