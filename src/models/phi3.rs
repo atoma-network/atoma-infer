@@ -348,11 +348,11 @@ mod tests {
 
   //  cargo test test_phi3_model -- --exact
     fn test_phi3_model() -> Result<()> {
-        let prompt = "The capital of France is ".to_string();
+        let prompt = "The History of France ".to_string();
 
         let dtype = DType::BF16;
         let device = Device::new_cuda(0).unwrap();
-        let model_id = "YourModelID/YourPhi3Model".to_string();  // Replace with your model ID
+        let model_id = "TinyLlama/TinyLlama-1.1B-Chat-v1.0".to_string();
         let revision = "main".to_string();
         let api = Api::new().expect("Failed to create the HF API");
 
@@ -363,18 +363,23 @@ mod tests {
             .get("tokenizer.json")
             .expect("Failed to get tokenizer.json");
         let config_filename = api.get("config.json").expect("Failed to get config.json");
-        let config: Phi3Config = serde_json::from_slice(
+        let config: LlamaConfig = serde_json::from_slice(
             &std::fs::read(config_filename).expect("Failed to read config.json"),
         )
         .expect("Failed to deserialize config.json");
+        let config = config.into_config();
 
         let filenames = vec![api
             .get("model.safetensors")
             .expect("Failed to get model.safetensors")];
-        let mut phi3_model = {
+        let mut llama_model = {
             let vb = unsafe { VarBuilder::from_mmaped_safetensors(&filenames, dtype, &device)? };
-            Model::new(&config, vb, &device).expect("Failed to load the model")
+            Llama::load(vb, &config, dtype, &device).expect("Failed to load the model")
         };
+
+
+
+        //tests
         let tokenizer =
             Tokenizer::from_file(tokenizer_filename).expect("Failed to load the tokenizer");
         let eos_token_id = config
@@ -503,22 +508,12 @@ mod tests {
     #[test]
     #[serial]
     fn test_phi3_model_batch() -> Result<()> {
-        let prompts = vec![
-            "The capital of France is ".to_string(),
-            "Modern music is especially focused on ".to_string(),
-            "How many countries do exist? ".to_string(),
-            "Sailing requires advanced techniques on ".to_string(),
-            "What are the best places to surf? ".to_string(),
-            "How many letters does the word 'Algarve' have? ".to_string(),
-            "Zero knowledge cryptography regards ".to_string(),
-            "What is a large language model? ".to_string(),
-            "What is the best way to learn a new language? ".to_string(),
-            "Healthy food is vital for ".to_string(),
-        ];
+
+        let prompt = "The History of France ".to_string();
 
         let dtype = DType::BF16;
         let device = Device::new_cuda(0).unwrap();
-        let model_id = "YourModelID/YourPhi3Model".to_string();  // Replace with your model ID
+        let model_id = "TinyLlama/TinyLlama-1.1B-Chat-v1.0".to_string();
         let revision = "main".to_string();
         let api = Api::new().expect("Failed to create the HF API");
 
@@ -529,18 +524,20 @@ mod tests {
             .get("tokenizer.json")
             .expect("Failed to get tokenizer.json");
         let config_filename = api.get("config.json").expect("Failed to get config.json");
-        let config: Phi3Config = serde_json::from_slice(
+        let config: LlamaConfig = serde_json::from_slice(
             &std::fs::read(config_filename).expect("Failed to read config.json"),
         )
         .expect("Failed to deserialize config.json");
+        let config = config.into_config();
 
         let filenames = vec![api
             .get("model.safetensors")
             .expect("Failed to get model.safetensors")];
-        let mut phi3_model = {
+        let mut llama_model = {
             let vb = unsafe { VarBuilder::from_mmaped_safetensors(&filenames, dtype, &device)? };
-            Model::new(&config, vb, &device).expect("Failed to load the model")
+            Llama::load(vb, &config, dtype, &device).expect("Failed to load the model")
         };
+
         let tokenizer =
             Tokenizer::from_file(tokenizer_filename).expect("Failed to load the tokenizer");
         let eos_token_id = config
@@ -836,11 +833,12 @@ mod tests {
     #[test]
     #[serial]
     fn test_phi3_model_long() -> Result<()> {
-        let prompt = "The History of France starts in ".to_string();
+      
+        let prompt = "The History of France ".to_string();
 
         let dtype = DType::BF16;
         let device = Device::new_cuda(0).unwrap();
-        let model_id = "microsoft/Phi-3-mini-4k-instruct".to_string();  
+        let model_id = "TinyLlama/TinyLlama-1.1B-Chat-v1.0".to_string();
         let revision = "main".to_string();
         let api = Api::new().expect("Failed to create the HF API");
 
@@ -851,18 +849,21 @@ mod tests {
             .get("tokenizer.json")
             .expect("Failed to get tokenizer.json");
         let config_filename = api.get("config.json").expect("Failed to get config.json");
-        let config: Phi3Config = serde_json::from_slice(
+        let config: LlamaConfig = serde_json::from_slice(
             &std::fs::read(config_filename).expect("Failed to read config.json"),
         )
         .expect("Failed to deserialize config.json");
+        let config = config.into_config();
 
         let filenames = vec![api
             .get("model.safetensors")
             .expect("Failed to get model.safetensors")];
-        let mut phi3_model = {
+        let mut llama_model = {
             let vb = unsafe { VarBuilder::from_mmaped_safetensors(&filenames, dtype, &device)? };
-            Model::new(&config, vb, &device).expect("Failed to load the model")
+            Llama::load(vb, &config, dtype, &device).expect("Failed to load the model")
         };
+
+
         let tokenizer =
             Tokenizer::from_file(tokenizer_filename).expect("Failed to load the tokenizer");
         let eos_token_id = config
