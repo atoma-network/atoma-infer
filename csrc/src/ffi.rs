@@ -58,6 +58,9 @@ extern "C" {
         softcap: f32,
         unpadded_lse: bool,
         force_split_kernel: bool,
+
+        softmax_lseaccum_ptr: *const c_void,
+        oaccum_ptr: *const c_void
     );
 
     pub(crate) fn copy_blocks_f16(

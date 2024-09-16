@@ -262,6 +262,16 @@ impl FlashAttention {
                     (o_stride[0] * seqlen_q) as u32,
                 )
             };
+            let (softmax_lseaccum_ptr, oaccum_ptr) = if num_splits > 1 {
+                let softmax_lseaccum_ptr = dev.alloc::<f32>(num_split * batch_size * num_heads * seqlen_q).w()?;
+                let oaccum_ptr = dev.alloc::<f32>(num_splits * batch_size * num_heads * seqlen_q * head_size_rounded).w()?;
+                (
+                    *softmax_lseaccum_ptr.device_ptr() as *const core::ffi::c_void,
+                    *oaccum_ptr.device_ptr() as *const core::ffi::c_void,
+                )
+            } else {
+                (std::ptr::null(), std::ptr::null())
+            };
             ffi::run_mha(
                 q_ptr,
                 k_ptr,
@@ -308,6 +318,8 @@ impl FlashAttention {
                 /* softcap */ softcap,
                 /* unpadded_lse */ true,
                 /* force_split_kernel */ false,
+                /* softmax_lseaccum_ptr */ softmax_lseaccum_ptr,
+                /* oaccum_ptr */ oaccum_ptr,
             )
         }
 
@@ -995,12 +1007,22 @@ impl FlashAttentionVarLen {
                 .map(|_| (k_stride[0] as u32, v_stride[0] as u32))
                 .unwrap_or((0, 0));
             // TODO: handle case where max_seqlen_q == 0, separately
+            let (softmax_lseaccum_ptr, oaccum_ptr) = if num_splits > 1 {
+                let softmax_lseaccum_ptr = dev.alloc::<f32>(num_split * batch_size * num_heads * seqlen_q).w()?;
+                let oaccum_ptr = dev.alloc::<f32>(num_splits * batch_size * num_heads * seqlen_q * head_size_rounded).w()?;
+                (
+                    *softmax_lseaccum_ptr.device_ptr() as *const core::ffi::c_void,
+                    *oaccum_ptr.device_ptr() as *const core::ffi::c_void,
+                )
+            } else {
+                (std::ptr::null(), std::ptr::null())
+            };
             ffi::run_mha(
-                q_ptr,
-                k_ptr,
-                v_ptr,
-                dst_ptr,
-                softmax_lse_ptr,
+                /* q_ptr */ q_ptr,
+                /* k_ptr */ k_ptr,
+                /* v_ptr */ v_ptr,
+                /* o_ptr */ dst_ptr,
+                /* softmax_lse_ptr */ softmax_lse_ptr,
                 /* alibi_slopes_ptr */ alibi_slopes_ptr,
                 /* cu_seqlens_q_ptr */ seqlens_q_ptr,
                 /* cu_seqlens_k_ptr */ seqlens_k_ptr,
@@ -1041,6 +1063,8 @@ impl FlashAttentionVarLen {
                 /* softcap */ softcap,
                 /* unpadded_lse */ true,
                 /* force_split_kernel */ !block_table_ptr.is_null(),
+                /* softmax_lseaccum_ptr */ softmax_lseaccum_ptr,
+                /* oaccum_ptr */ oaccum_ptr,
             )
         }
 
@@ -1738,22 +1762,32 @@ impl FlashAttentionKvCache {
             } else {
                 0
             };
+            let (softmax_lseaccum_ptr, oaccum_ptr) = if num_splits > 1 {
+                let softmax_lseaccum_ptr = dev.alloc::<f32>(num_split * batch_size * num_heads * seqlen_q).w()?;
+                let oaccum_ptr = dev.alloc::<f32>(num_splits * batch_size * num_heads * seqlen_q * head_size_rounded).w()?;
+                (
+                    *softmax_lseaccum_ptr.device_ptr() as *const core::ffi::c_void,
+                    *oaccum_ptr.device_ptr() as *const core::ffi::c_void,
+                )
+            } else {
+                (std::ptr::null(), std::ptr::null())
+            };
             ffi::run_mha(
-                q_ptr,
-                kc_ptr,
-                vc_ptr,
-                dst_ptr,
-                softmax_lse_ptr,
-                alibi_slopes_ptr,
-                std::ptr::null(),
-                cu_seqlens_k_ptr,
-                is_seqlens_k_cumulative,
-                q_stride[0] as u32,
-                kc_stride[0] as u32,
-                vc_stride[0] as u32,
-                o_stride[0] as u32,
-                alibi_slopes_batch_stride as u32,
-                q_stride[q_rank - 3] as u32,
+                /* q_ptr */ q_ptr,
+                /* k_ptr */ kc_ptr,
+                /* v_ptr */ vc_ptr,
+                /* o_ptr */ dst_ptr,
+                /* softmax_lse_ptr */ softmax_lse_ptr,
+                /* alibi_slopes_ptr */ alibi_slopes_ptr,
+                /* cu_seqlens_q_ptr */ std::ptr::null(),
+                /* cu_seqlens_k_ptr */ cu_seqlens_k_ptr,
+                /* is_seqlens_k_cumulative */ is_seqlens_k_cumulative,
+                /* q_batch_stride */ q_stride[0] as u32,
+                /* k_batch_stride */ kc_stride[0] as u32,
+                /* v_batch_stride */ vc_stride[0] as u32,
+                /* o_batch_stride */ o_stride[0] as u32,
+                /* alibi_slopes_batch_stride */ alibi_slopes_batch_stride as u32,
+                /* q_row_stride */ q_stride[q_rank - 3] as u32,
                 /* k_row_stride   */ kc_stride[kc_rank - 3] as u32,
                 /* v_row_stride   */ vc_stride[vc_rank - 3] as u32,
                 /* o_row_stride   */ o_stride[o_rank - 3] as u32,
@@ -1761,29 +1795,31 @@ impl FlashAttentionKvCache {
                 /* k_head_stride  */ kc_stride[kc_rank - 2] as u32,
                 /* v_head_stride  */ vc_stride[vc_rank - 2] as u32,
                 /* o_head_stride  */ o_stride[o_rank - 2] as u32,
-                num_splits,
-                batch_size as u32,
-                num_heads as u32,
-                num_heads_k as u32,
-                head_size as u32,
-                head_size_rounded as u32,
-                self.softmax_scale,
-                self.softmax_scale * std::f32::consts::LOG2_E,
-                block_table_ptr,
-                block_table_batch_stride,
-                page_block_size as i32,
-                std::ptr::null(),
-                seqlen_q as u32,
-                seqlen_k as u32,
-                seqlen_q_rounded as u32,
-                seqlen_k_rounded as u32,
-                is_bf16,
-                is_causal as i32,
-                window_size_left,
-                window_size_right,
-                0.0,
-                false,
-                !block_table_ptr.is_null(),
+                /* num_splits */ num_splits,
+                /* b */ batch_size as u32,
+                /* h */ num_heads as u32,
+                /* h_k */ num_heads_k as u32,
+                /* d */ head_size as u32,
+                /* d_rounded */ head_size_rounded as u32,
+                /* softmax_scale */ self.softmax_scale,
+                /* scale_softmax_log2 */ self.softmax_scale * std::f32::consts::LOG2_E,
+                /* block_table_ptr */ block_table_ptr,
+                /* block_table_batch_stride */ block_table_batch_stride,
+                /* page_block_size */ page_block_size as i32,
+                /* seqused_k */ std::ptr::null(),
+                /* seqlen_q */ seqlen_q as u32,
+                /* seqlen_k */ seqlen_k as u32,
+                /* seqlen_q_rounded */ seqlen_q_rounded as u32,
+                /* seqlen_k_rounded */ seqlen_k_rounded as u32,
+                /* is_bf16 */ is_bf16,
+                /* is_causal */ is_causal as i32,
+                /* window_size_left */ window_size_left,
+                /* window_size_right */ window_size_right,
+                /* dropout_p */ 0.0,
+                /* unpadded_lse */ false,
+                /* force_split_kernel */ self.block_table.is_some(),
+                /* softmax_lseaccum_ptr */ softmax_lseaccum_ptr,
+                /* oaccum_ptr */ oaccum_ptr,
             )
         }
 
