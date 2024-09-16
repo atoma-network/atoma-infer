@@ -26,21 +26,7 @@ pub struct Phi3Config {
     pub max_position_embeddings: usize,
 }
 
-#[derive(Debug, Clone)]
-pub struct Config {
-    pub hidden_size: usize,
-    pub intermediate_size: usize,
-    pub vocab_size: usize,
-    pub num_hidden_layers: usize,
-    pub num_attention_heads: usize,
-    pub num_key_value_heads: usize,
-    pub rms_norm_eps: f64,
-    pub rope_theta: f32,
-    pub bos_token_id: Option<u32>,
-    pub eos_token_id: Option<u32>,
-    pub rope_scaling: Option<String>,
-    pub max_position_embeddings: usize,
-}
+
 
 impl Phi3Config {
     pub fn head_dim(&self) -> usize {
@@ -51,20 +37,21 @@ impl Phi3Config {
         self.num_key_value_heads
     }
 
-    pub fn into_config(self) -> Config {
-        Config {
+    pub fn into_config(self) -> Phi3Config {
+        Phi3Config {
+            vocab_size: self.vocab_size,
+            hidden_act: self.hidden_act,
             hidden_size: self.hidden_size,
             intermediate_size: self.intermediate_size,
-            vocab_size: self.vocab_size,
             num_hidden_layers: self.num_hidden_layers,
             num_attention_heads: self.num_attention_heads,
             num_key_value_heads: self.num_key_value_heads,
             rms_norm_eps: self.rms_norm_eps,
-            rope_theta: self.rope_theta as f32,
-            bos_token_id: self.bos_token_id,
-            eos_token_id: self.eos_token_id,
+            rope_theta: self.rope_theta,
             rope_scaling: self.rope_scaling,
             max_position_embeddings: self.max_position_embeddings,
+            bos_token_id: self.bos_token_id,
+            eos_token_id: self.eos_token_id,
         }
     }
 }
@@ -138,7 +125,7 @@ impl fmt::Debug for Attention {
             .field("rotary_emb", &self.rotary_emb)
             .field("dtype", &self.dtype)
             .field("device", &self.device)
-            .finish_non_exhaustive()
+            .finish()
     }
 }
 
@@ -194,8 +181,8 @@ impl Attention {
             num_kv_groups: num_heads / num_kv_heads,
             head_dim,
             attention: FlashAttention::new(
-                cfg.num_attention_heads,
-                cfg.num_key_value_heads,
+                num_heads,
+                num_kv_heads,
                 head_dim,
                 1f32 / (head_dim as f32).sqrt(),
                 None,
@@ -247,8 +234,8 @@ impl Attention {
             &query_states,
             &key_states,
             &value_states,
-            &key_states,
             attention_metadata,
+
         )?;
 
         attn_output
@@ -267,7 +254,7 @@ struct Mlp {
 }
 
 impl Mlp {
-    fn new(cfg: &Phi3Config, vb: VarBuilder) -> Result<Self> {
+    fn new(cfg: &Config, vb: VarBuilder) -> Result<Self> {
         let hidden_size = cfg.hidden_size;
         let i_size = cfg.intermediate_size;
         let gate_up_proj = linear(hidden_size, 2 * i_size, vb.pp("gate_up_proj"))?;
@@ -353,13 +340,13 @@ pub struct Phi3Model {
 }
 
 impl Phi3Model {
-    pub fn load(vb: VarBuilder, cfg: &Phi3Config, dtype: DType, device: &Device) -> Result<Self> {
-        let vb_m = vb.pp("model");
+    pub fn load<C: AsRef<Config>>(vb: VarBuilder, cfg: C, dtype: DType, device: &Device) -> Result<Self> {
+        let cfg = cfg.as_ref();
         let embed_tokens =
-            candle_nn::embedding(cfg.vocab_size, cfg.hidden_size, vb_m.pp("embed_tokens"))?;
-        let rotary_emb = Arc::new(RotaryEmbedding::new(vb.dtype(), cfg, vb_m.device())?);
+            candle_nn::embedding(cfg.vocab_size, cfg.hidden_size, vb.pp("model.embed_tokens"))?;
+        let rotary_emb = Arc::new(RotaryEmbedding::new(vb.dtype(), cfg, vb.device())?);
         let mut layers = Vec::with_capacity(cfg.num_hidden_layers);
-        let vb_l = vb_m.pp("layers");
+        let vb_l = vb.pp("model.layers");
         for layer_idx in 0..cfg.num_hidden_layers {
             let layer = DecoderLayer::new(
                 rotary_emb.clone(),
@@ -370,7 +357,7 @@ impl Phi3Model {
             )?;
             layers.push(layer)
         }
-        let norm = RmsNorm::new(cfg.hidden_size, cfg.rms_norm_eps, vb_m.pp("norm"))?;
+        let norm = RmsNorm::new(cfg.hidden_size, cfg.rms_norm_eps, vb.pp("model.norm"))?;
         let lm_head = linear(cfg.hidden_size, cfg.vocab_size, vb.pp("lm_head"))?;
         Ok(Self {
             embed_tokens,
@@ -402,7 +389,7 @@ impl Phi3Model {
         let logits = xs
             .narrow(0, seq_len - 1, 1)?
             .apply(&self.lm_head)?
-            .squeeze(0)?; // Remove the sequence length dimension
+            .squeeze(0)?;
 
         logits.to_dtype(DType::F32)
     }
