@@ -29,6 +29,18 @@ impl Phi3Config {
     pub fn head_dim(&self) -> usize {
         self.hidden_size / self.num_attention_heads
     }
+
+    pub fn into_config(self) -> Config {
+        Config {
+            hidden_size: self.hidden_size,
+            intermediate_size: self.intermediate_size,
+            vocab_size: self.vocab_size,
+            num_hidden_layers: self.num_hidden_layers,
+            num_attention_heads: self.num_attention_heads,
+            num_key_value_heads: self.num_key_value_heads(),
+            rms_norm_eps: self.rms_norm_eps,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -374,13 +386,13 @@ impl Phi3Model {
 mod tests {
     use super::*;
     use crate::flash_attention::{FlashAttentionDecodingMetadata, FlashAttentionPrefillMetadata};
+    use crate::llama::Llama;
     use candle_core::IndexOp;
     use candle_transformers::generation::{LogitsProcessor, Sampling};
     use hf_hub::{api::sync::Api, Repo, RepoType};
     use serial_test::serial;
     use std::io::Write;
     use tokenizers::Tokenizer;
-    use crate::llama::Llama;
 
     const EOS_TOKEN: &str = "ӏ ";
     const BLOCK_SIZE: usize = 16;
@@ -541,7 +553,10 @@ mod tests {
     #[test]
     #[serial]
     fn test_phi3_model_batch() -> Result<()> {
-        let prompts = vec!["The History of France ".to_string(), "The History of Germany ".to_string()];
+        let prompts = vec![
+            "The History of France ".to_string(),
+            "The History of Germany ".to_string(),
+        ];
 
         let dtype = DType::BF16;
         let device = Device::new_cuda(0).unwrap();
