@@ -263,8 +263,8 @@ impl FlashAttention {
                 )
             };
             let (softmax_lseaccum_ptr, oaccum_ptr) = if num_splits > 1 {
-                let softmax_lseaccum_ptr = dev.alloc::<f32>(num_split * batch_size * num_heads * seqlen_q).w()?;
-                let oaccum_ptr = dev.alloc::<f32>(num_splits * batch_size * num_heads * seqlen_q * head_size_rounded).w()?;
+                let softmax_lseaccum_ptr = device.alloc_zeros::<f32>(num_splits as usize * b_sz * num_heads * seqlen_q).w()?;
+                let oaccum_ptr = device.alloc_zeros::<f32>(num_splits as usize * b_sz * num_heads * seqlen_q * head_size_rounded).w()?;
                 (
                     *softmax_lseaccum_ptr.device_ptr() as *const core::ffi::c_void,
                     *oaccum_ptr.device_ptr() as *const core::ffi::c_void,
@@ -1008,8 +1008,8 @@ impl FlashAttentionVarLen {
                 .unwrap_or((0, 0));
             // TODO: handle case where max_seqlen_q == 0, separately
             let (softmax_lseaccum_ptr, oaccum_ptr) = if num_splits > 1 {
-                let softmax_lseaccum_ptr = dev.alloc::<f32>(num_split * batch_size * num_heads * seqlen_q).w()?;
-                let oaccum_ptr = dev.alloc::<f32>(num_splits * batch_size * num_heads * seqlen_q * head_size_rounded).w()?;
+                let softmax_lseaccum_ptr = dev.alloc::<f32>(num_splits as usize * batch_size * num_heads * max_seqlen_q).w()?;
+                let oaccum_ptr = dev.alloc::<f32>(num_splits as usize * batch_size * num_heads * max_seqlen_q * head_size_rounded).w()?;
                 (
                     *softmax_lseaccum_ptr.device_ptr() as *const core::ffi::c_void,
                     *oaccum_ptr.device_ptr() as *const core::ffi::c_void,
@@ -1493,8 +1493,6 @@ struct FlashAttentionKvCache {
     /// Sequence lengths for the key tensor,
     /// of shape `[batch_size, ]`
     pub seqlens_k: Option<Tensor>,
-    /// Softcap parameter, used in Grok and Gemma2 models
-    pub softcap: Option<f32>,
 }
 
 impl FlashAttentionKvCache {
@@ -1562,7 +1560,7 @@ impl FlashAttentionKvCache {
             0
         };
 
-        let (num_blocks, page_block_size, seqlen_k, num_heads_k) = if !block_table_ptr.is_null() {
+        let (_num_blocks, page_block_size, seqlen_k, num_heads_k) = if !block_table_ptr.is_null() {
             let (num_blocks, page_block_size, num_heads_k, _head_size) = kc_l.shape().dims4()?;
             (
                 num_blocks,
@@ -1571,7 +1569,7 @@ impl FlashAttentionKvCache {
                 num_heads_k,
             )
         } else {
-            let (batch_size_cache, seqlen_k, num_heads_k, _head_size) = kc_l.shape().dims4()?;
+            let (_b_sz_c, seqlen_k, num_heads_k, _head_size) = kc_l.shape().dims4()?;
             (0, 1, seqlen_k, num_heads_k)
         };
 
@@ -1580,12 +1578,6 @@ impl FlashAttentionKvCache {
                 "page_block_size must be a multiple of 16 when block_table is provided"
             )
         }
-
-        let batch_size_cache = if !block_table_ptr.is_null() {
-            batch_size
-        } else {
-            kc_l.dims()[0]
-        };
 
         let mut window_size_left = self.window_size_left.map(|i| i as i32);
         let mut window_size_right = self.window_size_right.map(|i| i as i32);
@@ -1763,8 +1755,8 @@ impl FlashAttentionKvCache {
                 0
             };
             let (softmax_lseaccum_ptr, oaccum_ptr) = if num_splits > 1 {
-                let softmax_lseaccum_ptr = dev.alloc::<f32>(num_split * batch_size * num_heads * seqlen_q).w()?;
-                let oaccum_ptr = dev.alloc::<f32>(num_splits * batch_size * num_heads * seqlen_q * head_size_rounded).w()?;
+                let softmax_lseaccum_ptr = dev.alloc_zeros::<f32>(num_splits as usize * batch_size * num_heads * seqlen_q).w()?;
+                let oaccum_ptr = dev.alloc_zeros::<f32>(num_splits as usize * batch_size * num_heads * seqlen_q * head_size_rounded).w()?;
                 (
                     *softmax_lseaccum_ptr.device_ptr() as *const core::ffi::c_void,
                     *oaccum_ptr.device_ptr() as *const core::ffi::c_void,
@@ -1891,7 +1883,6 @@ pub fn flash_attn_kv_cache(
         alibi_slopes: None,
         window_size_left,
         window_size_right,
-        softcap: None,
         block_table: None,
         seqlens_k: None,
     };
@@ -1931,7 +1922,6 @@ pub fn flash_attn_kv_cache_windowed(
         alibi_slopes: None,
         window_size_left,
         window_size_right,
-        softcap: None,
         block_table: None,
         seqlens_k: seqlens_k.cloned(),
     };
@@ -1973,7 +1963,6 @@ pub fn flash_attn_kv_cache_alibi(
         alibi_slopes: Some(alibi_slopes.clone()),
         window_size_left,
         window_size_right,
-        softcap: None,
         block_table: None,
         seqlens_k: seqlens_k.cloned(),
     };
@@ -2018,7 +2007,6 @@ pub fn flash_attn_kv_cache_alibi_windowed(
         window_size_right,
         block_table: None,
         seqlens_k: None,
-        softcap: None,
     };
     q.apply_op3(k, v, op)
 }
@@ -2056,7 +2044,6 @@ pub fn flash_attn_kv_cache_full(
     softmax_scale: f32,
     block_table: Option<&Tensor>,
     seqlens_k: Option<&Tensor>,
-    softcap: Option<f32>,
     causal: bool,
 ) -> Result<Tensor> {
     let window_size_left = None;
@@ -2069,7 +2056,6 @@ pub fn flash_attn_kv_cache_full(
         window_size_right,
         block_table: block_table.cloned(),
         seqlens_k: seqlens_k.cloned(),
-        softcap,
     };
     q.apply_op3(k, v, op)
 }

@@ -78,7 +78,7 @@ extern "C" void run_mha(
     bool force_split_kernel,
 
     void *softmax_lseaccum_ptr,
-    void *oaccum_ptr,
+    void *oaccum_ptr
 ) {
     Flash_fwd_params params;
     // Reset the parameters
