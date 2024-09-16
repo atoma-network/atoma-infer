@@ -1,5 +1,6 @@
 /// A Rust implementation of the Phi3 model, a transformer-based language model.
 use candle_core::{DType, Device, Module, Result, Tensor, D};
+
 use candle_nn::VarBuilder;
 use std::sync::Arc;
 
@@ -25,9 +26,29 @@ pub struct Phi3Config {
     pub max_position_embeddings: usize,
 }
 
+#[derive(Debug, Clone)]
+pub struct Config {
+    pub hidden_size: usize,
+    pub intermediate_size: usize,
+    pub vocab_size: usize,
+    pub num_hidden_layers: usize,
+    pub num_attention_heads: usize,
+    pub num_key_value_heads: usize,
+    pub rms_norm_eps: f64,
+    pub rope_theta: f32,
+    pub bos_token_id: Option<u32>,
+    pub eos_token_id: Option<u32>,
+    pub rope_scaling: Option<String>,
+    pub max_position_embeddings: usize,
+}
+
 impl Phi3Config {
     pub fn head_dim(&self) -> usize {
         self.hidden_size / self.num_attention_heads
+    }
+
+    pub fn num_key_value_heads(&self) -> usize {
+        self.num_key_value_heads
     }
 
     pub fn into_config(self) -> Config {
@@ -37,8 +58,13 @@ impl Phi3Config {
             vocab_size: self.vocab_size,
             num_hidden_layers: self.num_hidden_layers,
             num_attention_heads: self.num_attention_heads,
-            num_key_value_heads: self.num_key_value_heads(),
+            num_key_value_heads: self.num_key_value_heads,
             rms_norm_eps: self.rms_norm_eps,
+            rope_theta: self.rope_theta as f32,
+            bos_token_id: self.bos_token_id,
+            eos_token_id: self.eos_token_id,
+            rope_scaling: self.rope_scaling,
+            max_position_embeddings: self.max_position_embeddings,
         }
     }
 }
@@ -75,7 +101,7 @@ impl RotaryEmbedding {
         k: &Tensor,
         input_positions: &Tensor,
     ) -> Result<(Tensor, Tensor)> {
-        let (_b_sz, _h, seq_len, _n_embd) = q.dims4()?;
+        let (_b_sz, _h, _seq_len, _n_embd) = q.dims4()?;
         let cos = self.cos.index_select(&input_positions.flatten(0, 1)?, 0)?;
         let sin = self.sin.index_select(&input_positions.flatten(0, 1)?, 0)?;
         let q_embed = candle_nn::rotary_emb::rope(&q.contiguous()?, &cos, &sin)?;
