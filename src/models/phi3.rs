@@ -305,7 +305,7 @@ impl DecoderLayer {
 }
 
 #[derive(Debug, Clone)]
-pub struct Model {
+pub struct Phi3Model {
     embed_tokens: candle_nn::Embedding,
     layers: Vec<DecoderLayer>,
     norm: RmsNorm,
