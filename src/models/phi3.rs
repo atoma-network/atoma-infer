@@ -8,9 +8,6 @@ use candle_transformers::models::with_tracing::{linear_no_bias as linear, Linear
 use crate::flash_attention::{FlashAttention, FlashAttentionMetadata};
 use candle_transformers::utils;
 
-// Add these imports at the top of the file
-use crate::models::llama::{LlamaConfig, Llama};
-
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct Phi3Config {
     pub vocab_size: usize,
@@ -359,7 +356,6 @@ mod tests {
     use serial_test::serial;
     use std::io::Write;
     use tokenizers::Tokenizer;
-    use crate::models::llama::{LlamaConfig, Llama};
 
     const EOS_TOKEN: &str = "ӏ ";
     const BLOCK_SIZE: usize = 16;
@@ -453,7 +449,7 @@ mod tests {
                 sequence_lengths: Some(Tensor::from_vec(vec![tokens.len() as u32], (1,), &device)?),
             }),
         };
-        let logits = llama_model.forward(
+        let logits = phi3_model.forward(
             &input,
             &input_positions,
             &attention_metadata,
@@ -487,11 +483,11 @@ mod tests {
                     max_decoding_sequence_length: tokens.len(),
                     sequence_lengths: Some(Tensor::new(&[tokens.len() as u32], &device)?),
                 }),
-                prefill_metadata: None,src/models/phi3.rs
+                prefill_metadata: None,
                 num_prefill_tokens: 0,
                 num_decoding_tokens: 1,
             };
-            let logits = llama_model
+            let logits = phi3_model
                 .forward(
                     &input,
                     &input_positions,
@@ -691,7 +687,7 @@ mod tests {
         };
         let selected_token_indices =
             Tensor::from_vec(selected_token_indices, (tokens.len(),), &device)?;
-        let logits = llama_model
+        let logits = phi3_model
             .forward(
                 &input,
                 &input_positions,
@@ -799,7 +795,7 @@ mod tests {
                 num_prefill_tokens: 0,
                 num_decoding_tokens: num_active,
             };
-            let logits = llama_model
+            let logits = phi3_model
                 .forward(
                     &input,
                     &input_positions,
@@ -962,7 +958,7 @@ mod tests {
                 sequence_lengths: Some(sequence_lengths),
             }),
         };
-        let logits = llama_model.forward(
+        let logits = phi3_model.forward(
             &input,
             &input_positions,
             &attention_metadata,
@@ -1012,7 +1008,7 @@ mod tests {
                 num_prefill_tokens,
                 num_decoding_tokens,
             };
-            let logits = llama_model
+            let logits = phi3_model
                 .forward(
                     &input,
                     &input_positions,
