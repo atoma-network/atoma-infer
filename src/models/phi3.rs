@@ -487,7 +487,7 @@ mod tests {
                     max_decoding_sequence_length: tokens.len(),
                     sequence_lengths: Some(Tensor::new(&[tokens.len() as u32], &device)?),
                 }),
-                prefill_metadata: None,
+                prefill_metadata: None,src/models/phi3.rs
                 num_prefill_tokens: 0,
                 num_decoding_tokens: 1,
             };
