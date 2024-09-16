@@ -314,8 +314,8 @@ pub struct Model {
     dtype: DType,
 }
 
-impl Model {
-    pub fn new(cfg: &Phi3Config, vb: VarBuilder, device: &Device) -> Result<Self> {
+impl Phi3Model {
+    pub fn load(vb: VarBuilder, cfg: &Phi3Config, dtype: DType, device: &Device) -> Result<Self> {
         let vb_m = vb.pp("model");
         let embed_tokens =
             candle_nn::embedding(cfg.vocab_size, cfg.hidden_size, vb_m.pp("embed_tokens"))?;
@@ -415,7 +415,7 @@ mod tests {
             .expect("Failed to get model.safetensors")];
         let mut phi3_model = {
             let vb = unsafe { VarBuilder::from_mmaped_safetensors(&filenames, dtype, &device)? };
-            Model::load(vb, &config, dtype, &device).expect("Failed to load the model")
+            Phi3Model::load(vb, &config, dtype, &device).expect("Failed to load the model")
         };
 
         //tests
@@ -566,7 +566,7 @@ mod tests {
             .expect("Failed to get model.safetensors")];
         let mut phi3_model = {
             let vb = unsafe { VarBuilder::from_mmaped_safetensors(&filenames, dtype, &device)? };
-            Model::load(vb, &config, dtype, &device).expect("Failed to load the model")
+            Phi3Model::load(vb, &config, dtype, &device).expect("Failed to load the model")
         };
 
         let tokenizer =
@@ -881,7 +881,7 @@ mod tests {
             .expect("Failed to get model.safetensors")];
         let mut phi3_model = {
             let vb = unsafe { VarBuilder::from_mmaped_safetensors(&filenames, dtype, &device)? };
-            Model::load(vb, &config, dtype, &device).expect("Failed to load the model")
+            Phi3Model::load(vb, &config, dtype, &device).expect("Failed to load the model")
         };
         let tokenizer =
             Tokenizer::from_file(tokenizer_filename).expect("Failed to load the tokenizer");
