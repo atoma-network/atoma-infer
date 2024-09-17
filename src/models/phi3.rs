@@ -1077,7 +1077,7 @@ mod tests {
         let sequence_start_locations =
             Tensor::from_vec(vec![0, tokens.len() as u32], (2,), &device)?;
         let sequence_lengths = Tensor::from_vec(vec![tokens.len() as u32], (1,), &device)?;
-        let block_tables = Tensor::new::<&[u32; 0]>(&[], &device)?;
+        let _block_tables = Tensor::new::<&[u32; 0]>(&[], &device)?;
 
         let num_prefill_tokens = tokens.len();
         let num_decoding_tokens = 0;
