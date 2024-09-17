@@ -476,7 +476,7 @@ impl Llama {
         let lm_head = linear(cfg.hidden_size, cfg.vocab_size, vb.pp("lm_head"))?;
         let ln_f = RmsNorm::new(cfg.hidden_size, cfg.rms_norm_eps, vb.pp("model.norm"))?;
         let blocks: Vec<_> = (0..cfg.num_hidden_layers)
-            .map(|i| Block::load(vb.pp(&format!("model.layers.{i}")), cfg, dtype, device).unwrap())
+            .map(|i| Block::load(vb.pp(format!("model.layers.{i}")), cfg, dtype, device).unwrap())
             .collect();
 
         Ok(Self {
@@ -957,7 +957,7 @@ mod tests {
             LogitsProcessor::from_sampling(42, sampling)
         };
 
-        let sample_len = 128;
+        let sample_len = 512;
         let start_gen = std::time::Instant::now();
         let mut token_generated = 0;
 
@@ -1153,6 +1153,8 @@ mod tests {
             "What is a large language model ? ".to_string(),
             "What is the best way to learn a new language ? ".to_string(),
             "Healthy food is vital for ".to_string(),
+            "History books ".to_string(),
+            "Once upon a time ".to_string(),
         ];
 
         let batch_size = prompts.len();
@@ -1219,12 +1221,12 @@ mod tests {
                 .collect::<Vec<_>>()
         };
 
-        let sample_len = 64;
+        let sample_len = 1024;
         let start_gen = std::time::Instant::now();
         let mut token_generated = 0;
 
         // KV cache
-        let num_blocks = 100;
+        let num_blocks = 1000;
         let block_size = 16;
         let num_key_value_heads = config.num_key_value_heads;
         let head_dim = config.hidden_size / config.num_attention_heads;
