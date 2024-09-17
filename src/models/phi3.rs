@@ -358,7 +358,7 @@ impl DecoderLayer {
         residual + xs
     }
 }
-
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct Phi3Model {
     embed_tokens: candle_nn::Embedding,
