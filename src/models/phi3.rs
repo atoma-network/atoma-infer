@@ -409,7 +409,7 @@ impl Phi3Model {
         if b_size != 1 {
             candle_core::bail!(
                 "x must be of shape [1, num_total_tokens], got {:?}",
-                xs.dims()
+                input_ids.dims()
             );
         }
         let mut xs = self.embed_tokens.forward(input_ids)?;
