@@ -2,7 +2,8 @@
 
 ![Atoma Logo](https://github.com/atoma-network/atoma-paged-attention/blob/main/assets/atoma-symbol.jpg)
 
-The Atoma Node Inference repository is a collection of optimized infrastructure for Large Language Models (LLMs) compute. We rely on highly optimized KV cache memory management software, through block pagination, such as [FlashAttention2](https://github.com/Dao-AILab/flash-attention). The codebase is mostly written in the Rust programming language, which leads to safe and highly optimized inference request scheduling, enhancing LLM inference serving.
+The Atoma Node Inference repository is a collection of optimized infrastructure for Large Language Models (LLMs) compute. We rely on highly optimized KV cache memory management software, through block pagination, such as 
+[PagedAttention](https://github.com/vllm-project/vllm) and [FlashAttention2](https://github.com/Dao-AILab/flash-attention). The codebase is mostly written in the Rust programming language, which leads to safe and highly optimized inference request scheduling, enhancing LLM inference serving.
 
 ## Features
 
