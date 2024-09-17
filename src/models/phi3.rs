@@ -386,6 +386,7 @@ impl Phi3Model {
             )?;
             layers.push(layer)
         }
+
         let norm = RmsNorm::new(cfg.hidden_size, cfg.rms_norm_eps, vb.pp("model.norm"))?;
         let lm_head = linear(cfg.hidden_size, cfg.vocab_size, vb.pp("lm_head"))?;
         Ok(Self {
