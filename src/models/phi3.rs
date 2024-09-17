@@ -81,7 +81,6 @@ impl RotaryEmbedding {
     }
 
     fn apply_rotary_embed(&self, x: &Tensor, input_positions: &Tensor) -> Result<Tensor> {
-        let _enter = self.span_rot.enter();
         let (b_sz, _num_heads, num_total_tokens, _hidden_size) = x.dims4()?; // [1, num_heads, num_total_tokens, hidden_size]
 
         if b_sz != 1 {
@@ -219,11 +218,10 @@ impl Attention {
         if batch_size != 1 {
             candle_core::bail!(
                 "x must be of shape [1, num_total_tokens], got {:?}",
-                x.dims()
+                xs.dims()
             );
         }
 
-        let _enter = self.span.enter();
         let qkv = self.qkv_proj.forward(xs)?;
         let query_pos = self.num_heads * self.head_dim;
         let query_states = qkv.narrow(D::Minus1, 0, query_pos)?;
@@ -252,9 +250,12 @@ impl Attention {
             self.head_dim,
         ))?;
 
-        let (query_states, key_states) =
-            self.rotary_emb
-                .apply_rotary_emb_qkv(&query_states, &key_states, input_positions)?;
+        let query_states = self
+            .rotary_emb
+            .apply_rotary_embed(&query_states, &input_positions)?;
+        let key_states = self
+            .rotary_emb
+            .apply_rotary_embed(&key_states, &input_positions)?;
 
         let query_states = query_states.transpose(1, 2)?.squeeze(0)?.contiguous()?;
         let key_states = key_states.transpose(1, 2)?.squeeze(0)?.contiguous()?;
@@ -408,7 +409,7 @@ impl Phi3Model {
         if b_size != 1 {
             candle_core::bail!(
                 "x must be of shape [1, num_total_tokens], got {:?}",
-                x.dims()
+                xs.dims()
             );
         }
         let mut xs = self.embed_tokens.forward(input_ids)?;
@@ -426,7 +427,7 @@ impl Phi3Model {
         //     .apply(&self.lm_head)?
         //     .squeeze(0)?;
         let xs = xs.index_select(selected_token_indices, 1)?.contiguous()?;
-        let logits = self.lm_head.forward(&x)?;
+        let logits = self.lm_head.forward(&xs)?;
 
         logits.to_dtype(DType::F32)
     }
@@ -819,6 +820,8 @@ mod tests {
             });
             result
         };
+        let selected_token_indices =
+            Tensor::from_vec(selected_token_indices, (tokens.len(),), &device)?;
         let logits = phi3_model
             .forward(
                 &input,
