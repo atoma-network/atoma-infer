@@ -26,8 +26,6 @@ pub struct Phi3Config {
     pub max_position_embeddings: usize,
 }
 
-
-
 impl Phi3Config {
     pub fn head_dim(&self) -> usize {
         self.hidden_size / self.num_attention_heads
@@ -472,6 +470,10 @@ mod tests {
         let start_gen = std::time::Instant::now();
         let mut token_generated = 0;
 
+        let num_layers = phi3_model.layers.len();
+        let mut kv_caches = vec![kv_cache.clone(); num_layers];
+        let kv_caches_refs: Vec<&mut Tensor> = kv_caches.iter_mut().collect();
+
         // prefill forward pass
         let input_positions = Tensor::arange(0, tokens.len() as i64, &device)?.unsqueeze(0)?;
         let input = Tensor::new(&tokens[..], &device)?.unsqueeze(0)?;
@@ -498,7 +500,7 @@ mod tests {
                 sequence_lengths: Some(Tensor::from_vec(vec![tokens.len() as u32], (1,), &device)?),
             }),
         };
-        let logits = phi3_model.forward(&input, &input_positions, &attention_metadata)?;
+        let logits = phi3_model.forward(&input, &input_positions, &kv_caches_refs, &attention_metadata)?;
         let logits = logits.squeeze(0)?.squeeze(0)?;
 
         let mut next_token = logits_processor.sample(&logits)?;
@@ -533,7 +535,7 @@ mod tests {
                 num_decoding_tokens: 1,
             };
             let logits = phi3_model
-                .forward(&input, &input_positions, &attention_metadata)?
+                .forward(&input, &input_positions, &kv_caches_refs, &attention_metadata)?
                 .squeeze(0)?
                 .squeeze(0)?;
 
@@ -642,6 +644,10 @@ mod tests {
         let max_tokens_len = tokens.iter().map(|ts| ts.len()).max().unwrap();
         let token_size_allocation = ((max_tokens_len + 64 + 16) / 16) * 16;
 
+        let num_layers = phi3_model.layers.len();
+        let mut kv_caches = vec![kv_cache.clone(); num_layers];
+        let kv_caches_refs: Vec<&mut Tensor> = kv_caches.iter_mut().collect();
+
         // prefill forward pass
         let input_positions = Tensor::from_vec(
             tokens
@@ -732,7 +738,7 @@ mod tests {
         let selected_token_indices =
             Tensor::from_vec(selected_token_indices, (tokens.len(),), &device)?;
         let logits = phi3_model
-            .forward(&input, &input_positions, &attention_metadata)?
+            .forward(&input, &input_positions, &kv_caches_refs, &attention_metadata)?
             .squeeze(0)?;
 
         assert_eq!(logits.dims().len(), 2);
@@ -835,7 +841,7 @@ mod tests {
                 num_decoding_tokens: num_active,
             };
             let logits = phi3_model
-                .forward(&input, &input_positions, &attention_metadata)?
+                .forward(&input, &input_positions, &kv_caches_refs, &attention_metadata)?
                 .squeeze(0)?;
 
             let mut new_active_indices = Vec::new();
@@ -955,7 +961,8 @@ mod tests {
         .collect::<Result<Vec<_>>>()?;
 
         let kv_cache = kv_cache.iter_mut().collect::<Vec<_>>();
-
+        let kv_cache_refs: Vec<&mut Tensor> = kv_cache.iter_mut().collect();
+        
         // prefill forward pass
         let input_positions = Tensor::arange(0, tokens.len() as i64, &device)?.unsqueeze(0)?;
         let input = Tensor::new(&tokens[..], &device)?.unsqueeze(0)?;
@@ -990,7 +997,8 @@ mod tests {
                 sequence_lengths: Some(sequence_lengths),
             }),
         };
-        let logits = phi3_model.forward(&input, &input_positions, &kv_cache, &attention_metadata)?;
+        let logits =
+            phi3_model.forward(&input, &input_positions, &kv_cache_refs, &attention_metadata)?;
         let logits = logits.squeeze(0)?.squeeze(0)?;
 
         let mut next_token = logits_processor.sample(&logits)?;
@@ -1037,7 +1045,7 @@ mod tests {
                 num_decoding_tokens,
             };
             let logits = phi3_model
-                .forward(&input, &input_positions, &kv_cache, &attention_metadata)?
+                .forward(&input, &input_positions, &kv_cache_refs, &attention_metadata)?
                 .squeeze(0)?
                 .squeeze(0)?;
 
