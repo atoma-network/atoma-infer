@@ -471,7 +471,21 @@ mod tests {
         let mut token_generated = 0;
 
         let num_layers = phi3_model.layers.len();
-        let mut kv_caches = vec![kv_cache.clone(); num_layers];
+        let num_blocks = 100;
+        let block_size = BLOCK_SIZE;
+        let num_key_value_heads = config.num_key_value_heads;
+        let head_dim = config.head_dim();
+        
+        let mut kv_caches = std::iter::repeat_with(|| {
+            Tensor::zeros(
+                (2, num_blocks, block_size, num_key_value_heads, head_dim),
+                dtype,
+                &device,
+            )
+        })
+        .take(num_layers)
+        .collect::<Result<Vec<_>>>()?;
+        
         let kv_caches_refs: Vec<&mut Tensor> = kv_caches.iter_mut().collect();
 
         // prefill forward pass
@@ -645,7 +659,21 @@ mod tests {
         let token_size_allocation = ((max_tokens_len + 64 + 16) / 16) * 16;
 
         let num_layers = phi3_model.layers.len();
-        let mut kv_caches = vec![kv_cache.clone(); num_layers];
+        let num_blocks = 100;
+        let block_size = BLOCK_SIZE;
+        let num_key_value_heads = config.num_key_value_heads;
+        let head_dim = config.head_dim();
+        
+        let mut kv_caches = std::iter::repeat_with(|| {
+            Tensor::zeros(
+                (2, num_blocks, block_size, num_key_value_heads, head_dim),
+                dtype,
+                &device,
+            )
+        })
+        .take(num_layers)
+        .collect::<Result<Vec<_>>>()?;
+        
         let kv_caches_refs: Vec<&mut Tensor> = kv_caches.iter_mut().collect();
 
         // prefill forward pass
@@ -950,9 +978,9 @@ mod tests {
         let block_size = BLOCK_SIZE;
         let num_key_value_heads = config.num_key_value_heads;
         let head_dim = config.head_dim();
-        let mut kv_cache = std::iter::repeat_with(|| {
+        let mut kv_caches = std::iter::repeat_with(|| {
             Tensor::zeros(
-                (num_blocks, block_size, num_key_value_heads, head_dim),
+                (2, num_blocks, block_size, num_key_value_heads, head_dim),
                 dtype,
                 &device,
             )
@@ -960,8 +988,7 @@ mod tests {
         .take(config.num_hidden_layers)
         .collect::<Result<Vec<_>>>()?;
 
-        let kv_cache = kv_cache.iter_mut().collect::<Vec<_>>();
-        let kv_cache_refs: Vec<&mut Tensor> = kv_cache.iter_mut().collect();
+        let kv_caches_refs: Vec<&mut Tensor> = kv_caches.iter_mut().collect();
         
         // prefill forward pass
         let input_positions = Tensor::arange(0, tokens.len() as i64, &device)?.unsqueeze(0)?;
