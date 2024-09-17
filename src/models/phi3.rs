@@ -644,6 +644,8 @@ mod tests {
             "The History of Germany ".to_string(),
         ];
 
+        let batch_size = prompts.len();
+
         let dtype = DType::BF16;
         let device = Device::new_cuda(0).unwrap();
         let model_id = "microsoft/Phi-3-mini-4k-instruct".to_string();
@@ -694,7 +696,7 @@ mod tests {
         let mut tokenizers = std::iter::repeat_with(|| {
             candle_examples::token_output_stream::TokenOutputStream::new(tokenizer.clone())
         })
-        .take(10)
+        .take(batch_size)
         .collect::<Vec<_>>();
         println!("starting the inference loop");
         for prompt in prompts.iter() {
@@ -715,7 +717,8 @@ mod tests {
 
         let num_prefill_tokens = tokens.iter().map(|ts| ts.len()).sum::<usize>();
         let max_tokens_len = tokens.iter().map(|ts| ts.len()).max().unwrap();
-        let token_size_allocation = ((max_tokens_len + 64 + 16) / 16) * 16;
+        let token_size_allocation =
+            ((max_tokens_len + sample_len + BLOCK_SIZE) / BLOCK_SIZE) * BLOCK_SIZE;
 
         let num_layers = phi3_model.layers.len();
         let num_blocks = 100;
@@ -835,23 +838,23 @@ mod tests {
             .squeeze(0)?;
 
         assert_eq!(logits.dims().len(), 2);
-        assert_eq!(logits.dims()[0], 10);
-        assert_eq!(logits.dims()[1], 32_000);
+        assert_eq!(logits.dims()[0], batch_size);
+        assert_eq!(logits.dims()[1], 32_064);
 
         let mut sentences = prompts.clone();
 
-        (0..10).for_each(|i| {
+        (0..batch_size).for_each(|i| {
             let next_token = logits_processors[i].sample(&logits.i(i).unwrap()).unwrap();
             if let Some(t) = tokenizers[i].next_token(next_token).unwrap() {
                 sentences[i].push_str(&t);
             }
             tokens[i].push(next_token);
         });
-        token_generated += 10;
+        token_generated += batch_size;
 
         // decoding loop
-        let mut finished_sequences = Vec::with_capacity(10);
-        let mut active_indices: Vec<usize> = (0..10).collect();
+        let mut finished_sequences = Vec::with_capacity(batch_size);
+        let mut active_indices: Vec<usize> = (0..batch_size).collect();
 
         for _ in 1..sample_len {
             let num_active = active_indices.len();
@@ -967,7 +970,7 @@ mod tests {
 
         finished_sequences.extend(tokens);
 
-        for i in 0..10 {
+        for i in 0..batch_size {
             if let Some(rest) = tokenizers[i].decode_rest().unwrap() {
                 sentences[i].push_str(&rest);
             }
