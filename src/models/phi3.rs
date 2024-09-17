@@ -472,9 +472,12 @@ mod tests {
         .expect("Failed to deserialize config.json");
         let config = config.into_config();
 
-        let filenames = vec![api
-            .get("model.safetensors.index.json")
-            .expect("Failed to get model.safetensors")];
+        let filenames = vec![
+            api.get("model-00001-of-00002.safetensors")
+                .expect("Failed to get model.safetensors"),
+            api.get("model-00002-of-00002.safetensors")
+                .expect("Failed to get model.safetensors"),
+        ];
         let mut phi3_model = {
             let vb = unsafe { VarBuilder::from_mmaped_safetensors(&filenames, dtype, &device)? };
             Phi3Model::load(vb, &config, dtype, &device).expect("Failed to load the model")
@@ -657,9 +660,12 @@ mod tests {
         .expect("Failed to deserialize config.json");
         let config = config.into_config();
 
-        let filenames = vec![api
-            .get("model.safetensors.index.json")
-            .expect("Failed to get model.safetensors")];
+        let filenames = vec![
+            api.get("model-00001-of-00002.safetensors")
+                .expect("Failed to get model.safetensors"),
+            api.get("model-00002-of-00002.safetensors")
+                .expect("Failed to get model.safetensors"),
+        ];
         let mut phi3_model = {
             let vb = unsafe { VarBuilder::from_mmaped_safetensors(&filenames, dtype, &device)? };
             Phi3Model::load(vb, &config, dtype, &device).expect("Failed to load the model")
@@ -1000,9 +1006,12 @@ mod tests {
         .expect("Failed to deserialize config.json");
         let config = config.into_config();
 
-        let filenames = vec![api
-            .get("model.safetensors.index.json")
-            .expect("Failed to get model.safetensors")];
+        let filenames = vec![
+            api.get("model-00001-of-00002.safetensors")
+                .expect("Failed to get model.safetensors"),
+            api.get("model-00002-of-00002.safetensors")
+                .expect("Failed to get model.safetensors"),
+        ];
         let mut phi3_model = {
             let vb = unsafe { VarBuilder::from_mmaped_safetensors(&filenames, dtype, &device)? };
             Phi3Model::load(vb, &config, dtype, &device).expect("Failed to load the model")
