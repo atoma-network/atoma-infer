@@ -365,8 +365,6 @@ pub struct Phi3Model {
     layers: Vec<DecoderLayer>,
     norm: RmsNorm,
     lm_head: Linear,
-    device: Device,
-    dtype: DType,
 }
 
 impl Phi3Model {
