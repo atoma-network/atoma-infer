@@ -579,7 +579,7 @@ mod tests {
         for _ in 1..sample_len {
             let input = Tensor::new(&[next_token], &device)?.unsqueeze(0)?;
             let input_positions = Tensor::new(&[tokens.len() as i64 - 1], &device)?.unsqueeze(0)?;
-            let selected_token_indices = Tensor::new(&[0u32], &device)?;
+            let _selected_token_indices = Tensor::new(&[0u32], &device)?;
             let num_blocks = (tokens.len() / BLOCK_SIZE) as i64 + 1;
             let attention_metadata = FlashAttentionMetadata {
                 context_lengths: None,
@@ -1082,9 +1082,9 @@ mod tests {
         let num_prefill_tokens = tokens.len();
         let num_decoding_tokens = 0;
         let max_query_length = tokens.len();
-        let max_decoding_sequence_length = 0;
+        let _max_decoding_sequence_length = 0;
         let max_prefill_sequence_length = tokens.len();
-        let num_prefill_sequences = 1;
+        let _num_prefill_sequences = 1;
 
         let attention_metadata = FlashAttentionMetadata {
             context_lengths: Some(context_lengths),
@@ -1125,10 +1125,10 @@ mod tests {
             let input_positions = Tensor::new(&[tokens.len() as i64 - 1], &device)?.unsqueeze(0)?;
             let num_blocks = (tokens.len() / block_size) as i64 + 1;
 
-            let context_lengths = Tensor::new(&[0u32], &device)?;
+            let _context_lengths = Tensor::new(&[0u32], &device)?;
             let slot_mapping = Tensor::new(&[tokens.len() as i64 - 1], &device)?;
-            let query_start_locations = Tensor::new(&[0u32, 1], &device)?;
-            let sequence_start_locations = Tensor::new(&[0, tokens.len() as u32], &device)?;
+            let _query_start_locations = Tensor::new(&[0u32, 1], &device)?;
+            let _sequence_start_locations = Tensor::new(&[0, tokens.len() as u32], &device)?;
             let sequence_lengths = Tensor::new(&[tokens.len() as u32], &device)?;
             let block_tables = Tensor::arange(0, num_blocks, &device)?
                 .to_dtype(DType::U32)?
@@ -1136,10 +1136,10 @@ mod tests {
 
             let num_prefill_tokens = 0;
             let num_decoding_tokens = 1;
-            let max_query_length = 1;
+            let _max_query_length = 1;
             let max_decoding_sequence_length = tokens.len();
-            let max_prefill_sequence_length = 0;
-            let num_prefill_sequences = 0;
+            let _max_prefill_sequence_length = 0;
+            let _num_prefill_sequences = 0;
 
             let attention_metadata = FlashAttentionMetadata {
                 context_lengths: None,
