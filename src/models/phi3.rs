@@ -234,7 +234,8 @@ impl Attention {
 
         let query_states = query_states
             .reshape((batch_size, num_total_tokens, self.num_heads, self.head_dim))?
-            .transpose(1, 2)?;
+            .transpose(1, 2)?
+            .contiguous()?;
         let key_states = key_states
             .reshape((
                 batch_size,
@@ -242,7 +243,8 @@ impl Attention {
                 self.num_kv_heads,
                 self.head_dim,
             ))?
-            .transpose(1, 2)?;
+            .transpose(1, 2)?
+            .contiguous()?;
         let value_states = value_states.reshape((
             batch_size,
             num_total_tokens,
