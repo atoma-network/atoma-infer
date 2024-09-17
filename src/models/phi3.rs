@@ -7,7 +7,6 @@ use std::sync::Arc;
 use candle_transformers::models::with_tracing::{linear_no_bias as linear, Linear, RmsNorm};
 
 use crate::flash_attention::{FlashAttention, FlashAttentionMetadata};
-use candle_transformers::utils;
 
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct Phi3Config {
@@ -254,10 +253,10 @@ impl Attention {
 
         let query_states = self
             .rotary_emb
-            .apply_rotary_embed(&query_states, &input_positions)?;
+            .apply_rotary_embed(&query_states, input_positions)?;
         let key_states = self
             .rotary_emb
-            .apply_rotary_embed(&key_states, &input_positions)?;
+            .apply_rotary_embed(&key_states, input_positions)?;
 
         let query_states = query_states.transpose(1, 2)?.squeeze(0)?.contiguous()?;
         let key_states = key_states.transpose(1, 2)?.squeeze(0)?.contiguous()?;
@@ -366,12 +365,12 @@ pub struct Phi3Model {
     layers: Vec<DecoderLayer>,
     norm: RmsNorm,
     lm_head: Linear,
-    device: Device,
-    dtype: DType,
+    _device: Device,
+    _dtype: DType,
 }
 
 impl Phi3Model {
-    pub fn load(vb: VarBuilder, cfg: &Phi3Config, dtype: DType, device: &Device) -> Result<Self> {
+    pub fn load(vb: VarBuilder, cfg: &Phi3Config, _dtype: DType, _device: &Device) -> Result<Self> {
         let embed_tokens =
             candle_nn::embedding(cfg.vocab_size, cfg.hidden_size, vb.pp("model.embed_tokens"))?;
         let rotary_emb = Arc::new(RotaryEmbedding::new(vb.dtype(), cfg, vb.device())?);
@@ -407,7 +406,7 @@ impl Phi3Model {
         kv_caches: &[&mut Tensor],
         attention_metadata: &FlashAttentionMetadata,
     ) -> Result<Tensor> {
-        let (b_size, seq_len) = input_ids.dims2()?;
+        let (b_size, _seq_len) = input_ids.dims2()?;
         if b_size != 1 {
             candle_core::bail!(
                 "x must be of shape [1, num_total_tokens], got {:?}",
