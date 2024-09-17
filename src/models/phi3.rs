@@ -80,18 +80,33 @@ impl RotaryEmbedding {
         })
     }
 
-    pub fn apply_rotary_emb_qkv(
-        &self,
-        q: &Tensor,
-        k: &Tensor,
-        input_positions: &Tensor,
-    ) -> Result<(Tensor, Tensor)> {
-        let (_b_sz, _h, _seq_len, _n_embd) = q.dims4()?;
+    fn apply_rotary_embed(&self, x: &Tensor, input_positions: &Tensor) -> Result<Tensor> {
+        let _enter = self.span_rot.enter();
+        let (b_sz, _num_heads, num_total_tokens, _hidden_size) = x.dims4()?; // [1, num_heads, num_total_tokens, hidden_size]
+
+        if b_sz != 1 {
+            candle_core::bail!("batch size must be 1, got {}", b_sz);
+        }
+        if input_positions.dims() != [1, num_total_tokens] {
+            candle_core::bail!(
+            "index_positions must be of shape [batch_size, sequence_length] = [{}, {}], got {:?}",
+            b_sz,
+            num_total_tokens,
+            input_positions.dims()
+        );
+        }
+        if input_positions.dtype() != DType::I64 {
+            candle_core::bail!(
+                "input_positions must be of dtype i64, got {:?}",
+                input_positions.dtype()
+            );
+        }
+
+        // select input positions tokens
         let cos = self.cos.index_select(&input_positions.flatten(0, 1)?, 0)?;
         let sin = self.sin.index_select(&input_positions.flatten(0, 1)?, 0)?;
-        let q_embed = candle_nn::rotary_emb::rope(&q.contiguous()?, &cos, &sin)?;
-        let k_embed = candle_nn::rotary_emb::rope(&k.contiguous()?, &cos, &sin)?;
-        Ok((q_embed, k_embed))
+
+        candle_nn::rotary_emb::rope(x, &cos, &sin)
     }
 }
 
@@ -200,8 +215,15 @@ impl Attention {
         kv_cache: &Tensor,
         attention_metadata: &FlashAttentionMetadata,
     ) -> Result<Tensor> {
-        let (b_sz, q_len, _) = xs.dims3()?;
+        let (batch_size, num_total_tokens, _hidden_size) = xs.dims3()?;
+        if batch_size != 1 {
+            candle_core::bail!(
+                "x must be of shape [1, num_total_tokens], got {:?}",
+                x.dims()
+            );
+        }
 
+        let _enter = self.span.enter();
         let qkv = self.qkv_proj.forward(xs)?;
         let query_pos = self.num_heads * self.head_dim;
         let query_states = qkv.narrow(D::Minus1, 0, query_pos)?;
@@ -213,21 +235,30 @@ impl Attention {
         )?;
 
         let query_states = query_states
-            .reshape((b_sz, q_len, self.num_heads, self.head_dim))?
+            .reshape((batch_size, num_total_tokens, self.num_heads, self.head_dim))?
             .transpose(1, 2)?;
         let key_states = key_states
-            .reshape((b_sz, q_len, self.num_kv_heads, self.head_dim))?
+            .reshape((
+                batch_size,
+                num_total_tokens,
+                self.num_kv_heads,
+                self.head_dim,
+            ))?
             .transpose(1, 2)?;
-        let value_states = value_states
-            .reshape((b_sz, q_len, self.num_kv_heads, self.head_dim))?
-            .transpose(1, 2)?;
+        let value_states = value_states.reshape((
+            batch_size,
+            num_total_tokens,
+            self.num_kv_heads,
+            self.head_dim,
+        ))?;
 
         let (query_states, key_states) =
             self.rotary_emb
                 .apply_rotary_emb_qkv(&query_states, &key_states, input_positions)?;
 
-        let key_states = utils::repeat_kv(key_states, self.num_kv_groups)?.contiguous()?;
-        let value_states = utils::repeat_kv(value_states, self.num_kv_groups)?.contiguous()?;
+        let query_states = query_states.transpose(1, 2)?.squeeze(0)?.contiguous()?;
+        let key_states = key_states.transpose(1, 2)?.squeeze(0)?.contiguous()?;
+        let value_states = value_states.squeeze(0)?;
 
         let attn_output = self.attention.forward(
             &query_states,
@@ -237,10 +268,7 @@ impl Attention {
             attention_metadata,
         )?;
 
-        attn_output
-            .transpose(1, 2)?
-            .reshape((b_sz, q_len, ()))?
-            .apply(&self.o_proj)
+        attn_output.unsqueeze(0)?.apply(&self.o_proj)
     }
 }
 
@@ -372,24 +400,33 @@ impl Phi3Model {
         &mut self,
         input_ids: &Tensor,
         input_positions: &Tensor,
+        selected_token_indices: &Tensor,
         kv_caches: &[&mut Tensor],
         attention_metadata: &FlashAttentionMetadata,
     ) -> Result<Tensor> {
         let (b_size, seq_len) = input_ids.dims2()?;
+        if b_size != 1 {
+            candle_core::bail!(
+                "x must be of shape [1, num_total_tokens], got {:?}",
+                x.dims()
+            );
+        }
         let mut xs = self.embed_tokens.forward(input_ids)?;
         for (layer, kv_cache) in self.layers.iter_mut().zip(kv_caches.iter()) {
             xs = layer.forward(&xs, input_positions, kv_cache, attention_metadata)?
         }
         xs = self.norm.forward(&xs)?;
 
-        // Squeeze the first dimension if it's 1
-        let xs = if b_size == 1 { xs.squeeze(0)? } else { xs };
+        // // Squeeze the first dimension if it's 1
+        // let xs = if b_size == 1 { xs.squeeze(0)? } else { xs };
 
-        // Select the last token's logits
-        let logits = xs
-            .narrow(0, seq_len - 1, 1)?
-            .apply(&self.lm_head)?
-            .squeeze(0)?;
+        // // Select the last token's logits
+        // let logits = xs
+        //     .narrow(0, seq_len - 1, 1)?
+        //     .apply(&self.lm_head)?
+        //     .squeeze(0)?;
+        let xs = xs.index_select(selected_token_indices, 1)?.contiguous()?;
+        let logits = self.lm_head.forward(&x)?;
 
         logits.to_dtype(DType::F32)
     }
@@ -475,7 +512,7 @@ mod tests {
         let block_size = BLOCK_SIZE;
         let num_key_value_heads = config.num_key_value_heads;
         let head_dim = config.head_dim();
-        
+
         let mut kv_caches = std::iter::repeat_with(|| {
             Tensor::zeros(
                 (2, num_blocks, block_size, num_key_value_heads, head_dim),
@@ -485,7 +522,7 @@ mod tests {
         })
         .take(num_layers)
         .collect::<Result<Vec<_>>>()?;
-        
+
         let kv_caches_refs: Vec<&mut Tensor> = kv_caches.iter_mut().collect();
 
         // prefill forward pass
@@ -514,7 +551,13 @@ mod tests {
                 sequence_lengths: Some(Tensor::from_vec(vec![tokens.len() as u32], (1,), &device)?),
             }),
         };
-        let logits = phi3_model.forward(&input, &input_positions, &kv_caches_refs, &attention_metadata)?;
+        let logits = phi3_model.forward(
+            &input,
+            &input_positions,
+            &kv_caches_refs,
+            &Tensor::new(vec![tokens.len() as u32 - 1], &device)?,
+            &attention_metadata,
+        )?;
         let logits = logits.squeeze(0)?.squeeze(0)?;
 
         let mut next_token = logits_processor.sample(&logits)?;
@@ -548,8 +591,15 @@ mod tests {
                 num_prefill_tokens: 0,
                 num_decoding_tokens: 1,
             };
+            let selected_token_indices = Tensor::new(&[0u32], &device)?;
             let logits = phi3_model
-                .forward(&input, &input_positions, &kv_caches_refs, &attention_metadata)?
+                .forward(
+                    &input,
+                    &input_positions,
+                    &kv_caches_refs,
+                    &selected_token_indices,
+                    &attention_metadata,
+                )?
                 .squeeze(0)?
                 .squeeze(0)?;
 
@@ -663,7 +713,7 @@ mod tests {
         let block_size = BLOCK_SIZE;
         let num_key_value_heads = config.num_key_value_heads;
         let head_dim = config.head_dim();
-        
+
         let mut kv_caches = std::iter::repeat_with(|| {
             Tensor::zeros(
                 (2, num_blocks, block_size, num_key_value_heads, head_dim),
@@ -673,7 +723,7 @@ mod tests {
         })
         .take(num_layers)
         .collect::<Result<Vec<_>>>()?;
-        
+
         let kv_caches_refs: Vec<&mut Tensor> = kv_caches.iter_mut().collect();
 
         // prefill forward pass
@@ -763,10 +813,14 @@ mod tests {
             });
             result
         };
-        let selected_token_indices =
-            Tensor::from_vec(selected_token_indices, (tokens.len(),), &device)?;
         let logits = phi3_model
-            .forward(&input, &input_positions, &kv_caches_refs, &attention_metadata)?
+            .forward(
+                &input,
+                &input_positions,
+                &kv_caches_refs,
+                &selected_token_indices,
+                &attention_metadata,
+            )?
             .squeeze(0)?;
 
         assert_eq!(logits.dims().len(), 2);
@@ -869,7 +923,13 @@ mod tests {
                 num_decoding_tokens: num_active,
             };
             let logits = phi3_model
-                .forward(&input, &input_positions, &kv_caches_refs, &attention_metadata)?
+                .forward(
+                    &input,
+                    &input_positions,
+                    &kv_caches_refs,
+                    &selected_token_indices,
+                    &attention_metadata,
+                )?
                 .squeeze(0)?;
 
             let mut new_active_indices = Vec::new();
@@ -989,7 +1049,7 @@ mod tests {
         .collect::<Result<Vec<_>>>()?;
 
         let kv_caches_refs: Vec<&mut Tensor> = kv_caches.iter_mut().collect();
-        
+
         // prefill forward pass
         let input_positions = Tensor::arange(0, tokens.len() as i64, &device)?.unsqueeze(0)?;
         let input = Tensor::new(&tokens[..], &device)?.unsqueeze(0)?;
@@ -1024,8 +1084,13 @@ mod tests {
                 sequence_lengths: Some(sequence_lengths),
             }),
         };
-        let logits =
-            phi3_model.forward(&input, &input_positions, &kv_caches_refs, &attention_metadata)?;
+        let logits = phi3_model.forward(
+            &input,
+            &input_positions,
+            &kv_caches_refs,
+            &Tensor::new(vec![tokens.len() as u32 - 1], &device)?,
+            &attention_metadata,
+        )?;
         let logits = logits.squeeze(0)?.squeeze(0)?;
 
         let mut next_token = logits_processor.sample(&logits)?;
@@ -1072,7 +1137,13 @@ mod tests {
                 num_decoding_tokens,
             };
             let logits = phi3_model
-                .forward(&input, &input_positions, &kv_caches_refs, &attention_metadata)?
+                .forward(
+                    &input,
+                    &input_positions,
+                    &kv_caches_refs,
+                    &Tensor::new(&[0u32], &device)?,
+                    &attention_metadata,
+                )?
                 .squeeze(0)?
                 .squeeze(0)?;
 
