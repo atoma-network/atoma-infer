@@ -1025,7 +1025,7 @@ mod tests {
             }),
         };
         let logits =
-            phi3_model.forward(&input, &input_positions, &kv_cache_refs, &attention_metadata)?;
+            phi3_model.forward(&input, &input_positions, &kv_caches_refs, &attention_metadata)?;
         let logits = logits.squeeze(0)?.squeeze(0)?;
 
         let mut next_token = logits_processor.sample(&logits)?;
@@ -1072,7 +1072,7 @@ mod tests {
                 num_decoding_tokens,
             };
             let logits = phi3_model
-                .forward(&input, &input_positions, &kv_cache_refs, &attention_metadata)?
+                .forward(&input, &input_positions, &kv_caches_refs, &attention_metadata)?
                 .squeeze(0)?
                 .squeeze(0)?;
 
