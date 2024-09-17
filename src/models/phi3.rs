@@ -557,8 +557,8 @@ mod tests {
         let logits = phi3_model.forward(
             &input,
             &input_positions,
-            &kv_caches_refs,
             &Tensor::new(vec![tokens.len() as u32 - 1], &device)?,
+            &kv_caches_refs,
             &attention_metadata,
         )?;
         let logits = logits.squeeze(0)?.squeeze(0)?;
@@ -599,8 +599,8 @@ mod tests {
                 .forward(
                     &input,
                     &input_positions,
-                    &kv_caches_refs,
                     &selected_token_indices,
+                    &kv_caches_refs,
                     &attention_metadata,
                 )?
                 .squeeze(0)?
@@ -823,8 +823,8 @@ mod tests {
             .forward(
                 &input,
                 &input_positions,
-                &kv_caches_refs,
                 &selected_token_indices,
+                &kv_caches_refs,
                 &attention_metadata,
             )?
             .squeeze(0)?;
@@ -932,8 +932,8 @@ mod tests {
                 .forward(
                     &input,
                     &input_positions,
-                    &kv_caches_refs,
                     &selected_token_indices,
+                    &kv_caches_refs,
                     &attention_metadata,
                 )?
                 .squeeze(0)?;
@@ -1096,8 +1096,8 @@ mod tests {
         let logits = phi3_model.forward(
             &input,
             &input_positions,
-            &kv_caches_refs,
             &Tensor::new(vec![tokens.len() as u32 - 1], &device)?,
+            &kv_caches_refs,
             &attention_metadata,
         )?;
         let logits = logits.squeeze(0)?.squeeze(0)?;
@@ -1149,8 +1149,8 @@ mod tests {
                 .forward(
                     &input,
                     &input_positions,
-                    &kv_caches_refs,
                     &Tensor::new(&[0u32], &device)?,
+                    &kv_caches_refs,
                     &attention_metadata,
                 )?
                 .squeeze(0)?
