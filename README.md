@@ -86,10 +86,10 @@ All PRs for new features must include a suitable test suite.
 
 Performance improvements are particularly welcome! 
 
-1. the target bottleneck (only one per PR to avoid confusing things!)
-2. how performance is measured
-3. characteristics of the machine used (CPU, OS, GPU, etc.)
-4. performance before and after the PR
+1. The target bottleneck (only one per PR to avoid confusing things!)
+2. How performance is measured
+3. Characteristics of the machine used (CPU, OS, GPU, etc.)
+4. Performance gains in terms of speedups and memory usage (e.g. 2x speedup and 50% memory reduction).
 
 
 #### Report bugs
