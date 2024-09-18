@@ -1,4 +1,4 @@
-use candle_core::{DType, Activation, Device, Module, Result, Tensor, D};
+use candle_core::{DType, Device, Module, Result, Tensor, D};
 use candle_nn::{Activation, VarBuilder};
 use candle_transformers::models::with_tracing::{linear_no_bias, Linear, RmsNorm};
 
