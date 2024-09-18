@@ -334,15 +334,15 @@ impl DecoderLayer {
         residual + xs
     }
 }
-
+#[allow(dead_code)]
 pub struct Model {
     embed_tokens: candle_nn::Embedding,
     layers: Vec<DecoderLayer>,
     norm: RmsNorm,
     lm_head: Linear,
-    _sliding_window: Option<usize>,
-    _device: Device,
-    _dtype: DType,
+    sliding_window: Option<usize>,
+    device: Device,
+    dtype: DType,
 }
 
 impl Model {
