@@ -1,4 +1,4 @@
-use candle_core::{DType, Device, Module, Result, Tensor, D};
+use candle_core::{DType, Device, Module, Result, Tensor};
 use candle_nn::{Activation, VarBuilder};
 use candle_transformers::models::with_tracing::{linear_no_bias, Linear, RmsNorm};
 
@@ -87,10 +87,10 @@ impl Config {
         }
     }
 
-    fn head_dim(&self) -> usize {
-        self.head_dim
-            .unwrap_or(self.hidden_size / self.num_attention_heads)
-    }
+    // fn head_dim(&self) -> usize {
+    //     self.head_dim
+    //         .unwrap_or(self.hidden_size / self.num_attention_heads)
+    // }
 }
 
 #[derive(Clone, Debug)]
@@ -340,9 +340,9 @@ pub struct Model {
     layers: Vec<DecoderLayer>,
     norm: RmsNorm,
     lm_head: Linear,
-    sliding_window: Option<usize>,
-    device: Device,
-    dtype: DType,
+    _sliding_window: Option<usize>,
+    _device: Device,
+    _dtype: DType,
 }
 
 impl Model {
