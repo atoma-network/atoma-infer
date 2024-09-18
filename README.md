@@ -44,19 +44,64 @@ For more detailed instructions, please refer to our [documentation](docs/README.
 
 ## Contributing
 
-We welcome contributions from both the ML and Rust communities. Here's how you can contribute:
+### General guidance for your PR
 
-1. **Report bugs**: If you find a bug, please open an issue in our GitHub repository with a clear description and steps to reproduce.
+Under no circumstances should a single PR mix different purposes: Your
+PR is either a bug fix, a new feature, or a performance improvement,
+never a combination. Nor should you include, for example, two
+unrelated performance improvements in one PR. Please just submit
+separate PRs. The goal is to make reviewing your PR as simple as
+possible, and you should be thinking about how to compose the PR to
+minimise the burden on the reviewer.
 
-2. **Suggest enhancements**: Have ideas for improvements? Open an issue to discuss your proposal.
+Here are a few specific guidelines for the three main categories of
+PRs that we expect:
 
-3. **Submit pull requests**: Ready to contribute code? Here's the process:
-   - Fork the repository
-   - Create a new branch for your feature: `git checkout -b feature-name`
-   - Make your changes and commit them: `git commit -m 'Add some feature'`
-   - Push to the branch: `git push origin feature-name`
-   - Submit a pull request through GitHub
 
-4. **Improve documentation**: Help us enhance our documentation by fixing typos, clarifying explanations, or adding examples.
+#### The PR fixes a bug
 
-5. **Share knowledge**: Participate in discussions, answer questions, and share your expertise with the community.
+In the PR description, please clearly but briefly describe
+
+1. the bug (could be a reference to a GH issue; if it is from a
+   discussion (on Discord/email/etc. for example), please copy in the
+   relevant parts of the discussion);
+2. what turned out to the cause the bug; and
+3. how the PR fixes the bug.
+
+Wherever possible, PRs that fix bugs should include additional tests
+that (i) trigger the original bug and (ii) pass after applying the PR.
+
+
+#### The PR implements a new feature
+
+In the PR description, please clearly but briefly describe
+
+1. what the feature does
+2. the approach taken to implement it
+
+All PRs for new features must include a suitable test suite.
+
+
+#### The PR improves performance
+
+Performance improvements are particularly welcome! 
+
+1. the target bottleneck (only one per PR to avoid confusing things!)
+2. how performance is measured
+3. characteristics of the machine used (CPU, OS, GPU, etc.)
+4. performance before and after the PR
+
+
+#### Report bugs
+
+If you find a bug, please open an issue in our GitHub repository with a clear description and steps to reproduce.
+
+
+#### Documentation
+
+Help us enhance our documentation by fixing typos, clarifying explanations, or adding examples.
+
+
+#### Share knowledge
+
+Participate in discussions, answer questions, and share your expertise with the community.
