@@ -2,6 +2,8 @@ use crate::flash_attention::{FlashAttention, FlashAttentionMetadata};
 use candle::{DType, Device, Module, Result, Tensor, D};
 use candle_nn::{Activation, VarBuilder};
 use std::sync::Arc;
+use candle_transformers::models::with_tracing::{linear_no_bias as linear, Linear, RmsNorm};
+
 
 /// Mistral LLM, https://github.com/mistralai/mistral-src
 
@@ -543,4 +545,5 @@ mod tests {
         assert_eq!(output.dims(), [3, 1, 32003]);
         assert_eq!(output.to_vec2::<f32>()?, vec![vec![0.0; 32003]; 3]);
     }
+
 }
