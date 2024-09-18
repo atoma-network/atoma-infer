@@ -293,7 +293,8 @@ struct DecoderLayer {
 
 impl DecoderLayer {
     fn new(cfg: &Config, vb: VarBuilder) -> Result<Self> {
-        let self_attn = CausalSelfAttention::load(vb.pp("self_attn"), cfg, vb.dtype(), vb.device())?;
+        let self_attn =
+            CausalSelfAttention::load(vb.pp("self_attn"), cfg, vb.dtype(), vb.device())?;
         let mlp = MLP::new(cfg, vb.pp("mlp"))?;
         let input_layernorm =
             RmsNorm::new(cfg.hidden_size, cfg.rms_norm_eps, vb.pp("input_layernorm"))?;
@@ -319,7 +320,9 @@ impl DecoderLayer {
     ) -> Result<Tensor> {
         let residual = xs;
         let xs = self.input_layernorm.forward(xs)?;
-        let xs = self.self_attn.forward(&xs, input_positions, kv_cache, attention_metadata)?;
+        let xs = self
+            .self_attn
+            .forward(&xs, input_positions, kv_cache, attention_metadata)?;
         let xs = (xs + residual)?;
         let residual = &xs;
         let xs = xs.apply(&self.post_attention_layernorm)?.apply(&self.mlp)?;

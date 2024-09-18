@@ -1244,7 +1244,8 @@ mod tests {
 
         let num_prefill_tokens = tokens.iter().map(|ts| ts.len()).sum::<usize>();
         let max_tokens_len = tokens.iter().map(|ts| ts.len()).max().unwrap();
-        let token_size_allocation = ((max_tokens_len + sample_len + block_size) / block_size) * block_size;
+        let token_size_allocation =
+            ((max_tokens_len + sample_len + block_size) / block_size) * block_size;
 
         // prefill forward pass
         let input_positions = Tensor::from_vec(
