@@ -1,11 +1,12 @@
 use candle_core::{DType, Activation, Device, Module, Result, Tensor, D};
-use candle_nn::{embedding, Embedding, VarBuilder};
-use candle_transformers::models::with_tracing::{linear_no_bias as linear, Linear, RmsNorm};
-use std::f32::consts::PI;
-use std::sync::Arc;
+use candle_nn::{Activation, VarBuilder};
+use candle_transformers::models::with_tracing::{linear_no_bias, Linear, RmsNorm};
 
 use crate::flash_attention::{FlashAttention, FlashAttentionMetadata};
 
+fn default_use_flash_attn() -> bool {
+    false
+}
 
 /// Mistral LLM, https://github.com/mistralai/mistral-src
 
@@ -103,7 +104,7 @@ impl Cache {
         let head_dim = config.hidden_size / config.num_attention_heads;
         let inv_freq: Vec<_> = (0..head_dim)
             .step_by(2)
-            .map(|i| 1f32 / config.rope_theta.powf(i as f32 / head_dim as f32))
+            .map(|i| 1f32 / (config.rope_theta as f32).powf(i as f32 / head_dim as f32))
             .collect();
         let inv_freq = Tensor::from_vec(inv_freq, (head_dim / 2,), device)?.to_dtype(dtype)?;
         let t = Tensor::arange(0u32, config.max_position_embeddings as u32, device)?
@@ -326,7 +327,7 @@ impl DecoderLayer {
         let xs = self.input_layernorm.forward(xs)?;
         let xs = self
             .self_attn
-            .forward(&xs, input_positions, kv_cache, attention_metadata)?;
+            .forward(&xs, input_positions, kv_cache, &attention_metadata)?;
         let xs = (xs + residual)?;
         let residual = &xs;
         let xs = xs.apply(&self.post_attention_layernorm)?.apply(&self.mlp)?;
@@ -376,7 +377,7 @@ impl Model {
         kv_caches: &[&mut Tensor],
         attention_metadata: FlashAttentionMetadata,
     ) -> Result<Tensor> {
-        let (_b_size, seq_len) = input_ids.dims2()?;
+        let (_b_size, _seq_len) = input_ids.dims2()?;
         let mut xs = self.embed_tokens.forward(input_ids)?;
         for (layer, kv_cache) in self.layers.iter_mut().zip(kv_caches.iter()) {
             xs = layer.forward(&xs, input_positions, kv_cache, &attention_metadata)?;
@@ -387,10 +388,12 @@ impl Model {
     }
 }
 
+#[cfg(test)]
 mod tests {
     use super::*;
+    
     #[test]
-    fn test_mistral() -> Result<(), Box<dyn std::error::Error>> {
+    fn test_mistral() -> Result<()> {
         let device = Device::Cpu;
         let cfg = Config::config_7b_v0_1(true);
         let vb = VarBuilder::new(device.clone(), DType::F32);
@@ -432,7 +435,7 @@ mod tests {
     }
 
     #[test]
-    fn test_amazon_mistral_lite() -> Result<(), Box<dyn std::error::Error>> {
+    fn test_amazon_mistral_lite() -> Result<()> {
         let device = Device::Cpu;
         let cfg = Config::config_amazon_mistral_lite(true);
         let vb = VarBuilder::new(device.clone(), DType::F32);
