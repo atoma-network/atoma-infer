@@ -382,3 +382,165 @@ impl Model {
             .apply(&self.lm_head)
     }
 }
+
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_mistral() {
+        let cfg = Config::config_7b_v0_1(true);
+        let vb = VarBuilder::new(Device::Cpu, DType::F32);
+        let model = Model::new(&cfg, vb).unwrap();
+        let input_ids = Tensor::new(
+            &[
+                [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+                [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+            ],
+            &[1, 1],
+        )?;
+        let input_positions = Tensor::new(&[[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]], &[1, 10])?;
+        let selected_token_indices = Tensor::new(&[[9]], &[1, 1])?;
+
+        let mut kv_caches = vec![];
+        let attention_metadata = FlashAttentionMetadata::new(1, 1, 1);
+        let output = model
+            .forward(
+                &input_ids,
+                &input_positions,
+                &selected_token_indices,
+                &kv_caches,
+                attention_metadata,
+            )
+            .unwrap();
+        println!("{:?}", output);
+        assert_eq!(output.dims(), [1, 1, 32000]);
+        assert_eq!(output.to_vec2::<f32>()?, vec![vec![0.0; 32000]; 1]);
+    }
+
+    #[test]
+    fn test_mistral_chatml() {
+        let cfg = Config::config_chat_ml(true);
+        let vb = VarBuilder::new(Device::Cpu, DType::F32);
+        let model = Model::new(&cfg, vb).unwrap();
+        let input_ids = Tensor::new(
+            &[
+                [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+                [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+            ],
+            &[1, 1],
+        )?;
+        let input_positions = Tensor::new(&[[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]], &[1, 10])?;
+        let selected_token_indices = Tensor::new(&[[9]], &[1, 1])?;
+
+        let mut kv_caches = vec![];
+        let attention_metadata = FlashAttentionMetadata::new(1, 1, 1);
+        let output = model
+            .forward(
+                &input_ids,
+                &input_positions,
+                &selected_token_indices,
+                &kv_caches,
+                attention_metadata,
+            )
+            .unwrap();
+        println!("{:?}", output);
+        assert_eq!(output.dims(), [1, 1, 32002]);
+        assert_eq!(output.to_vec2::<f32>()?, vec![vec![0.0; 32002]; 1]);
+    }
+
+    #[test]
+    fn test_amazon_mistral_lite() {
+        let cfg = Config::config_amazon_mistral_lite(true);
+        let vb = VarBuilder::new(Device::Cpu, DType::F32);
+        let model = Model::new(&cfg, vb).unwrap();
+        let input_ids = Tensor::new(
+            &[
+                [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+                [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+            ],
+            &[1, 1],
+        )?;
+        let input_positions = Tensor::new(&[[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]], &[1, 10])?;
+        let selected_token_indices = Tensor::new(&[[9]], &[1, 1])?;
+
+        let mut kv_caches = vec![];
+        let attention_metadata = FlashAttentionMetadata::new(1, 1, 1);
+        let output = model
+            .forward(
+                &input_ids,
+                &input_positions,
+                &selected_token_indices,
+                &kv_caches,
+                attention_metadata,
+            )
+            .unwrap();
+        println!("{:?}", output);
+        assert_eq!(output.dims(), [1, 1, 32003]);
+        assert_eq!(output.to_vec2::<f32>()?, vec![vec![0.0; 32003]; 1]);
+    }
+
+    #[test]
+    fn test_amazon_mistral_lite_batch() {
+        let cfg = Config::config_amazon_mistral_lite(true);
+        let vb = VarBuilder::new(Device::Cpu, DType::F32);
+        let model = Model::new(&cfg, vb).unwrap();
+        let input_ids = Tensor::new(
+            &[
+                [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+                [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+                [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+            ],
+            &[3, 1],
+        )?;
+        let input_positions = Tensor::new(&[[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]], &[1, 10])?;
+        let selected_token_indices = Tensor::new(&[[9]], &[1, 1])?;
+
+        let mut kv_caches = vec![];
+        let attention_metadata = FlashAttentionMetadata::new(1, 1, 1);
+        let output = model
+            .forward(
+                &input_ids,
+                &input_positions,
+                &selected_token_indices,
+                &kv_caches,
+                attention_metadata,
+            )
+            .unwrap();
+        println!("{:?}", output);
+        assert_eq!(output.dims(), [3, 1, 32003]);
+        assert_eq!(output.to_vec2::<f32>()?, vec![vec![0.0; 32003]; 3]);
+    }
+    #[test]
+    fn test_amazon_mistral_lite_batch_2() {
+        let cfg = Config::config_amazon_mistral_lite(true);
+        let vb = VarBuilder::new(Device::Cpu, DType::F32);
+        let model = Model::new(&cfg, vb).unwrap();
+        let input_ids = Tensor::new(
+            &[
+                [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+                [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+                [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+            ],
+            &[3, 1],
+        )?;
+        let input_positions = Tensor::new(&[[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]], &[1, 10])?;
+        let selected_token_indices = Tensor::new(&[[9]], &[1, 1])?;
+
+        let mut kv_caches = vec![];
+        let attention_metadata = FlashAttentionMetadata::new(1, 1, 1);
+
+        let output = model
+            .forward(
+                &input_ids,
+                &input_positions,
+                &selected_token_indices,
+                &kv_caches,
+                attention_metadata,
+            )
+            .unwrap();
+
+        println!("{:?}", output);
+        assert_eq!(output.dims(), [3, 1, 32003]);
+        assert_eq!(output.to_vec2::<f32>()?, vec![vec![0.0; 32003]; 3]);
+    }
+}
