@@ -327,7 +327,7 @@ impl DecoderLayer {
         let xs = self.input_layernorm.forward(xs)?;
         let xs = self
             .self_attn
-            .forward(&xs, input_positions, kv_cache, &attention_metadata)?;
+            .forward(&xs, input_positions, kv_cache, attention_metadata)?;
         let xs = (xs + residual)?;
         let residual = &xs;
         let xs = xs.apply(&self.post_attention_layernorm)?.apply(&self.mlp)?;
