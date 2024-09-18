@@ -1,8 +1,10 @@
-use crate::flash_attention::{FlashAttention, FlashAttentionMetadata};
-use candle::{DType, Device, Module, Result, Tensor, D};
-use candle_nn::{Activation, VarBuilder};
-use std::sync::Arc;
+use candle_core::{DType, Activation, Device, Module, Result, Tensor, D};
+use candle_nn::{embedding, Embedding, VarBuilder};
 use candle_transformers::models::with_tracing::{linear_no_bias as linear, Linear, RmsNorm};
+use std::f32::consts::PI;
+use std::sync::Arc;
+
+use crate::flash_attention::{FlashAttention, FlashAttentionMetadata};
 
 
 /// Mistral LLM, https://github.com/mistralai/mistral-src
