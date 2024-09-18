@@ -6,3 +6,5 @@ pub use flash_attention::{
     FlashAttentionPrefillMetadata,
 };
 pub use models::Llama;
+pub use models::Mistral;
+
