@@ -2,5 +2,4 @@ pub mod llama;
 pub mod mistra;
 
 pub use llama::Llama;
-pub use mistra::MistralModel;
-
+pub use mistra::Mistral;

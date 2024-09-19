@@ -5,4 +5,4 @@ pub use flash_attention::{
     FlashAttention, FlashAttentionDecodingMetadata, FlashAttentionMetadata,
     FlashAttentionPrefillMetadata,
 };
-pub use models::{MistralModel, Llama};
+pub use models::{Llama, Mistral};
