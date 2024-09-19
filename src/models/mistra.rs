@@ -11,7 +11,7 @@ fn default_use_flash_attn() -> bool {
 /// Mistral LLM, https://github.com/mistralai/mistral-src
 
 #[derive(Debug, Clone, PartialEq, serde::Deserialize)]
-pub struct Config {
+pub struct MistralConfig {
     pub vocab_size: usize,
     pub hidden_size: usize,
     pub intermediate_size: usize,
@@ -28,7 +28,7 @@ pub struct Config {
     pub use_flash_attn: bool,
 }
 
-impl Config {
+impl MistralConfig {
     // https://huggingface.co/mistralai/Mistral-7B-v0.1/blob/main/config.json
     pub fn config_7b_v0_1(use_flash_attn: bool) -> Self {
         Self {
@@ -266,7 +266,7 @@ struct MLP {
 }
 
 impl MLP {
-    fn new(cfg: &Config, vb: VarBuilder) -> Result<Self> {
+    fn new(cfg: &MistralConfig, vb: VarBuilder) -> Result<Self> {
         let hidden_sz = cfg.hidden_size;
         let intermediate_sz = cfg.intermediate_size;
         let gate_proj = linear_no_bias(hidden_sz, intermediate_sz, vb.pp("gate_proj"))?;
@@ -297,7 +297,7 @@ struct DecoderLayer {
 }
 
 impl DecoderLayer {
-    fn new(cfg: &Config, vb: VarBuilder) -> Result<Self> {
+    fn new(cfg: &MistralConfig, vb: VarBuilder) -> Result<Self> {
         let self_attn =
             CausalSelfAttention::load(vb.pp("self_attn"), cfg, vb.dtype(), vb.device())?;
         let mlp = MLP::new(cfg, vb.pp("mlp"))?;
@@ -335,7 +335,7 @@ impl DecoderLayer {
     }
 }
 #[allow(dead_code)]
-pub struct Model {
+pub struct MistralModel {
     embed_tokens: candle_nn::Embedding,
     layers: Vec<DecoderLayer>,
     norm: RmsNorm,
@@ -345,8 +345,8 @@ pub struct Model {
     dtype: DType,
 }
 
-impl Model {
-    pub fn new(cfg: &Config, vb: VarBuilder) -> Result<Self> {
+impl MistralModel {
+    pub fn new(cfg: &MistralConfig, vb: VarBuilder) -> Result<Self> {
         let vb_m = vb.pp("model");
         let embed_tokens =
             candle_nn::embedding(cfg.vocab_size, cfg.hidden_size, vb_m.pp("embed_tokens"))?;
@@ -429,14 +429,14 @@ mod tests {
             .expect("Failed to get model.safetensors")];
         let mut llama_model = {
             let vb = unsafe { VarBuilder::from_mmaped_safetensors(&filenames, dtype, &device)? };
-            Mistral::load(vb, &config, dtype, &device).expect("Failed to load the model")
+            MistralModel::load(vb, &config, dtype, &device).expect("Failed to load the model")
         };
         let tokenizer =
             Tokenizer::from_file(tokenizer_filename).expect("Failed to load the tokenizer");
         let eos_token_id = config
             .eos_token_id
             .clone()
-            .or_else(|| tokenizer.token_to_id(EOS_TOKEN).map(LlamaEosToks::Single));
+            .or_else(|| tokenizer.token_to_id(EOS_TOKEN).map(MistralEosToks::Single));
 
         let mut tokens = tokenizer
             .encode(prompt.clone(), true)
@@ -614,7 +614,7 @@ mod tests {
             .expect("Failed to get model.safetensors")];
         let mut mistral_model = {
             let vb = unsafe { VarBuilder::from_mmaped_safetensors(&filenames, dtype, &device)? };
-            Mistral::load(vb, &config, dtype, &device).expect("Failed to load the model")
+            MistralModel::load(vb, &config, dtype, &device).expect("Failed to load the model")
         };
         let tokenizer =
             Tokenizer::from_file(tokenizer_filename).expect("Failed to load the tokenizer");
@@ -639,13 +639,13 @@ mod tests {
             LogitsProcessor::from_sampling(42, sampling)
         };
 
-        let sample_len = 512;
+        let sample_len = 1024;
         let start_gen = std::time::Instant::now();
         let mut token_generated = 0;
 
         // kv cache
         let num_blocks = 100;
-        let block_size = 16;
+        let block_size = 64;
         let num_key_value_heads = config.num_key_value_heads;
         let head_dim = config.hidden_size / config.num_attention_heads;
         let mut kv_cache = std::iter::repeat_with(|| {
@@ -670,7 +670,9 @@ mod tests {
         let sequence_start_locations =
             Tensor::from_vec(vec![0, tokens.len() as u32], (2,), &device)?;
         let sequence_lengths = Tensor::from_vec(vec![tokens.len() as u32], (1,), &device)?;
-        let block_tables = Tensor::new::<&[u32; 0]>(&[], &device)?;
+        let block_tables = Tensor::arange(0, num_blocks, &device)?
+            .to_dtype(DType::U32)?
+            .reshape((1, num_blocks as usize))?;
 
         let num_prefill_tokens = tokens.len();
         let num_decoding_tokens = 0;
@@ -721,7 +723,11 @@ mod tests {
             let num_blocks = (tokens.len() / block_size) as i64 + 1;
 
             let context_lengths = Tensor::new(&[0u32], &device)?;
-            let slot_mapping = Tensor::new(&[tokens.len() as i64 - 1], &device)?;
+            let slot_mapping = Tensor::arange(
+                (99 * block_size) as i64,
+                (99 * block_size) as i64 + (tokens.len() % block_size) as i64,
+                &device,
+            )?;
             let query_start_locations = Tensor::new(&[0u32, 1], &device)?;
             let sequence_start_locations = Tensor::new(&[0, tokens.len() as u32], &device)?;
             let sequence_lengths = Tensor::new(&[tokens.len() as u32], &device)?;
@@ -768,10 +774,10 @@ mod tests {
             tokens.push(next_token);
 
             match eos_token_id {
-                Some(LlamaEosToks::Single(eos_tok_id)) if next_token == eos_tok_id => {
+                Some(MistralEosToks::Single(eos_tok_id)) if next_token == eos_tok_id => {
                     break;
                 }
-                Some(LlamaEosToks::Multiple(ref eos_ids)) if eos_ids.contains(&next_token) => {
+                Some(MistralEosToks::Multiple(ref eos_ids)) if eos_ids.contains(&next_token) => {
                     break;
                 }
                 _ => (),
@@ -814,7 +820,7 @@ mod tests {
             .get("tokenizer.json")
             .expect("Failed to get tokenizer.json");
         let config_filename = api.get("config.json").expect("Failed to get config.json");
-        let config: LlamaConfig = serde_json::from_slice(
+        let config: MistralConfig = serde_json::from_slice(
             &std::fs::read(config_filename).expect("Failed to read config.json"),
         )
         .expect("Failed to deserialize config.json");
@@ -827,7 +833,7 @@ mod tests {
             api.get("model-00003-of-00003.safetensors")
                 .expect("Failed to get model.safetensors"),
         ];
-        let mut llama_model = {
+        let mut mistral_model = {
             let vb = unsafe { VarBuilder::from_mmaped_safetensors(&filenames, dtype, &device)? };
             Mistral::load(vb, &config, dtype, &device).expect("Failed to load the model")
         };
@@ -836,7 +842,7 @@ mod tests {
         let eos_token_id = config
             .eos_token_id
             .clone()
-            .or_else(|| tokenizer.token_to_id(EOS_TOKEN).map(LlamaEosToks::Single));
+            .or_else(|| tokenizer.token_to_id(EOS_TOKEN).map(MistralEosToks::Single));
 
         let mut tokens = tokenizer
             .encode(prompt.clone(), true)
@@ -918,7 +924,7 @@ mod tests {
             false,
         )
         .expect("Failed to create `FlashAttentionMetadata` instance");
-        let logits = llama_model.forward(
+        let logits = mistral_model.forward(
             &input,
             &input_positions,
             &Tensor::new(vec![tokens.len() as u32 - 1], &device)?,
@@ -1008,10 +1014,10 @@ mod tests {
             tokens.push(next_token);
 
             match eos_token_id {
-                Some(LlamaEosToks::Single(eos_tok_id)) if next_token == eos_tok_id => {
+                Some(MistralEosToks::Single(eos_tok_id)) if next_token == eos_tok_id => {
                     break;
                 }
-                Some(LlamaEosToks::Multiple(ref eos_ids)) if eos_ids.contains(&next_token) => {
+                Some(MistralEosToks::Multiple(ref eos_ids)) if eos_ids.contains(&next_token) => {
                     break;
                 }
                 _ => (),
@@ -1069,7 +1075,7 @@ mod tests {
             .get("tokenizer.json")
             .expect("Failed to get tokenizer.json");
         let config_filename = api.get("config.json").expect("Failed to get config.json");
-        let config: LlamaConfig = serde_json::from_slice(
+        let config: MistralConfig = serde_json::from_slice(
             &std::fs::read(config_filename).expect("Failed to read config.json"),
         )
         .expect("Failed to deserialize config.json");
@@ -1083,7 +1089,7 @@ mod tests {
             api.get("model-00003-of-00003.safetensors")
                 .expect("Failed to get model.safetensors"),
         ];
-        let mut llama_model = {
+        let mut mistral_model = {
             let vb = unsafe { VarBuilder::from_mmaped_safetensors(&filenames, dtype, &device)? };
             Mistral::load(vb, &config, dtype, &device).expect("Failed to load the model")
         };
@@ -1092,7 +1098,7 @@ mod tests {
         let eos_token_id = config
             .eos_token_id
             .clone()
-            .or_else(|| tokenizer.token_to_id(EOS_TOKEN).map(LlamaEosToks::Single));
+            .or_else(|| tokenizer.token_to_id(EOS_TOKEN).map(MistralEosToks::Single));
 
         let mut tokens = prompts
             .iter()
@@ -1238,7 +1244,7 @@ mod tests {
         };
         let selected_token_indices =
             Tensor::from_vec(selected_token_indices, (tokens.len(),), &device)?;
-        let logits = llama_model
+        let logits = mistral_model
             .forward(
                 &input,
                 &input_positions,
@@ -1374,14 +1380,14 @@ mod tests {
                 tokens[i].push(next_token);
 
                 match eos_token_id {
-                    Some(LlamaEosToks::Single(eos_tok_id)) => {
+                    Some(MistralEosToks::Single(eos_tok_id)) => {
                         if next_token != eos_tok_id {
                             new_active_indices.push(i);
                         } else {
                             finished_sequences.push(tokens[i].clone());
                         }
                     }
-                    Some(LlamaEosToks::Multiple(ref eos_ids)) => {
+                    Some(MistralEosToks::Multiple(ref eos_ids)) => {
                         if eos_ids.contains(&next_token) {
                             finished_sequences.push(tokens[i].clone());
                         } else {
