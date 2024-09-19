@@ -1,13 +1,9 @@
 use crate::flash_attention::{FlashAttention, FlashAttentionMetadata};
 use candle_core::{DType, Device, Module, Result, Tensor};
-use candle_nn::{Activation, VarBuilder};
+use candle_nn::{embedding, Embedding, Activation, VarBuilder};
 
-use crate::models::with_tracing::{linear_no_bias, Linear, RmsNorm};
 /// Mistral LLM, https://github.com/mistralai/mistral-src
-use candle::{DType, Device, Module, Result, Tensor, D};
-use candle_nn::{Activation, VarBuilder};
-use candle_transformers::models::rope::RotaryEmbedding;
-use candle_transformers::models::with_tracing::{linear_no_bias, Linear, RmsNorm};
+use candle_transformers::models::with_tracing::{linear_no_bias as linear, Linear, RmsNorm};
 use std::sync::Arc;
 
 const DEFAULT_MAX_SEQ_LEN: usize = 4096;
@@ -20,6 +16,7 @@ fn default_use_flash_attn() -> bool {
 pub enum MistralRopeType {
     #[serde(rename = "mistral")]
     Mistral,
+    #[default]
     #[serde(rename = "default")]
     Default,
 }
@@ -575,23 +572,16 @@ impl Default for MistralConfig {
 
 mod tests {
     use super::*;
+    use crate::flash_attention::{FlashAttentionDecodingMetadata, FlashAttentionPrefillMetadata};
     use candle_core::IndexOp;
-    use candle_core::VarBuilder;
-    use candle_core::{DType, Device};
-    use candle_nn::VarBuilder;
     use candle_transformers::generation::{LogitsProcessor, Sampling};
-    use candle_transformers::models::mistral::FlashAttentionDecodingMetadata;
-    use candle_transformers::models::mistral::FlashAttentionMetadata;
-    use candle_transformers::models::mistral::FlashAttentionMetadata;
-    use candle_transformers::models::mistral::FlashAttentionPrefillMetadata;
-    use candle_transformers::models::mistral::Mistral;
-    use candle_transformers::models::mistral::MistralConfig;
-    use candle_transformers::models::mistral::MistralEosToks;
     use hf_hub::{api::sync::Api, Repo, RepoType};
     use rand::Rng;
     use serial_test::serial;
     use std::io::Write;
     use tokenizers::Tokenizer;
+
+    const EOS_TOKEN: &str = "</s>";
 
     #[test]
     fn test_mistral_model() -> Result<()> {
