@@ -852,15 +852,14 @@ mod tests {
         });
         token_generated += batch_size;
 
-        // decoding loop
         let mut finished_sequences = Vec::with_capacity(batch_size);
         let mut active_indices: Vec<usize> = (0..batch_size).collect();
 
         // round division
-        // decoding loop
         let total_num_blocks_per_sequence =
             ((token_size_allocation + block_size - 1) / block_size) as i64;
 
+        // decoding loop
         for _ in 1..sample_len {
             let num_active = active_indices.len();
             if num_active == 0 {
