@@ -34,11 +34,12 @@ This project leverages [Candle](https://github.com/huggingface/candle), HuggingF
 ## Getting Started
 
 1. Fork and star the repository.
-2. Clone your forked repository: `git clone https://github.com/your-username/atoma-paged-attention.git`
+2. Clone your forked repository: `git clone https://github.com/your-username/atoma-node-inference.git`
 3. Install Rust: Follow the instructions at [https://www.rust-lang.org/tools/install](https://www.rust-lang.org/tools/install)
-4. Navigate to the project directory: `cd atoma-paged-attention`
-5. Build the project: `cargo build --release`
-6. Run tests: `cargo test`
+4. Navigate to the project directory: `cd atoma-node-inference`
+5. Initialize the git submodules: `git submodule init` and then `git pull --recurse-submodules`
+6. Build the project: `cargo build --release`
+7. Run tests: `cargo test`
 
 For more detailed instructions, please refer to our [documentation](docs/README.md).
 
