@@ -904,8 +904,9 @@ mod tests {
                 .iter()
                 .zip(num_blocks_per_sequence.iter())
                 .flat_map(|(i, num_blocks)| {
-                    let mut range = ((*i as u32 * max_num_blocks as u32)
-                        ..((*i as u32 * max_num_blocks as u32) + *num_blocks as u32))
+                    let mut range = ((*i as u32 * total_num_blocks_per_sequence as u32)
+                        ..((*i as u32 * total_num_blocks_per_sequence as u32)
+                            + *num_blocks as u32))
                         .collect::<Vec<_>>();
                     range.extend([0u32].repeat(max_num_blocks - *num_blocks as usize)); // pad to max_num_blocks
                     range
