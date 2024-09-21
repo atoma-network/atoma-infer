@@ -15,7 +15,7 @@ help = { workspace = true }
 
 [build-dependencies]
 anyhow = { workspace = true, features = ["backtrace"] }
-bindgen_cuda = { worskpace = true }
+bindgen_cuda = { workspace = true }
 
 [dev-dependencies]
 anyhow = { workspace = true, features = ["backtrace"] }
