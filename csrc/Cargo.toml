@@ -2,22 +2,22 @@
 name = "csrc"
 version = "0.1.0"
 edition = "2021"
-description = "Flash and paged attention kernels for Atoma"
+description = "Flash attention 2 kernels, with paged attention enabled"
 categories = ["science"]
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-candle-core = { version = "0.6.0", features = ["cuda"] }
-cuda-runtime-sys = "0.3.0-alpha.1"
-cuda-sys = "0.2.0"
-half = { version = "2.4.1", features = ["num-traits"] }
-help = { path = "../help" }
+candle-core = { workspace = true, features = ["cuda"] }
+cuda-runtime-sys = { workspace = true }
+cuda-sys = { workspace = true }
+half = { workspace = true, features = ["num-traits"] }
+help = { workspace = true }
 
 [build-dependencies]
-anyhow = { version = "1", features = ["backtrace"] }
-bindgen_cuda = "0.1.5"
+anyhow = { workspace = true, features = ["backtrace"] }
+bindgen_cuda = { worskpace = true }
 
 [dev-dependencies]
-anyhow = { version = "1", features = ["backtrace"] }
-candle-nn = { version = "0.6.0", features = ["cuda"] }
-serial_test = "3.1.1"
+anyhow = { workspace = true, features = ["backtrace"] }
+candle-nn = { workspace = true, features = ["cuda"] }
+serial_test = { workspace = true }

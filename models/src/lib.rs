@@ -1,8 +1,8 @@
 pub mod flash_attention;
-pub mod models;
+pub mod llama;
 
 pub use flash_attention::{
     FlashAttention, FlashAttentionDecodingMetadata, FlashAttentionMetadata,
     FlashAttentionPrefillMetadata,
 };
-pub use models::Llama;
+pub use llama::Llama;
