@@ -477,7 +477,7 @@ mod tests {
             api.get("model-00002-of-00003.safetensors")
                 .expect("Failed to get model.safetensors"),
         ];
-        let mut phi3_model = {
+        let mut mistral_model = {
             let vb = unsafe { VarBuilder::from_mmaped_safetensors(&filenames, dtype, &device)? };
             MistralModel::load(vb, &config, dtype, &device).expect("Failed to load the model")
         };
@@ -509,7 +509,7 @@ mod tests {
         let start_gen = std::time::Instant::now();
         let mut token_generated = 0;
 
-        let num_layers = phi3_model.layers.len();
+        let num_layers = mistral_model.layers.len();
         let num_blocks = 100;
         let block_size = BLOCK_SIZE;
         let num_key_value_heads = config.num_key_value_heads;
@@ -824,7 +824,7 @@ mod tests {
         };
         let selected_token_indices =
             Tensor::from_vec(selected_token_indices, (tokens.len(),), &device)?;
-        let logits = phi3_model
+        let logits = mistral_model
             .forward(
                 &input,
                 &input_positions,
@@ -938,7 +938,7 @@ mod tests {
                 num_prefill_tokens: 0,
                 num_decoding_tokens: num_active,
             };
-            let logits = phi3_model
+            let logits = mistral_model
                 .forward(
                     &input,
                     &input_positions,
@@ -1010,7 +1010,7 @@ mod tests {
             .get("tokenizer.json")
             .expect("Failed to get tokenizer.json");
         let config_filename = api.get("config.json").expect("Failed to get config.json");
-        let config: Phi3Config = serde_json::from_slice(
+        let config: MistralConfig = serde_json::from_slice(
             &std::fs::read(config_filename).expect("Failed to read config.json"),
         )
         .expect("Failed to deserialize config.json");
@@ -1103,7 +1103,7 @@ mod tests {
                 sequence_lengths: Some(sequence_lengths),
             }),
         };
-        let logits = phi3_model.forward(
+        let logits = mistral_model.forward(
             &input,
             &input_positions,
             &Tensor::new(vec![tokens.len() as u32 - 1], &device)?,
