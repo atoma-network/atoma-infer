@@ -454,7 +454,7 @@ mod tests {
 
         let dtype = DType::BF16;
         let device = Device::new_cuda(0).unwrap();
-        let model_id = "microsoft/Phi-3-mini-4k-instruct".to_string();
+        let model_id = "mistralai/Mistral-7B-Instruct-v0.3".to_string();
         let revision = "main".to_string();
         let api = Api::new().expect("Failed to create the HF API");
 
@@ -472,9 +472,9 @@ mod tests {
         let config = config.into_config();
 
         let filenames = vec![
-            api.get("model-00001-of-00002.safetensors")
+            api.get("model-00001-of-00003.safetensors")
                 .expect("Failed to get model.safetensors"),
-            api.get("model-00002-of-00002.safetensors")
+            api.get("model-00002-of-00003.safetensors")
                 .expect("Failed to get model.safetensors"),
         ];
         let mut phi3_model = {
@@ -644,7 +644,8 @@ mod tests {
 
         let dtype = DType::BF16;
         let device = Device::new_cuda(0).unwrap();
-        let model_id = "mistralai/Mistral-7B-v0.1".to_string();
+
+        let model_id = "mistralai/Mistral-7B-Instruct-v0.3".to_string();
         let revision = "main".to_string();
         let api = Api::new().expect("Failed to create the HF API");
 
@@ -655,19 +656,19 @@ mod tests {
             .get("tokenizer.json")
             .expect("Failed to get tokenizer.json");
         let config_filename = api.get("config.json").expect("Failed to get config.json");
-        let config: Phi3Config = serde_json::from_slice(
+        let config: MistralConfig = serde_json::from_slice(
             &std::fs::read(config_filename).expect("Failed to read config.json"),
         )
         .expect("Failed to deserialize config.json");
         let config = config.into_config();
 
         let filenames = vec![
-            api.get("model-00001-of-00002.safetensors")
+            api.get("model-00001-of-00003.safetensors")
                 .expect("Failed to get model.safetensors"),
-            api.get("model-00002-of-00002.safetensors")
+            api.get("model-00002-of-00003.safetensors")
                 .expect("Failed to get model.safetensors"),
         ];
-        let mut phi3_model = {
+        let mut mistral_model = {
             let vb = unsafe { VarBuilder::from_mmaped_safetensors(&filenames, dtype, &device)? };
             MistralModel::load(vb, &config, dtype, &device).expect("Failed to load the model")
         };
@@ -716,7 +717,7 @@ mod tests {
         let token_size_allocation =
             ((max_tokens_len + sample_len + BLOCK_SIZE) / BLOCK_SIZE) * BLOCK_SIZE;
 
-        let num_layers = phi3_model.layers.len();
+        let num_layers = mistral_model.layers.len();
         let num_blocks = 100;
         let block_size = BLOCK_SIZE;
         let num_key_value_heads = config.num_key_value_heads;
@@ -998,7 +999,7 @@ mod tests {
 
         let dtype = DType::BF16;
         let device = Device::new_cuda(0).unwrap();
-        let model_id = "mistralai/Mistral-7B-v0.1".to_string();
+        let model_id = "mistralai/Mistral-7B-Instruct-v0.3".to_string();
         let revision = "main".to_string();
         let api = Api::new().expect("Failed to create the HF API");
 
@@ -1016,12 +1017,12 @@ mod tests {
         let config = config.into_config();
 
         let filenames = vec![
-            api.get("model-00001-of-00002.safetensors")
+            api.get("model-00001-of-00003.safetensors")
                 .expect("Failed to get model.safetensors"),
-            api.get("model-00002-of-00002.safetensors")
+            api.get("model-00002-of-00003.safetensors")
                 .expect("Failed to get model.safetensors"),
         ];
-        let mut phi3_model = {
+        let mut mistral_model = {
             let vb = unsafe { VarBuilder::from_mmaped_safetensors(&filenames, dtype, &device)? };
             MistralModel::load(vb, &config, dtype, &device).expect("Failed to load the model")
         };
@@ -1154,7 +1155,7 @@ mod tests {
                 num_prefill_tokens,
                 num_decoding_tokens,
             };
-            let logits = phi3_model
+            let logits = mistral_model
                 .forward(
                     &input,
                     &input_positions,
