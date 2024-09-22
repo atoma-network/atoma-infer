@@ -1,6 +1,6 @@
 workspace = { members = ["csrc"] }
 [package]
-name = "atoma-paged-attention"
+name = "atoma-node-inference"
 version = "0.1.0"
 edition = "2021"
 
