@@ -148,7 +148,7 @@ impl FlashAttentionMetadata {
 ///
 /// It encapsulates the flash attention algorithm for fast attention computation.
 /// It is further compatible with the paged attention algorithm, including
-/// cache and memory management, using a block pagination method.
+/// cache and memory management, using a block pagination method.
 ///
 /// It supports both prefill and decode generation.
 ///

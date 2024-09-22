@@ -6,3 +6,4 @@ pub use flash_attention::{
     FlashAttentionPrefillMetadata,
 };
 pub use llama::Llama;
+pub use phi3::Phi3Model as Phi3;
