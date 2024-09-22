@@ -632,6 +632,7 @@ mod tests {
         Ok(())
     }
 
+    //  cargo test test_mistral_model_batch -- --exact
     #[test]
     #[serial]
     fn test_mistral_model_batch() -> Result<()> {
