@@ -1,26 +1,31 @@
-workspace = { members = ["csrc"] }
-[package]
-name = "atoma-node-inference"
+[workspace]
+resolver = "2"
+
+members = [
+    "csrc",
+    "models",
+]
+
+[workspace.package]
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
-[dependencies]
-candle-core = { version = "0.6.0", features = ["cuda"] }
-candle-nn = { version = "0.6.0", features = ["cuda"] }
-candle-transformers = { version = "0.6.0", features = ["cuda"] }
+[workspace.dependencies]
+anyhow = "1.0.89"
+bindgen_cuda = "0.1.5"
+candle-core = "0.6.0"
+candle-nn = "0.6.0"
+candle-transformers = "0.6.0"
+candle-examples = "0.6.0"
 csrc = { path = "csrc" }
-half = { version = "2.4.1", features = ["num-traits"] }
+cuda-runtime-sys = "0.3.0-alpha.1"
+cuda-sys = "0.2.0"
+half = "2.4.1"
 help = { path = "help" }
-serde = { version = "1.0.204", features = ["derive"] }
-serde_json = "1.0.120"
-tracing = "0.1.40"
-
-[dev-dependencies]
-candle-examples = { version = "0.6.0", features = ["cuda"] }
 hf-hub = "0.3.2"
 rand = "0.8.5"
+serde = "1.0.204"
 serde_json = "1.0.120"
 serial_test = "3.1.1"
 tokenizers = "0.19.1"
+tracing = "0.1.40"

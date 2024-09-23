@@ -1,0 +1,27 @@
+[package]
+name = "models"
+version.workspace = true
+edition = "2021"
+description = "Large language models library, with fast and efficient memory management attention"
+categories = ["science"]
+license = "MIT OR Apache-2.0"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+candle-core = { workspace = true, features = ["cuda"] }
+candle-nn = { workspace = true, features = ["cuda"] }
+candle-transformers = { workspace = true, features = ["cuda"] }
+csrc = { workspace = true }
+half = { workspace = true, features = ["num-traits"] }
+help = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+candle-examples = { workspace = true, features = ["cuda"] }
+hf-hub = { workspace = true }
+rand = { workspace = true }
+serde_json = { workspace = true }
+tokenizers = { workspace = true }
