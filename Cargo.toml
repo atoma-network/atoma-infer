@@ -1,6 +1,8 @@
+[workspace.metadata.crane]
+name = "atoma-node-inference"
+
 [workspace]
 resolver = "2"
-
 members = [
     "csrc",
     "models",
