@@ -31,6 +31,23 @@
         "type": "github"
       }
     },
+    "cutlass": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1720626922,
+        "narHash": "sha256-fUGUVvRFSqo36x/6oP0g1tixUMoZwvMHc9BX5MPmjlQ=",
+        "owner": "NVIDIA",
+        "repo": "cutlass",
+        "rev": "56b46e2d13875b46b8f6a03f9f5ac91e2bfdc01a",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NVIDIA",
+        "repo": "cutlass",
+        "rev": "56b46e2d13875b46b8f6a03f9f5ac91e2bfdc01a",
+        "type": "github"
+      }
+    },
     "fenix": {
       "inputs": {
         "nixpkgs": [
@@ -90,6 +107,7 @@
       "inputs": {
         "advisory-db": "advisory-db",
         "crane": "crane",
+        "cutlass": "cutlass",
         "fenix": "fenix",
         "flake-utils": "flake-utils",
         "nixpkgs": "nixpkgs"

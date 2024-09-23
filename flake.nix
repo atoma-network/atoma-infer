@@ -18,9 +18,14 @@
       url = "github:rustsec/advisory-db";
       flake = false;
     };
+
+    cutlass = {
+      url = "github:NVIDIA/cutlass/56b46e2d13875b46b8f6a03f9f5ac91e2bfdc01a";
+      flake = false;
+    };
   };
 
-  outputs = { self, nixpkgs, crane, fenix, flake-utils, advisory-db, ... }:
+  outputs = { self, nixpkgs, crane, fenix, flake-utils, advisory-db, cutlass, ... }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = import nixpkgs {
@@ -34,12 +39,17 @@
         inherit (pkgs) lib;
 
         craneLib = crane.mkLib pkgs;
-        src = ./.;
+        src = craneLib.cleanCargoSource ./.;
 
         # Common arguments can be set here to avoid repeating them later
         commonArgs = {
           inherit src;
           strictDeps = true;
+
+          preBuildPhase = ''
+            mkdir -p csrc/cutlass
+            cp -r ${cutlass}/* csrc/cutlass/
+          '';
 
           buildInputs = with pkgs; [
             # Add additional build inputs here
@@ -95,15 +105,15 @@
           doCheck = false;
         };
 
-        # fileSetForCrate = crate: lib.fileset.toSource {
-        #   root = ./.;
-        #   fileset = lib.fileset.unions [
-        #     ./Cargo.toml
-        #     ./Cargo.lock
-        #     ./csrc/cutlass
-        #     crate
-        #   ];
-        # };
+        fileSetForCrate = crate: lib.fileset.toSource {
+          root = ./.;
+          fileset = lib.fileset.unions [
+            ./Cargo.toml
+            ./Cargo.lock
+            ./help
+            crate
+          ];
+        };
 
         # Build the top-level crates of the workspace as individual derivations.
         # This allows consumers to only depend on (and build) only what they need.
@@ -112,12 +122,12 @@
         csrc = craneLib.buildPackage (individualCrateArgs // {
           pname = "csrc";
           cargoExtraArgs = "-p csrc";
-          # src = fileSetForCrate ./csrc;
+          src = fileSetForCrate ./csrc;
         });
         models = craneLib.buildPackage (individualCrateArgs // {
           pname = "models";
           cargoExtraArgs = "-p models";
-          # src = fileSetForCrate ./models;
+          src = fileSetForCrate ./models;
         });
       in
       {
