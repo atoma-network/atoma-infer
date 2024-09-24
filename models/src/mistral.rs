@@ -447,8 +447,6 @@ mod tests {
 
     #[test]
     #[serial]
-
-    //  cargo test test_mistral_model -- --exact
     fn test_mistral_model() -> Result<()> {
         let prompt = "The History of France ".to_string();
 
