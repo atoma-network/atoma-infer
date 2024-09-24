@@ -119,10 +119,10 @@ impl ErrString for ValidationErrorKind {
             ValidationErrorKind::FalseSchema => "Everything is invalid for false schema".into(),
             ValidationErrorKind::FileNotFound {
                 error,
-            } => format!("If the referenced file is not found during ref resolution: err: {error:?}"),
+            } => format!("The referenced file is not found during ref resolution: err: {error:?}"),
             ValidationErrorKind::Format {
                 format,
-            } => format!("When the input doesn’t match to the specified format: {format}"),
+            } => format!("The input doesn’t match to the specified format: {format}"),
             ValidationErrorKind::FromUtf8 {
                 error,
             } => format!("May happen in contentEncoding validation if base64 encoded data is invalid: err: {error:?}"),
@@ -134,7 +134,7 @@ impl ErrString for ValidationErrorKind {
             } => format!("May happen during ref resolution when remote document is not a valid JSON: err: {error:?}"),
             ValidationErrorKind::InvalidReference {
                 reference,
-            } => format!("reference value is not valid: {reference}"),
+            } => format!("Reference value is not valid: {reference}"),
             ValidationErrorKind::InvalidURL {
                 error,
             } => format!("Invalid URL, e.g. invalid port number or IP address: err: {error:?}"),
