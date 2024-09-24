@@ -252,7 +252,8 @@ pub mod json_schema_tests {
         let reader = BufReader::new(schema_file);
         let schema: serde_json::Value =
             serde_json::from_reader(reader).expect("failed to read request schema");
-        let validator = jsonschema::draft7::new(&schema).expect("failed to create validator from request schema");
+        let validator = jsonschema::draft7::new(&schema)
+            .expect("failed to create validator from request schema");
         let request = serde_json::json!(RequestBody::control());
         assert!(
             validate_with_schema(validator, request).is_none(),
