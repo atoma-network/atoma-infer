@@ -6,7 +6,7 @@ use std::{
 #[cfg(test)]
 mod llama;
 
-use atoma_paged_attention::FlashAttentionMetadata;
+use models::FlashAttentionMetadata;
 use candle_core::{DType, Device, Tensor};
 use rand::Rng;
 use tokio::sync::mpsc;

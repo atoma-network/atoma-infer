@@ -4,7 +4,7 @@ use std::{
     sync::Arc,
 };
 
-use atoma_paged_attention::flash_attention::FlashAttentionMetadata;
+use models::flash_attention::FlashAttentionMetadata;
 use candle_core::{DType, Device, IndexOp, Tensor};
 use futures::stream::FuturesUnordered;
 use thiserror::Error;
