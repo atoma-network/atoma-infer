@@ -482,6 +482,8 @@ mod tests {
                 .expect("Failed to get model.safetensors"),
             api.get("model-00002-of-00003.safetensors")
                 .expect("Failed to get model.safetensors"),
+                api.get("model-00003-of-00003.safetensors")
+                .expect("Failed to get model.safetensors")
         ];
         let mut mistral_model = {
             let vb = unsafe { VarBuilder::from_mmaped_safetensors(&filenames, dtype, &device)? };
@@ -683,6 +685,8 @@ mod tests {
                 .expect("Failed to get model.safetensors"),
             api.get("model-00002-of-00003.safetensors")
                 .expect("Failed to get model.safetensors"),
+            api.get("model-00003-of-00003.safetensors")
+                .expect("Failed to get model.safetensors")
         ];
         let mut mistral_model = {
             let vb = unsafe { VarBuilder::from_mmaped_safetensors(&filenames, dtype, &device)? };
@@ -1047,6 +1051,8 @@ mod tests {
                 .expect("Failed to get model.safetensors"),
             api.get("model-00002-of-00003.safetensors")
                 .expect("Failed to get model.safetensors"),
+            api.get("model-00003-of-00003.safetensors")
+                .expect("Failed to get model.safetensors")
         ];
         let mut mistral_model = {
             let vb = unsafe { VarBuilder::from_mmaped_safetensors(&filenames, dtype, &device)? };
