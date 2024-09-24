@@ -6,7 +6,6 @@ edition.workspace = true
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-models.workspace = true
 candle-core = { version = "0.6.0", features = ["cuda"] }
 candle-nn = { version = "0.6.0", features = ["cuda"] }
 candle-transformers = { version = "0.6.0", features = ["cuda"] }
@@ -15,6 +14,7 @@ hf-hub.workspace = true
 indexmap.workspace = true
 metrics.workspace = true
 metrics-exporter-prometheus.workspace = true
+models.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokenizers.workspace = true

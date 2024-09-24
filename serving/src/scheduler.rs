@@ -14,7 +14,7 @@ use crate::{
     types::{ReadLock, WriteLock},
 };
 use thiserror::Error;
-use tracing::{debug, error, info, info_span, instrument, trace, warn, Span};
+use tracing::{debug, error, info_span, instrument, trace, warn, Span};
 
 /// Preemption modes.
 ///
@@ -51,8 +51,6 @@ struct SchedulingBudget {
     num_batched_tokens: usize,
     /// Number of current scheduled sequences.
     num_curr_seqs: usize,
-    /// Tracing span
-    pub span: Span,
 }
 
 impl SchedulingBudget {
@@ -65,7 +63,6 @@ impl SchedulingBudget {
             request_ids_num_curr_seqs: HashSet::new(),
             num_batched_tokens: 0,
             num_curr_seqs: 0,
-            span: info_span!("scheduling-budget"),
         }
     }
 
@@ -76,7 +73,6 @@ impl SchedulingBudget {
         num_new_tokens: usize,
         num_new_sequences: usize,
     ) -> Result<bool, SchedulerError> {
-        let _enter = self.span.enter();
         if num_new_sequences == 0 || num_new_tokens == 0 {
             error!("Empty scheduling, either `num_new_sequences` == 0 or `num_new_tokens` == 0");
             return Err(SchedulerError::EmptyScheduling);
@@ -96,7 +92,6 @@ impl SchedulingBudget {
     /// Adds number of batched tokens
     #[instrument(skip_all)]
     pub fn add_num_batched_tokens(&mut self, request_id: String, num_batched_tokens: usize) {
-        let _enter = self.span.enter();
         trace!("Adding number of batched tokens");
         // If request has already been batched, simply return
         if self.request_ids_num_batched_tokens.contains(&request_id) {
@@ -110,7 +105,6 @@ impl SchedulingBudget {
     /// Subtracts number of batched tokens
     #[instrument(skip_all)]
     pub fn subtract_num_batched_tokens(&mut self, request_id: &str, num_batched_tokens: usize) {
-        let _enter = self.span.enter();
         trace!("Subtracting number of batched tokens..");
         // Only performs an action, if request with `request_id` has been already batched
         if self.request_ids_num_batched_tokens.contains(request_id) {
@@ -122,7 +116,6 @@ impl SchedulingBudget {
     /// Adds number sequences
     #[instrument(skip_all)]
     pub fn add_number_sequences(&mut self, request_id: String, num_current_sequences: usize) {
-        let _enter = self.span.enter();
         trace!("Adding number of sequences..");
         // If request has already been added, simply return
         if self.request_ids_num_curr_seqs.contains(&request_id) {
@@ -136,7 +129,6 @@ impl SchedulingBudget {
     /// Subtracts number sequences
     #[instrument(skip_all)]
     pub fn subtracts_number_sequences(&mut self, request_id: &str, num_current_sequences: usize) {
-        let _enter = self.span.enter();
         trace!("Subtracting number of sequences..");
         // Only performs an action, if request with `request_id` has been already added
         if self.request_ids_num_curr_seqs.contains(request_id) {
@@ -263,15 +255,12 @@ pub struct SchedulerOutputs {
     pub running_queue_size: usize,
     /// Number of preempted sequence groups
     preempted: usize,
-    /// Tracing span
-    span: Span,
 }
 
 impl SchedulerOutputs {
     /// Validate that `SchedulerOutputs` is well formed
     #[instrument(skip_all)]
     fn validate(&self) -> Result<(), SchedulerError> {
-        let _enter = self.span.enter();
         if !self.blocks_to_swap_in.is_empty() && !self.blocks_to_swap_out.is_empty() {
             error!("Swap in and swap out should never happen at the same time.");
             return Err(SchedulerError::InvalidSchedulerOutput(
@@ -293,7 +282,6 @@ impl SchedulerOutputs {
             ignored_seq_groups: vec![],
             running_queue_size: 0,
             preempted: 0,
-            span: info_span!("scheduler-output"),
         }
     }
 
@@ -340,8 +328,6 @@ pub struct Scheduler<P> {
     num_cumulative_preemption: usize,
     /// Generic parameter for the scheduling policy
     _phantom: PhantomData<P>,
-    /// Tracing span
-    span: Span,
 }
 
 impl<P> Scheduler<P> {
@@ -366,7 +352,6 @@ impl<P> Scheduler<P> {
             previous_prompt: false,
             last_prompt_latency: 0.0,
             num_cumulative_preemption: 0,
-            span: info_span!("scheduler"),
             _phantom: PhantomData,
         })
     }
@@ -400,7 +385,6 @@ impl<P> Scheduler<P> {
     /// - Freeing sequence resources
     #[instrument(skip_all)]
     pub fn abort_sequence_group(&mut self, request_id: String) -> Result<(), SchedulerError> {
-        let _enter = self.span.enter();
         debug!("Aborting sequence group..");
 
         let mut queue_identifier = 'w';
@@ -487,7 +471,6 @@ impl<P> Scheduler<P> {
         &mut self,
         request_ids: impl Iterator<Item = String>,
     ) -> Result<(), SchedulerError> {
-        let _enter = self.span.enter();
         for request_id in request_ids {
             debug!("Aborting sequence group: {}", request_id);
             self.abort_sequence_group(request_id)?;
@@ -640,7 +623,6 @@ impl<P: Policy> Scheduler<P> {
         budget: &mut SchedulingBudget,
         enable_chunking: bool,
     ) -> Result<(VecDeque<SequenceGroup>, SchedulerRunningOutputs), SchedulerError> {
-        let _enter = self.span.enter();
         trace!("Schedule running..");
         // Blocks that need to be swapped or copied before model execution
         let mut blocks_to_swap_out = HashMap::<u32, u32>::new();
@@ -801,7 +783,6 @@ impl<P: Policy> Scheduler<P> {
         budget: &mut SchedulingBudget,
         enable_chunking: bool,
     ) -> Result<(VecDeque<SequenceGroup>, SchedulerSwappedInOutputs), SchedulerError> {
-        let _enter = self.span.enter();
         trace!("Schedule swapped..");
         // Blocks that need to be swapped or copied before model execution.
         let mut blocks_to_swap_in = HashMap::<u32, u32>::new();
@@ -925,7 +906,6 @@ impl<P: Policy> Scheduler<P> {
         budget: &mut SchedulingBudget,
         enable_chunking: bool,
     ) -> Result<(VecDeque<SequenceGroup>, SchedulerPrefillOutputs), SchedulerError> {
-        let _enter = self.span.enter();
         trace!("Schedulig prefills..");
 
         let mut ignored_sequence_groups = Vec::<SequenceGroup>::new();
@@ -1080,7 +1060,6 @@ impl<P: Policy> Scheduler<P> {
     /// - Maintains ordering of preempted requests for fairness.
     #[instrument(skip_all)]
     fn schedule_default(&mut self) -> Result<SchedulerOutputs, SchedulerError> {
-        let _enter = self.span.enter();
         trace!("Scheduling default..");
         // Include running requests to the budget.
         let mut budget = SchedulingBudget::new(
@@ -1239,7 +1218,6 @@ impl<P: Policy> Scheduler<P> {
             ignored_seq_groups,
             running_queue_size: self.running.len(),
             preempted,
-            span: info_span!("scheduler-outputs"),
         })
     }
 
@@ -1282,7 +1260,6 @@ impl<P: Policy> Scheduler<P> {
     /// - The number of sequences exceeds the configured maximum.
     #[instrument(skip_all)]
     fn schedule_chunked_prefill(&mut self) -> Result<SchedulerOutputs, SchedulerError> {
-        let _enter = self.span.enter();
         trace!("Scheduling chunked prefill..");
         let mut budget = SchedulingBudget::new(
             self.scheduler_config.max_num_batched_tokens(),
@@ -1403,7 +1380,6 @@ impl<P: Policy> Scheduler<P> {
             ignored_seq_groups,
             running_queue_size: self.running.len(),
             preempted,
-            span: info_span!("scheduler-outputs"),
         })
     }
 
@@ -1478,7 +1454,6 @@ impl<P: Policy> Scheduler<P> {
     pub fn schedule(
         &mut self,
     ) -> Result<(Vec<Arc<SequenceGroupMetadata>>, SchedulerOutputs), SchedulerError> {
-        let _enter = self.span.enter();
         trace!("Scheduling..");
         let scheduler_outputs = self.schedule_()?;
         let now = Instant::now();
@@ -1614,7 +1589,7 @@ impl<P: Debug> Scheduler<P> {
         enable_chunking: bool,
         budget: &mut SchedulingBudget,
     ) -> Result<usize, SchedulerError> {
-        let trace!(
+        trace!(
             "Get number of tokens for sequence group with id = {}",
             sequence_group.request_id
         );
@@ -1666,7 +1641,6 @@ impl<P: Debug> Scheduler<P> {
     /// to generate the next token for a sequence group.
     #[instrument(skip_all)]
     fn can_append_slots(&self, sequence_group: &SequenceGroup) -> bool {
-        let _enter = self.span.enter();
         trace!(
             "Can append slots for sequence group with id = {}",
             sequence_group.request_id
@@ -1706,7 +1680,6 @@ impl<P: Debug> Scheduler<P> {
         sequence_group: &SequenceGroup,
         blocks_to_copy: &mut HashMap<u32, u32>,
     ) -> Result<(), SchedulerError> {
-        let _enter = self.span.enter();
         trace!(
             "Appending slot to sequence group with id = {}",
             sequence_group.request_id
@@ -1759,7 +1732,6 @@ impl<P: Debug> Scheduler<P> {
     /// The actual scheduling occurs when the `schedule` method is called on the scheduler.
     #[instrument(skip_all)]
     pub fn add_sequence_group(&mut self, sequence_group: SequenceGroup) {
-        let _enter = self.span.enter();
         trace!(
             "Adding sequence group with id = {}",
             sequence_group.request_id
@@ -1801,7 +1773,6 @@ impl<P: Debug> Scheduler<P> {
         blocks_to_swap_out: &mut HashMap<u32, u32>,
         preemption_mode: Option<PreemptionMode>,
     ) -> Result<PreemptionMode, SchedulerError> {
-        let _enter = self.span.enter();
         trace!(
             "Preempting sequence group with id = {}",
             sequence_group.request_id
@@ -1881,7 +1852,6 @@ impl<P: Debug> Scheduler<P> {
         &mut self,
         sequence_group: &mut SequenceGroup,
     ) -> Result<(), SchedulerError> {
-        let _enter = self.span.enter();
         trace!(
             "Preemption by recomputation for sequence group with id = {}",
             sequence_group.request_id
@@ -1955,7 +1925,6 @@ impl<P: Debug> Scheduler<P> {
         sequence_group: &mut SequenceGroup,
         blocks_to_swap_out: &mut HashMap<u32, u32>,
     ) -> Result<(), SchedulerError> {
-        let _enter = self.span.enter();
         trace!(
             "Preemption by swap for sequence group with id = {}..",
             sequence_group.request_id
@@ -2000,7 +1969,6 @@ impl<P: Debug> Scheduler<P> {
         sequence_group: &mut SequenceGroup,
         blocks_to_swap_out: &mut HashMap<u32, u32>,
     ) -> Result<(), SchedulerError> {
-        let _enter = self.span.enter();
         trace!(
             "Swapping out for sequence group with id = {}",
             sequence_group.request_id
@@ -2057,7 +2025,6 @@ impl<P: Debug> Scheduler<P> {
         sequence_group: &mut SequenceGroup,
         blocks_to_swap_in: &mut HashMap<u32, u32>,
     ) -> Result<(), SchedulerError> {
-        let _enter = self.span.enter();
         trace!(
             "Swapping in for sequence group with id = {}",
             sequence_group.request_id
@@ -2098,8 +2065,8 @@ impl<P: Debug> Scheduler<P> {
     ///      a) The time since the earliest arrival exceeds the delay factor * last prompt latency.
     ///      b) There are no currently running requests.
     /// 4. If delay factor is not set or there are no waiting requests, always returns true.
+    #[instrument(skip_all)]
     fn passed_delay(&mut self, now: Instant) -> bool {
-        let _enter = self.span.enter();
         trace!("Checking if enough time has passed to schedule the next prompt");
         if self.previous_prompt {
             self.last_prompt_latency = (now - self.previous_time).as_secs_f32();
@@ -2187,7 +2154,6 @@ impl<P: Debug> Scheduler<P> {
         &mut self,
         sequence_group: &mut SequenceGroup,
     ) -> Result<(), SchedulerError> {
-        let _enter = self.span.enter();
         trace!(
             "Allocating blocks for sequence group with id = {}",
             sequence_group.request_id
@@ -2220,9 +2186,8 @@ impl<P: Debug> Scheduler<P> {
     ///
     /// This method should be called periodically to clean up the running queue,
     /// typically after each generation step or when checking for completed sequences.
-    #[instrument(skip(self))]
+    #[instrument(skip_all)]
     pub fn free_finished_sequence(&mut self) {
-        let _enter = self.span.enter();
         trace!("Freeing finished sequence");
         self.running = self
             .running

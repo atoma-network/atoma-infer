@@ -8,7 +8,7 @@ use std::{
 use candle_core::Tensor;
 use candle_transformers::generation::LogitsProcessor;
 use thiserror::Error;
-use tracing::{debug, error, info, info_span, instrument, trace, Span};
+use tracing::{debug, error, info_span, instrument, trace, Span};
 
 use crate::{
     block::{BlockError, LogicalTokenBlock},

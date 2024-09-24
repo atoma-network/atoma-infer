@@ -1,13 +1,10 @@
-use models::{
-    models::{
-        llama::{Config, LlamaConfig, LlamaEosToks},
-        Llama,
-    },
-    FlashAttentionMetadata,
-};
 use candle_core::{DType, Device, Tensor};
 use candle_nn::VarBuilder;
 use hf_hub::{api::sync::ApiBuilder, Repo, RepoType};
+use models::{
+    llama::{Config, LlamaConfig, LlamaEosToks},
+    FlashAttentionMetadata, Llama,
+};
 use std::{path::Path, time::Instant};
 use tracing::info;
 

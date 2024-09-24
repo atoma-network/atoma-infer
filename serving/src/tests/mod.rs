@@ -6,8 +6,8 @@ use std::{
 #[cfg(test)]
 mod llama;
 
-use models::FlashAttentionMetadata;
 use candle_core::{DType, Device, Tensor};
+use models::FlashAttentionMetadata;
 use rand::Rng;
 use tokio::sync::mpsc;
 use tracing::info;

@@ -11,7 +11,7 @@ use crate::{
     types::{ReadLock, WriteLock},
 };
 
-use candle_core::utils::{cuda_is_available, metal_is_available};
+use candle_core::utils::cuda_is_available;
 
 use thiserror::Error;
 use tracing::{error, info, info_span, instrument, trace, warn, Span};
@@ -295,7 +295,6 @@ impl BlockSpaceManager {
         &mut self,
         sequence: RwLockReadGuard<Sequence>,
     ) -> Result<Option<(u32, u32)>, BlockSpaceManagerError> {
-        let _enter = self.span.enter();
         let num_total_logical_token_blocks = sequence.get_num_total_logical_token_blocks();
 
         if num_total_logical_token_blocks == 0 {
@@ -408,7 +407,6 @@ impl BlockSpaceManager {
         parent_sequence: RwLockReadGuard<Sequence>,
         child_sequence: RwLockReadGuard<Sequence>,
     ) -> Result<(), BlockSpaceManagerError> {
-        let _enter = self.span.enter();
         info!(
             "Forking current parent sequence with id = {}",
             parent_sequence.sequence_id()
@@ -465,7 +463,6 @@ impl BlockSpaceManager {
         &self,
         seq_group: &SequenceGroup,
     ) -> Result<Vec<SyncPhysicalTokenBlock>, BlockSpaceManagerError> {
-        let _enter = self.span.enter();
         // NOTE: we assume that physical blocks are only shared across `Sequence`'s of the
         // same `SequenceGroup`
         let mut output = Vec::new();
@@ -521,8 +518,6 @@ impl BlockSpaceManager {
         &self,
         seq_group: &SequenceGroup,
     ) -> Result<AllocationStatus, BlockSpaceManagerError> {
-        let _enter = self.span.enter();
-
         trace!(
             "Can swap in, for sequence group with id = {}",
             seq_group.request_id
@@ -585,7 +580,6 @@ impl BlockSpaceManager {
         &mut self,
         seq_group: &mut SequenceGroup,
     ) -> Result<HashMap<u32, u32>, BlockSpaceManagerError> {
-        let _enter = self.span.enter();
         trace!(
             "Swapping in CPU to GPU blocks, for sequence group with id = {}",
             seq_group.request_id
@@ -664,7 +658,6 @@ impl BlockSpaceManager {
     /// It's typically used to determine if a swap-out operation can be initiated safely.
     #[instrument(skip_all)]
     pub fn can_swap_out(&self, seq_group: &SequenceGroup) -> Result<bool, BlockSpaceManagerError> {
-        let _enter = self.span.enter();
         trace!(
             "Can swap out, for sequence group with id = {}",
             seq_group.request_id
@@ -720,7 +713,6 @@ impl BlockSpaceManager {
         &mut self,
         seq_group: &mut SequenceGroup,
     ) -> Result<HashMap<u32, u32>, BlockSpaceManagerError> {
-        let _enter = self.span.enter();
         trace!(
             "Swap out GPU to CPU blocks, for sequence group with id = {}",
             seq_group.request_id
@@ -911,7 +903,6 @@ impl BlockSpaceManager {
     /// as if it was newly created. Any references to previously allocated blocks will be invalid.
     #[instrument(skip_all)]
     pub fn reset(&mut self) -> Result<(), BlockSpaceManagerError> {
-        let _enter = self.span.enter();
         trace!("Resetting all block tables..");
         let block_tables = self.block_tables.clone();
         for (_, bt) in block_tables.iter() {

@@ -11,7 +11,7 @@ use tokio::sync::{
     mpsc::{error::SendError, UnboundedReceiver, UnboundedSender},
     oneshot::error::RecvError,
 };
-use tracing::{error, info, info_span, instrument, trace, Span};
+use tracing::{debug, error, info, info_span, instrument, trace, Span};
 
 use crate::{
     model_executor::ModelThreadDispatcher,

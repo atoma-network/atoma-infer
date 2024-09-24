@@ -4,9 +4,9 @@ use std::{
     sync::Arc,
 };
 
-use models::flash_attention::FlashAttentionMetadata;
 use candle_core::{DType, Device, IndexOp, Tensor};
 use futures::stream::FuturesUnordered;
+use models::flash_attention::FlashAttentionMetadata;
 use thiserror::Error;
 use tokio::{
     sync::{

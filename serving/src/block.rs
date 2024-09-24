@@ -4,7 +4,7 @@ use std::{
 };
 
 use thiserror::Error;
-use tracing::{error, info_span, instrument, Span};
+use tracing::{error, info_span, Span};
 
 use crate::types::{ReadLock, WriteLock};
 

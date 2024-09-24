@@ -4,8 +4,8 @@ use crate::{
     model_executor::{ModelExecutor, ModelExecutorError, ModelLoaderError},
     sequence::{ExecuteModelRequest, SequenceGroupMetadata, SequenceGroupOutput},
 };
-use models::flash_attention::{FlashAttention, FlashAttentionMetadata};
 use candle_core::{DType, DTypeParseError, Device, Error as CandleError, Tensor};
+use models::flash_attention::{FlashAttention, FlashAttentionMetadata};
 use thiserror::Error;
 use tracing::{error, info, info_span, instrument, warn, Span};
 
