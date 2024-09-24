@@ -1,7 +1,7 @@
 //! Responsible for creating the json schema associated with the AtomaAPI, which is modeled after OpenAPI.
 
 use schemars::JsonSchema;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 // NOTE: `Role`, `Message` and `content` in some of the `Message`s have sort of a strange
 // relationship, ie. `content` is sometimes a struct, sometimes a string or an array, and
@@ -237,7 +237,10 @@ pub mod json_schema_tests {
         let request_schema = schema_for!(RequestBody);
         let json_request_schema = serde_json::to_string_pretty(&request_schema)
             .expect("failed to parse json schema into str while verifying request schema");
-        check_schema(&json_request_schema, expect_file!["../../request_schema.json"]);
+        check_schema(
+            &json_request_schema,
+            expect_file!["../../request_schema.json"],
+        );
     }
 
     // TODO: Add the above test for response_schema
@@ -256,4 +259,3 @@ pub mod json_schema_tests {
         );
     }
 }
-
