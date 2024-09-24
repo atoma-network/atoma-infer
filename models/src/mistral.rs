@@ -437,7 +437,7 @@ mod tests {
     use crate::flash_attention::{FlashAttentionDecodingMetadata, FlashAttentionPrefillMetadata};
     use candle_core::IndexOp;
     use candle_transformers::generation::{LogitsProcessor, Sampling};
-    use hf_hub::{api::sync::Api, Repo, RepoType};
+    use hf_hub::{api::sync::{Api, ApiBuilder}, Repo, RepoType};
     use serial_test::serial;
     use std::io::Write;
     use tokenizers::Tokenizer;
@@ -454,11 +454,19 @@ mod tests {
         let device = Device::new_cuda(0).unwrap();
         let model_id = "mistralai/Mistral-7B-Instruct-v0.3".to_string();
         let revision = "main".to_string();
-        let api = Api::new().expect("Failed to create the HF API");
+        let api = if let Ok(token) = std::env::var("HUGGING_FACE_TOKEN") {
+            println!("Using provided Hugging Face token");
+            ApiBuilder::new()
+                .with_token(Some(token))
+                .build()
+                .expect("Failed to create the HF API")
+        } else {
+            println!("HUGGING_FACE_TOKEN not set, proceeding without authentication");
+            Api::new().expect("Failed to create the HF API")
+        };
 
         println!("loading the model weights from {model_id}");
         let api = api.repo(Repo::with_revision(model_id, RepoType::Model, revision));
-
         let tokenizer_filename = api
             .get("tokenizer.json")
             .expect("Failed to get tokenizer.json");
@@ -646,7 +654,16 @@ mod tests {
 
         let model_id = "mistralai/Mistral-7B-Instruct-v0.3".to_string();
         let revision = "main".to_string();
-        let api = Api::new().expect("Failed to create the HF API");
+        let api = if let Ok(token) = std::env::var("HUGGING_FACE_TOKEN") {
+            println!("Using provided Hugging Face token");
+            ApiBuilder::new()
+                .with_token(Some(token))
+                .build()
+                .expect("Failed to create the HF API")
+        } else {
+            println!("HUGGING_FACE_TOKEN not set, proceeding without authentication");
+            Api::new().expect("Failed to create the HF API")
+        };
 
         println!("loading the model weights from {model_id}");
         let api = api.repo(Repo::with_revision(model_id, RepoType::Model, revision));
@@ -1000,11 +1017,21 @@ mod tests {
         let device = Device::new_cuda(0).unwrap();
         let model_id = "mistralai/Mistral-7B-Instruct-v0.3".to_string();
         let revision = "main".to_string();
-        let api = Api::new().expect("Failed to create the HF API");
+
+        // Create API with token
+        let api = if let Ok(token) = std::env::var("HUGGING_FACE_TOKEN") {
+            println!("Using provided Hugging Face token");
+            ApiBuilder::new()
+                .with_token(Some(token))
+                .build()
+                .expect("Failed to create the HF API")
+        } else {
+            println!("HUGGING_FACE_TOKEN not set, proceeding without authentication");
+            Api::new().expect("Failed to create the HF API")
+        };
 
         println!("loading the model weights from {model_id}");
         let api = api.repo(Repo::with_revision(model_id, RepoType::Model, revision));
-
         let tokenizer_filename = api
             .get("tokenizer.json")
             .expect("Failed to get tokenizer.json");
