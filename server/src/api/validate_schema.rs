@@ -9,9 +9,7 @@ pub fn validate_with_schema(
 ) -> Option<Vec<RequestValidationError>> {
     let result = validator.validate(&instance);
     if let Err(errors) = result {
-        let errors = errors
-            .map(|err| RequestValidationError::from(err))
-            .collect();
+        let errors = errors.map(RequestValidationError::from).collect();
         return Some(errors);
     }
     None

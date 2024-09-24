@@ -24,91 +24,55 @@
     }
   },
   "definitions": {
-    "content": {
-      "oneOf": [
+    "MessageContent": {
+      "anyOf": [
         {
           "description": "The text contents of the message.",
-          "type": "object",
-          "required": [
-            "text"
-          ],
-          "properties": {
-            "text": {
-              "type": "string"
-            }
-          },
-          "additionalProperties": false
+          "type": "string"
         },
         {
           "description": "An array of content parts with a defined type, each can be of type text or image_url when passing in images. You can pass multiple images by adding multiple image_url content parts. Image input is only supported when using the gpt-4o model.",
-          "type": "object",
-          "required": [
-            "array"
-          ],
-          "properties": {
-            "array": {
-              "type": "array",
-              "items": {
-                "$ref": "#/definitions/content_part"
-              }
-            }
-          },
-          "additionalProperties": false
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/MessageContentPart"
+          }
         }
       ]
     },
-    "content_part": {
-      "oneOf": [
+    "MessageContentPart": {
+      "anyOf": [
         {
           "type": "object",
           "required": [
-            "text"
+            "text",
+            "type"
           ],
           "properties": {
             "text": {
-              "type": "object",
-              "required": [
-                "text",
-                "type"
-              ],
-              "properties": {
-                "text": {
-                  "description": "The text content.",
-                  "type": "string"
-                },
-                "type": {
-                  "description": "The type of the content part.",
-                  "type": "string"
-                }
-              }
+              "description": "The text content.",
+              "type": "string"
+            },
+            "type": {
+              "description": "The type of the content part.",
+              "type": "string"
             }
-          },
-          "additionalProperties": false
+          }
         },
         {
           "type": "object",
           "required": [
-            "image"
+            "image_url",
+            "type"
           ],
           "properties": {
-            "image": {
-              "type": "object",
-              "required": [
-                "image_url",
-                "type"
-              ],
-              "properties": {
-                "image_url": {
-                  "$ref": "#/definitions/image_url"
-                },
-                "type": {
-                  "description": "The type of the content part.",
-                  "type": "string"
-                }
-              }
+            "image_url": {
+              "$ref": "#/definitions/image_url"
+            },
+            "type": {
+              "description": "The type of the content part.",
+              "type": "string"
             }
-          },
-          "additionalProperties": false
+          }
         }
       ]
     },
@@ -149,173 +113,56 @@
       }
     },
     "message": {
-      "oneOf": [
-        {
-          "type": "object",
-          "required": [
-            "system"
-          ],
-          "properties": {
-            "system": {
-              "type": "object",
-              "required": [
-                "content",
-                "role"
-              ],
-              "properties": {
-                "content": {
-                  "description": "The contents of the system message.",
-                  "type": "string"
-                },
-                "name": {
-                  "description": "An optional name for the participant. Provides the model information to differentiate between participants of the same role.",
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "role": {
-                  "description": "The role of the messages author, in this case system.",
-                  "allOf": [
-                    {
-                      "$ref": "#/definitions/role"
-                    }
-                  ]
-                }
-              }
+      "type": "object",
+      "required": [
+        "role"
+      ],
+      "properties": {
+        "content": {
+          "description": "The contents of the message.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/MessageContent"
+            },
+            {
+              "type": "null"
             }
-          },
-          "additionalProperties": false
+          ]
         },
-        {
-          "type": "object",
-          "required": [
-            "user"
-          ],
-          "properties": {
-            "user": {
-              "type": "object",
-              "required": [
-                "content",
-                "role"
-              ],
-              "properties": {
-                "content": {
-                  "description": "The contents of the user message.",
-                  "allOf": [
-                    {
-                      "$ref": "#/definitions/content"
-                    }
-                  ]
-                },
-                "name": {
-                  "description": "An optional name for the participant. Provides the model information to differentiate between participants of the same role.",
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "role": {
-                  "description": "The role of the messages author, in this case user.",
-                  "allOf": [
-                    {
-                      "$ref": "#/definitions/role"
-                    }
-                  ]
-                }
-              }
-            }
-          },
-          "additionalProperties": false
+        "name": {
+          "description": "An optional name for the participant. Provides the model information to differentiate between participants of the same role.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
-        {
-          "type": "object",
-          "required": [
-            "assistant"
-          ],
-          "properties": {
-            "assistant": {
-              "type": "object",
-              "required": [
-                "content",
-                "role",
-                "tool_calls"
-              ],
-              "properties": {
-                "content": {
-                  "description": "The contents of the assistant message. Required unless tool_calls is specified.",
-                  "type": "string"
-                },
-                "name": {
-                  "description": "An optional name for the participant. Provides the model information to differentiate between participants of the same role.",
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "refusal": {
-                  "description": "The refusal message by the assistant.",
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "role": {
-                  "description": "The role of the messages author, in this case assistant.",
-                  "allOf": [
-                    {
-                      "$ref": "#/definitions/role"
-                    }
-                  ]
-                },
-                "tool_calls": {
-                  "description": "The tool calls generated by the model, such as function calls.",
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/definitions/tool_call"
-                  }
-                }
-              }
-            }
-          },
-          "additionalProperties": false
+        "refusal": {
+          "description": "The refusal message by the assistant.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
-        {
-          "type": "object",
-          "required": [
-            "tool"
-          ],
-          "properties": {
-            "tool": {
-              "type": "object",
-              "required": [
-                "content",
-                "role",
-                "tool_call_id"
-              ],
-              "properties": {
-                "content": {
-                  "description": "The contents of the tool message.",
-                  "type": "string"
-                },
-                "role": {
-                  "description": "The role of the messages author, in this case tool.",
-                  "allOf": [
-                    {
-                      "$ref": "#/definitions/role"
-                    }
-                  ]
-                },
-                "tool_call_id": {
-                  "description": "Tool call that this message is responding to.",
-                  "type": "string"
-                }
-              }
+        "role": {
+          "description": "The role of the messages author.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/role"
             }
-          },
-          "additionalProperties": false
+          ]
+        },
+        "tool_call_id": {
+          "description": "Tool call that this message is responding to.",
+          "type": "string"
+        },
+        "tool_calls": {
+          "description": "The tool calls generated by the model, such as function calls.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/tool_call"
+          }
         }
-      ]
+      }
     },
     "model": {
       "description": "ID of the model to use.",
