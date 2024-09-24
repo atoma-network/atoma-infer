@@ -14,7 +14,7 @@ use crate::{
     types::{ReadLock, WriteLock},
 };
 use thiserror::Error;
-use tracing::{debug, error, info_span, instrument, trace, warn, Span};
+use tracing::{debug, error, instrument, trace, warn};
 
 /// Preemption modes.
 ///
@@ -240,8 +240,10 @@ pub struct SchedulerOutputs {
     /// Scheduled sequence groups.
     pub scheduled_sequence_groups: Vec<ScheduledSequenceGroup>,
     /// Number of prefill groups scheduled.
+    #[allow(dead_code)]
     number_prefill_groups: usize,
     /// Total number of batched tokens.
+    #[allow(dead_code)]
     num_batched_tokens: usize,
     /// Blocks to swap in. List of CPU -> GPU block number.
     pub blocks_to_swap_in: HashMap<u32, u32>,
@@ -307,6 +309,7 @@ impl SchedulerOutputs {
 #[derive(Debug)]
 pub struct Scheduler<P> {
     /// Cache configuration
+    #[allow(dead_code)]
     pub(crate) cache_config: CacheConfig,
     /// `Scheduler` configuration
     pub(crate) scheduler_config: SchedulerConfig,
