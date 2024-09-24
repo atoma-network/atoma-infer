@@ -256,6 +256,7 @@ pub struct SchedulerOutputs {
     /// The number of requests in the running queue
     pub running_queue_size: usize,
     /// Number of preempted sequence groups
+    #[allow(dead_code)]
     preempted: usize,
 }
 

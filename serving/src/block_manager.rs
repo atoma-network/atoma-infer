@@ -14,7 +14,7 @@ use crate::{
 use candle_core::utils::cuda_is_available;
 
 use thiserror::Error;
-use tracing::{error, info, info_span, instrument, trace, warn, Span};
+use tracing::{error, info, instrument, trace, warn};
 
 /// Represents the status of a potential block allocation for a sequence group.
 ///
@@ -46,12 +46,11 @@ pub struct BlockSpaceManager {
     pub(crate) gpu_allocator: BlockAllocator,
     /// Block sliding window
     pub(crate) block_sliding_window: Option<usize>,
-    /// Tracing span
-    span: Span,
 }
 
 impl BlockSpaceManager {
     /// Constructor
+    #[instrument]
     pub fn new(
         block_size: usize,
         num_cpu_blocks: usize,
@@ -59,8 +58,6 @@ impl BlockSpaceManager {
         sliding_window: Option<usize>,
     ) -> Result<Self, BlockSpaceManagerError> {
         let block_sliding_window = sliding_window.map(|sw| sw.div_ceil(block_size));
-
-        let span = info_span!("block-space-manager");
 
         let (cpu_allocator, gpu_allocator): (BlockAllocator, BlockAllocator) =
             if cuda_is_available() {
@@ -83,7 +80,6 @@ impl BlockSpaceManager {
             cpu_allocator,
             gpu_allocator,
             block_sliding_window,
-            span,
         })
     }
 
