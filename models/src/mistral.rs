@@ -280,14 +280,14 @@ impl Attention {
 
 #[derive(Debug, Clone)]
 #[allow(clippy::upper_case_acronyms)]
-struct MLP {
+struct Mlp {
     gate_proj: Linear,
     up_proj: Linear,
     down_proj: Linear,
     act_fn: Activation,
 }
 
-impl MLP {
+impl Mlp {
     fn new(cfg: &Config, vb: VarBuilder) -> Result<Self> {
         let hidden_sz = cfg.hidden_size;
         let intermediate_sz = cfg.intermediate_size;
@@ -303,7 +303,7 @@ impl MLP {
     }
 }
 
-impl Module for MLP {
+impl Module for Mlp {
     fn forward(&self, xs: &Tensor) -> Result<Tensor> {
         let lhs = xs.apply(&self.gate_proj)?.apply(&self.act_fn)?;
         let rhs = xs.apply(&self.up_proj)?;
