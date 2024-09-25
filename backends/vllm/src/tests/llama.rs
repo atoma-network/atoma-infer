@@ -1,12 +1,10 @@
 use crate::{
-    config::{CacheConfig, SchedulerConfig},
     llm_service::LlmService,
     models::llama::LlamaModel,
     types::{GenerateParameters, GenerateRequest},
     validation::Validation,
 };
-use candle_core::{DType, Device};
-use std::{path::PathBuf, time::Instant};
+use std::Instant;
 use tracing::info;
 
 const BLOCK_SIZE: usize = 16;
@@ -82,7 +80,8 @@ async fn test_llama_model() {
             .expect("Failed to send request with id = {i}");
     }
 
-    for _ in 0..prompts.len() {
+    let mut received_responses = 0;
+    while received_responses < prompts.len() {
         let responses: Vec<crate::llm_engine::GenerateRequestOutput> =
             atoma_client_receiver.recv().await.unwrap();
         for inference_outputs in responses {
@@ -98,8 +97,7 @@ async fn test_llama_model() {
                 info!("\n\nReceived response: {text:?}\n, within time: {elapsed_time:?}\n\n");
             }
         }
-    }
 
-    // Remove model cache folder
-    std::fs::remove_dir_all(cache_dir).unwrap();
+        received_responses += 1;
+    }
 }

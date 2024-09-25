@@ -13,7 +13,6 @@ use tokio::sync::mpsc;
 use tracing::info;
 
 use crate::{
-    config::{CacheConfig, SchedulerConfig},
     llm_service::LlmService,
     model_executor::{
         ModelExecutor, ModelExecutorError, ModelFilePaths, ModelLoader, ModelLoaderError,

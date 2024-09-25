@@ -2339,10 +2339,10 @@ mod tests {
     #[test]
     fn test_scheduler_add_sequence_group() {
         const BLOCK_SIZE: usize = 4;
-        const GPU_MEMORY_UTILIZATION: f32 = 1.0;
+        const GPU_MEMORY_UTILIZATION: f32 = 1.;
         const NUM_CPU_BLOCKS: usize = 4;
         const NUM_GPU_BLOCKS: usize = 4;
-        const SWAP_SPACE_FRACTION: usize = 1;
+        const SWAP_SPACE_FRACTION: f32 = 1.;
 
         const MAX_NUM_BATCHED_TOKENS: usize = 100;
         const MAX_NUM_SEQUENCES: usize = 64;
@@ -2384,7 +2384,7 @@ mod tests {
         const GPU_MEMORY_UTILIZATION: f32 = 1.0;
         const NUM_CPU_BLOCKS: usize = 4;
         const NUM_GPU_BLOCKS: usize = 4;
-        const SWAP_SPACE_FRACTION: usize = 1;
+        const SWAP_SPACE_FRACTION: f32 = 1.;
 
         const MAX_NUM_BATCHED_TOKENS: usize = 100;
         const MAX_NUM_SEQUENCES: usize = 64;
@@ -2433,7 +2433,7 @@ mod tests {
         const GPU_MEMORY_UTILIZATION: f32 = 1.0;
         const NUM_CPU_BLOCKS: usize = 8;
         const NUM_GPU_BLOCKS: usize = 8;
-        const SWAP_SPACE_FRACTION: usize = 1;
+        const SWAP_SPACE_FRACTION: f32 = 1.;
 
         const MAX_NUM_BATCHED_TOKENS: usize = 100;
         const MAX_NUM_SEQUENCES: usize = 4;
@@ -2558,10 +2558,10 @@ mod tests {
     /// Verify running batched tokens are not applied to prefill requests.
     fn test_scheduler_prefill_prioritized() {
         const BLOCK_SIZE: usize = 4;
-        const GPU_MEMORY_UTILIZATION: f32 = 1.0;
+        const GPU_MEMORY_UTILIZATION: f32 = 1.;
         const NUM_CPU_BLOCKS: usize = 2;
         const NUM_GPU_BLOCKS: usize = 2;
-        const SWAP_SPACE_FRACTION: usize = 1.0;
+        const SWAP_SPACE_FRACTION: f32 = 1.;
 
         const MAX_NUM_BATCHED_TOKENS: usize = 30;
         const MAX_NUM_SEQUENCES: usize = 2;
@@ -2689,10 +2689,10 @@ mod tests {
     #[test]
     fn test_scheduler_schedule_preempt_abort() {
         const BLOCK_SIZE: usize = 4;
-        const GPU_MEMORY_UTILIZATION: f32 = 1.0;
+        const GPU_MEMORY_UTILIZATION: f32 = 1.;
         const NUM_CPU_BLOCKS: usize = 2;
         const NUM_GPU_BLOCKS: usize = 2;
-        const SWAP_SPACE_FRACTION: usize = 1.0;
+        const SWAP_SPACE_FRACTION: f32 = 1.;
 
         const MAX_NUM_BATCHED_TOKENS: usize = 64;
         const MAX_NUM_SEQUENCES: usize = 2;
@@ -2873,10 +2873,11 @@ mod tests {
     #[test]
     fn test_scheduler_max_seqs() {
         const BLOCK_SIZE: usize = 4;
+        const GPU_MEMORY_UTILIZATION: f32 = 1.;
         const NUM_SEQ_GROUP: usize = 4;
         const MAX_SEQ_GROUP: usize = 2;
         const MAX_MODEL_LEN: usize = 16;
-        const SWAP_SPACE_FRACTION: f32 = 1.0;
+        const SWAP_SPACE_FRACTION: f32 = 1.;
         let scheduler_config = SchedulerConfig::new(64, MAX_SEQ_GROUP, MAX_MODEL_LEN, 0.0, false)
             .expect("Failed to get schedule config");
         let cache_config = CacheConfig::new(
@@ -3329,7 +3330,7 @@ mod tests {
         const BLOCK_SIZE: usize = 4;
         let scheduler_config = SchedulerConfig::new(1000, 1000, 1000, 0.0, false)
             .expect("Failed to get scheduler config");
-        let cache_config = CacheConfig::new(BLOCK_SIZE, None, 1.0, 1, None, None)
+        let cache_config = CacheConfig::new(BLOCK_SIZE, None, 1., 1., None, None)
             .expect("Failed to get cache config");
         let mut scheduler =
             Scheduler::<FcfsPolicy>::new(cache_config.clone(), scheduler_config.clone())
