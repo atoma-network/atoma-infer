@@ -185,7 +185,6 @@ impl Attention {
         let num_heads = cfg.num_attention_heads;
         let num_kv_heads = cfg.num_key_value_heads;
         let head_dim = cfg.head_dim();
-        let op_size = num_heads * head_dim + 2 * num_kv_heads * head_dim;
         let q_proj = linear(cfg.hidden_size, num_heads * head_dim, vb.pp("q_proj"))?;
         let k_proj = linear(cfg.hidden_size, num_kv_heads * head_dim, vb.pp("k_proj"))?;
         let v_proj = linear(cfg.hidden_size, num_kv_heads * head_dim, vb.pp("v_proj"))?;
@@ -863,7 +862,7 @@ mod tests {
 
         assert_eq!(logits.dims().len(), 2);
         assert_eq!(logits.dims()[0], batch_size);
-        assert_eq!(logits.dims()[1], 32_064);
+        assert_eq!(logits.dims()[1], 32_768);
 
         let mut sentences = prompts.clone();
 

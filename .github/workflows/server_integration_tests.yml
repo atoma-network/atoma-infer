@@ -1,0 +1,84 @@
+# TODO: This could be a nix derivation instead which would be more ideal
+# since here we are checking out an unverified rust toolchain, on a system
+# we only know is running ubuntu-latest, etc.
+name: Server Integration Tests
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  integration-test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Check out repository
+      uses: actions/checkout@v3
+
+    - name: Set up Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        profile: minimal
+        override: true
+
+    - name: Install Rust project dependencies
+      run: cargo fetch
+
+    - name: Build the project
+      run: cargo build
+
+    - name: Run the inference server
+      run: |
+        cargo run --bin atoma-node-inference-server &
+        SERVER_PID=$!
+        # Wait for the server to start
+        sleep 5
+
+        # test validation is working
+        validate_response=$(curl -s -o validate_response.txt -w "%{http_code}" -X POST http://localhost:8080/chat/completions/validate \
+          -H "Content-Type: application/json" \
+          -d '{
+                "role": "system",
+                "content": "Validate completion"
+              }')
+
+        # Check if the response was 200 OK
+        if [ "$validate_response" -eq 200 ]; then
+          echo "Server responded with status code 200 for /chat/completions/validate"
+        else
+          echo "Server response failed with status code $validate_response"
+          cat validate_response.txt
+          exit 1
+        fi
+
+        # Check if the body contains the expected JSON: {"status": "success"}
+        if grep -q '"status": "success"' validate_response.txt; then
+          echo "Response body contains the expected success status"
+        else
+          echo "Response body does not contain expected status"
+          cat validate_response.txt
+          exit 1
+        fi
+
+        # test chat completion works
+        response=$(curl -s -o response.txt -w "%{http_code}" -X POST http://localhost:8080/api/message \
+          -H "Content-Type: application/json" \
+          -d '{
+                "role": "system",
+                "content": "System initialized."
+              }')
+
+        # Check if the response was 200 OK
+        if [ "$response" -eq 200 ]; then
+          echo "Server responded with status code 200 for /chat/completions"
+          cat response.txt
+        else
+          echo "Server response failed with status code $response"
+          cat response.txt
+          exit 1
+        fi
+
+        # Kill the server after the test
+        kill $SERVER_PID
