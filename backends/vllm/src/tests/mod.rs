@@ -11,6 +11,7 @@ use models::FlashAttentionMetadata;
 use rand::Rng;
 use tokio::sync::mpsc;
 use tracing::info;
+use hf_hub::{api::sync::ApiBuilder, Repo, RepoType};
 
 use crate::{
     llm_service::LlmService,
@@ -35,14 +36,26 @@ struct MockModel {}
 
 impl ModelLoader for MockModel {
     fn fetch<T: AsRef<Path>>(
-        _: String,
-        _: T,
-        _: String,
-        _: String,
+        api_key: String,
+        cache_dir: T,
+        model_id: String,
+        revision: String,
     ) -> Result<ModelFilePaths, ModelLoaderError> {
+        let api = ApiBuilder::new()
+            .with_progress(true)
+            .with_token(Some(api_key))
+            .with_cache_dir(cache_dir.as_ref().to_path_buf())
+            .build()?;
+        let repo = api.repo(Repo::with_revision(
+            model_id.clone(),
+            RepoType::Model,
+            revision,
+        ));
+        let tokenizer_file_path = repo.get("tokenizer.json")?;
+
         Ok(ModelFilePaths {
             config_path: "".into(),
-            tokenizer_path: "".into(),
+            tokenizer_path: tokenizer_file_path,
             weights_path: vec![],
         })
     }
@@ -151,8 +164,6 @@ async fn test_llm_engine() {
         .join("tests")
         .join("test_config_enable_chunked_prefill.toml");
 
-    println!("Attempting to load config from: {:?}", config_path);
-
     let service = LlmService::start::<MockModel, PathBuf>(
         atoma_event_subscriber_receiver,
         atoma_client_sender,
@@ -256,8 +267,6 @@ async fn test_llm_engine_with_enable_chunking() {
         .join("src")
         .join("tests")
         .join("test_config_enable_chunked_prefill.toml");
-
-    println!("Attempting to load config from: {:?}", config_path);
 
     let service = LlmService::start::<MockModel, PathBuf>(
         atoma_event_subscriber_receiver,
