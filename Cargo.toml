@@ -2,7 +2,9 @@
 resolver = "2"
 
 members = [
+    "backends",
     "csrc",
+    "help",
     "models",
     "server",
 ]
