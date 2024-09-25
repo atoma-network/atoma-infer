@@ -25,6 +25,7 @@ candle-examples = "0.6.0"
 config = "0.14.0"
 csrc = { path = "csrc" }
 cuda-runtime-sys = "0.3.0-alpha.1"
+dotenv = "0.15.0"
 expect-test = "1.5"
 futures = "0.3.30"
 half = "2.4.1"

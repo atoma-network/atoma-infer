@@ -1,9 +1,7 @@
-use std::{
-    path::Path, str::FromStr, time::Instant
-};
+use std::{path::Path, str::FromStr, time::Instant};
 
 use crate::{
-    config::{CacheConfig, ModelConfig, SchedulerConfig, CacheConfigError, SchedulerConfigError},
+    config::{CacheConfig, CacheConfigError, ModelConfig, SchedulerConfig, SchedulerConfigError},
     llm_engine::{EngineError, GenerateRequestOutput, LlmEngine},
     model_executor::{ModelExecutor, ModelLoaderError, ModelThreadDispatcher, ModelThreadError},
     scheduler::{Scheduler, SchedulerError},
@@ -12,7 +10,7 @@ use crate::{
     types::GenerateRequest,
     validation::{ValidGenerateRequest, Validation, ValidationError},
 };
-use candle_core::{DType, Device};
+use candle_core::{DType, DTypeParseError, Device};
 use candle_transformers::generation::{LogitsProcessor, Sampling};
 use metrics::{counter, gauge};
 use thiserror::Error;
@@ -82,14 +80,19 @@ impl LlmService {
 
         let model_config = ModelConfig::from_file_path(config_path.as_ref());
         // NOTE: for now we use a synchronous model loader, on the instance's thread, as the service
-        // should not make any progress until the model is loaded in GPU memory 
-        let file_paths = M::fetch(model_config.api_key.clone(), model_config.cache_dir.clone(), model_config.model_name.clone(), model_config.revision.clone())?;
+        // should not make any progress until the model is loaded in GPU memory
+        let file_paths = M::fetch(
+            model_config.api_key.clone(),
+            model_config.cache_dir.clone(),
+            model_config.model_name.clone(),
+            model_config.revision.clone(),
+        )?;
         let tokenizer = Tokenizer::from_file(&file_paths.tokenizer_path)?;
         // NOTE: we load the model on GPU memory, as to properly compute the number of blocks
         // during the system profiling stage. See `compute_num_gpu_blocks` comments
         // in the file `config.rs` for more details.
         // TODO: support multi-GPUs
-        let device = Device::new(model_config.device_ids[0])?; 
+        let device = Device::new_cuda(model_config.device_ids[0])?;
         let dtype = DType::from_str(&model_config.dtype)?;
         let model = M::load(device.clone(), dtype, &file_paths)?;
 
@@ -104,10 +107,12 @@ impl LlmService {
 
         let cloned_tokenizer = tokenizer.clone();
         let tokenizer_handle = tokio::spawn(async move {
-            Ok(
-                TokenizerWorker::start(cloned_tokenizer, tokenizer_receiver, model_config.num_tokenizer_workers)
-                    .await?,
+            Ok(TokenizerWorker::start(
+                cloned_tokenizer,
+                tokenizer_receiver,
+                model_config.num_tokenizer_workers,
             )
+            .await?)
         });
 
         let model_thread_dispatcher = ModelThreadDispatcher::start::<M>(
@@ -313,6 +318,8 @@ pub enum LlmServiceError {
     BoxedError(#[from] Box<dyn std::error::Error + Send + Sync>),
     #[error("Cache config error: `{0}`")]
     CacheConfigError(#[from] CacheConfigError),
+    #[error("DType parse error: `{0}`")]
+    DTypeParseError(#[from] DTypeParseError),
     #[error("Model loader error: `{0}`")]
     ModelLoaderError(#[from] ModelLoaderError),
     #[error("Model thread error: `{0}`")]

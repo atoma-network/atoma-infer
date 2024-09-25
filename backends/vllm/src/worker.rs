@@ -302,8 +302,9 @@ where
 
                     // 7. If sliding window is used, we need to trim the block table
                     if let Some(sliding_window) = self.model.sliding_window() {
-                        let sw_block_num = (sliding_window + self.cache_engine.block_size - 1)
-                            / self.cache_engine.block_size;
+                        let sw_block_num = (sliding_window + self.cache_engine.get_block_size()
+                            - 1)
+                            / self.cache_engine.get_block_size();
                         let start = block_table.len().saturating_sub(sw_block_num);
                         block_table = block_table[start..].to_vec();
                     }
@@ -375,10 +376,10 @@ where
                     if i < start_index {
                         PAD_SLOT_ID
                     } else {
-                        let block_number = block_table[i / self.cache_engine.block_size];
-                        let block_offset = i % self.cache_engine.block_size;
-                        ((block_number as usize) * self.cache_engine.block_size + block_offset)
-                            as i64
+                        let block_number = block_table[i / self.cache_engine.get_block_size()];
+                        let block_offset = i % self.cache_engine.get_block_size();
+                        ((block_number as usize) * self.cache_engine.get_block_size()
+                            + block_offset) as i64
                     }
                 }));
             }
@@ -519,8 +520,8 @@ impl CacheEngine {
             span: info_span!("cache-engine"),
         };
 
-        this.cpu_cache = this.allocate_blocks(this.num_cpu_blocks, &Device::Cpu)?;
-        this.gpu_cache = this.allocate_blocks(this.num_gpu_blocks, &device)?;
+        this.cpu_cache = this.allocate_blocks(this.get_num_cpu_blocks(), &Device::Cpu)?;
+        this.gpu_cache = this.allocate_blocks(this.get_num_gpu_blocks(), &device)?;
 
         Ok(this)
     }
@@ -535,7 +536,7 @@ impl CacheEngine {
         let _enter = self.span.enter();
         let kv_cache_shape = FlashAttention::get_kv_cache_shape(
             num_blocks,
-            self.block_size,
+            self.get_block_size(),
             self.attention.num_kv_heads,
             self.attention.head_dim,
         );
@@ -589,6 +590,18 @@ impl CacheEngine {
             &mut self.gpu_cache,
             blocks_to_copy,
         )?)
+    }
+
+    pub fn get_block_size(&self) -> usize {
+        self.cache_config.block_size()
+    }
+
+    pub fn get_num_cpu_blocks(&self) -> usize {
+        self.cache_config.num_cpu_blocks().unwrap()
+    }
+
+    pub fn get_num_gpu_blocks(&self) -> usize {
+        self.cache_config.num_gpu_blocks().unwrap()
     }
 }
 

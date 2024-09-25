@@ -344,7 +344,7 @@ impl<P> Scheduler<P> {
             block_manager: BlockSpaceManager::new(
                 cache_config.block_size(),
                 cache_config.num_cpu_blocks().unwrap(),
-                cache_config.num_gpu_blocks().uwnrap(),
+                cache_config.num_gpu_blocks().unwrap(),
                 cache_config.sliding_window(),
             )?,
             cache_config,
@@ -2894,9 +2894,8 @@ mod tests {
         const MAX_SEQ_GROUP: usize = 2;
         const MAX_MODEL_LEN: usize = 16;
         const SWAP_SPACE_FRACTION: f32 = 1.0;
-        let scheduler_config =
-            SchedulerConfig::new(64, MAX_SEQ_GROUP, MAX_MODEL_LEN, 0.0, false)
-                .expect("Failed to get schedule config");
+        let scheduler_config = SchedulerConfig::new(64, MAX_SEQ_GROUP, MAX_MODEL_LEN, 0.0, false)
+            .expect("Failed to get schedule config");
         let cache_config = CacheConfig::new(
             BLOCK_SIZE,
             None,
@@ -2959,17 +2958,10 @@ mod tests {
     #[test]
     fn test_scheduler_delay_factor() {
         const BLOCK_SIZE: usize = 4;
-        let scheduler_config = SchedulerConfig::new(100, 64, 16, 0.5, false)
-            .expect("Failed to get scheduler config");
-        let cache_config = CacheConfig::new(
-            BLOCK_SIZE,
-            None,
-            1.0,
-            1.0,
-            None,
-            None,
-        )
-        .expect("Failed to get cache config");
+        let scheduler_config =
+            SchedulerConfig::new(100, 64, 16, 0.5, false).expect("Failed to get scheduler config");
+        let cache_config = CacheConfig::new(BLOCK_SIZE, None, 1.0, 1.0, None, None)
+            .expect("Failed to get cache config");
         let mut scheduler = Scheduler::<FcfsPolicy>::new(cache_config, scheduler_config)
             .expect("Failed to get scheduler");
 

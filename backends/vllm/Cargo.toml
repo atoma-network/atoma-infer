@@ -9,6 +9,7 @@ candle-nn = { workspace = true, features = ["cuda"] }
 candle-transformers = { workspace = true, features = ["cuda"] }
 config.workspace = true
 cuda-runtime-sys.workspace = true
+dotenv.workspace = true
 futures.workspace = true
 hf-hub.workspace = true
 indexmap.workspace = true
