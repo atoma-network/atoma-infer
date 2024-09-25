@@ -3,7 +3,8 @@ resolver = "2"
 
 members = [
     "csrc",
-    "models", "serving",
+    "models",
+    "server",
 ]
 
 [workspace.package]
@@ -12,6 +13,7 @@ edition = "2021"
 
 [workspace.dependencies]
 anyhow = "1.0.89"
+axum = "0.7"
 bindgen_cuda = "0.1.5"
 candle-core = "0.6.0"
 candle-nn = "0.6.0"
@@ -20,11 +22,12 @@ candle-examples = "0.6.0"
 csrc = { path = "csrc" }
 cuda-runtime-sys = "0.3.0-alpha.1"
 cuda-sys = "0.2.0"
-indexmap = "2.2.6"
+expect-test = "1.5"
 futures = "0.3.30"
 half = "2.4.1"
 help = { path = "help" }
 hf-hub = "0.3.2"
+indexmap = "2.2.6"
 metrics = "0.23"
 metrics-exporter-prometheus = "0.14.0"
 models = { path = "models" }
