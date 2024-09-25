@@ -23,14 +23,11 @@ use crate::{
     validation::Validation,
 };
 
-const BLOCK_SIZE: usize = 16;
 const MAX_ELAPSED_INTERNAL: u64 = 50;
 const MAX_STOP_SEQUENCES: usize = 1;
 const MAX_TOP_N_TOKENS: u32 = 0;
 const MAX_INPUT_LENGTH: usize = 16;
 const MAX_TOTAL_TOKENS: u32 = 32;
-const NUM_CPU_BLOCKS: usize = 4096;
-const NUM_GPU_BLOCKS: usize = 4096;
 const EOS_TOKEN_ID: u32 = 2048;
 const VOCAB_SIZE: usize = 128;
 
@@ -152,7 +149,7 @@ async fn test_llm_engine() {
     let service = LlmService::start::<MockModel, PathBuf>(
         atoma_event_subscriber_receiver,
         atoma_client_sender,
-        "./test_config.toml".parse::<PathBuf>().unwrap(),
+        "test_config.toml".parse::<PathBuf>().unwrap(),
         tokenizer_receiver,
         validation,
         shutdown_signal,
@@ -251,7 +248,7 @@ async fn test_llm_engine_with_enable_chunking() {
     let service = LlmService::start::<MockModel, PathBuf>(
         atoma_event_subscriber_receiver,
         atoma_client_sender,
-        "./test_config_enable_chunked_prefill.toml"
+        "test_config_enable_chunked_prefill.toml"
             .parse::<PathBuf>()
             .unwrap(),
         tokenizer_receiver,
