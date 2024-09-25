@@ -50,10 +50,10 @@ pub trait ModelLoader {
     /// # Returns
     /// `Result<ModelFilePaths, ModelLoaderError>` containing paths to the fetched files.
     fn fetch<T: AsRef<Path>>(
-        api_key: &str,
+        api_key: String,
         cache_dir: T,
-        model_id: &str,
-        revision: &str,
+        model_id: String,
+        revision: String,
     ) -> Result<ModelFilePaths, ModelLoaderError>;
 
     /// Loads the model into memory.
@@ -343,16 +343,11 @@ impl ModelThreadDispatcher {
         let (sender, receiver) = mpsc::unbounded_channel();
 
         let join_handle = tokio::task::spawn_blocking(move || {
-            let block_size = cache_config.block_size();
-            let num_cpu_blocks = cache_config.num_cpu_blocks();
-            let num_gpu_blocks = cache_config.num_gpu_blocks();
             let model_worker = ModelWorker::<M>::new(
-                block_size,
+                cache_config,
                 device,
                 dtype,
                 model,
-                num_cpu_blocks,
-                num_gpu_blocks,
                 scheduler_config.enable_chunked_prefill(),
             )?;
             let model_thread = ModelThread {

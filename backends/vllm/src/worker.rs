@@ -1,6 +1,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use crate::{
+    config::CacheConfig,
     model_executor::{ModelExecutor, ModelExecutorError, ModelLoaderError},
     sequence::{ExecuteModelRequest, SequenceGroupMetadata, SequenceGroupOutput},
 };
@@ -59,12 +60,10 @@ where
     /// Constructor
     #[instrument(skip_all)]
     pub fn new(
-        block_size: usize,
+        cache_config: CacheConfig,
         device: Device,
         dtype: DType,
         model: M,
-        num_cpu_blocks: usize,
-        num_gpu_blocks: usize,
         enable_chunked_prefill: bool,
     ) -> Result<Self, ModelWorkerError> {
         let span = info_span!("model-worker");
@@ -73,7 +72,7 @@ where
 
         info!("Starting a new `ModelWorker` instance");
         let cache_engine = CacheEngine::new(
-            block_size,
+            cache_config,
             device.clone(),
             dtype,
             model.alibi_slopes(),
@@ -81,8 +80,6 @@ where
             model.num_attention_heads(),
             model.num_attention_heads(),
             model.num_kv_heads(),
-            num_cpu_blocks,
-            num_gpu_blocks,
             model.softmax_scale(),
             model.sliding_window(),
         )?;
@@ -469,16 +466,12 @@ pub enum ModelWorkerError {
 /// caches. It also provides methods for performing KV cache operations, such
 /// as swapping and copying.
 pub struct CacheEngine {
-    /// Block size
-    block_size: usize,
+    /// Cache config
+    cache_config: CacheConfig,
     /// Model's Cache dtype
     dtype: DType,
     /// Number of layers
     num_layers: usize,
-    /// Number of CPU blocks
-    num_cpu_blocks: usize,
-    /// Number of GPU blocks
-    num_gpu_blocks: usize,
     /// Flash attention backend,
     /// compatible with paged attention
     attention: FlashAttention,
@@ -495,7 +488,7 @@ impl CacheEngine {
     #[instrument(skip_all)]
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        block_size: usize,
+        cache_config: CacheConfig,
         device: Device,
         dtype: DType,
         alibi_slopes: Option<&Tensor>,
@@ -503,18 +496,14 @@ impl CacheEngine {
         num_attention_heads: usize,
         num_layers: usize,
         num_kv_heads: usize,
-        num_cpu_blocks: usize,
-        num_gpu_blocks: usize,
         softmax_scale: f32,
         sliding_window: Option<usize>,
     ) -> Result<Self, CacheEngineError> {
         info!("Starting a new `CacheEngine` instance");
         let mut this = Self {
-            block_size,
+            cache_config,
             dtype,
             num_layers,
-            num_cpu_blocks,
-            num_gpu_blocks,
             attention: FlashAttention::new(
                 num_attention_heads,
                 num_kv_heads,

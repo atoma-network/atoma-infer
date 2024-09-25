@@ -1,10 +1,9 @@
 use std::{
-    path::{Path, PathBuf},
-    time::Instant,
+    path::Path, str::FromStr, time::Instant
 };
 
 use crate::{
-    config::{CacheConfig, ModelConfig, SchedulerConfig},
+    config::{CacheConfig, ModelConfig, SchedulerConfig, CacheConfigError, SchedulerConfigError},
     llm_engine::{EngineError, GenerateRequestOutput, LlmEngine},
     model_executor::{ModelExecutor, ModelLoaderError, ModelThreadDispatcher, ModelThreadError},
     scheduler::{Scheduler, SchedulerError},
@@ -39,6 +38,8 @@ pub struct LlmService {
     /// Sender to communicate with an underlying
     /// `LlmEngine` running instance
     atoma_engine_sender: UnboundedSender<SequenceGroup>,
+    /// Block size
+    block_size: usize,
     /// Join handle for the background task
     /// running the `LlmEngine` instance
     llm_engine_handle: JoinHandle<Result<(), LlmServiceError>>,
@@ -82,17 +83,21 @@ impl LlmService {
         let model_config = ModelConfig::from_file_path(config_path.as_ref());
         // NOTE: for now we use a synchronous model loader, on the instance's thread, as the service
         // should not make any progress until the model is loaded in GPU memory 
-        let file_paths = M::fetch(&model_config.api_key, &model_config.cache_dir, &model_config.model_name, &model_config.revision)?;
+        let file_paths = M::fetch(model_config.api_key.clone(), model_config.cache_dir.clone(), model_config.model_name.clone(), model_config.revision.clone())?;
         let tokenizer = Tokenizer::from_file(&file_paths.tokenizer_path)?;
         // NOTE: we load the model on GPU memory, as to properly compute the number of blocks
         // during the system profiling stage. See `compute_num_gpu_blocks` comments
         // in the file `config.rs` for more details.
+        // TODO: support multi-GPUs
+        let device = Device::new(model_config.device_ids[0])?; 
+        let dtype = DType::from_str(&model_config.dtype)?;
         let model = M::load(device.clone(), dtype, &file_paths)?;
 
         let cache_config = CacheConfig::from_file_path(config_path.as_ref())?;
         let model_config = ModelConfig::from_file_path(config_path.as_ref());
         let scheduler_config = SchedulerConfig::from_file_path(config_path.as_ref())?;
 
+        let block_size = cache_config.block_size;
         let scheduler = Scheduler::new(cache_config.clone(), scheduler_config.clone())?;
 
         let start_time = Instant::now();
@@ -130,9 +135,10 @@ impl LlmService {
         Ok(Self {
             atoma_event_subscriber_receiver,
             atoma_engine_sender: request_sender,
+            block_size,
             llm_engine_handle,
-            request_counter: 0,
             model_config,
+            request_counter: 0,
             start_time,
             validation_service,
             shutdown_signal,
@@ -267,8 +273,8 @@ impl LlmService {
         );
 
         // Flush storage if configured
-        if self.flush_storage {
-            match tokio::fs::remove_dir(&self.cache_dir).await {
+        if self.model_config.flush_storage {
+            match tokio::fs::remove_dir(&self.model_config.cache_dir).await {
                 Ok(()) => info!("Successfully removed storage folder"),
                 Err(e) => error!("Failed to remove storage folder, on shutdown: {e}"),
             }
@@ -305,16 +311,20 @@ impl LlmService {
 pub enum LlmServiceError {
     #[error("Boxed error: `{0}`")]
     BoxedError(#[from] Box<dyn std::error::Error + Send + Sync>),
+    #[error("Cache config error: `{0}`")]
+    CacheConfigError(#[from] CacheConfigError),
     #[error("Model loader error: `{0}`")]
     ModelLoaderError(#[from] ModelLoaderError),
     #[error("Model thread error: `{0}`")]
     ModelThreadError(#[from] ModelThreadError),
-    #[error("Scheduler error: `{0}`")]
-    SchedulerError(#[from] SchedulerError),
     #[error("Engine error: `{0}`")]
     EngineError(#[from] EngineError),
     #[error("Validation error: `{0}`")]
     ValidationError(#[from] ValidationError),
+    #[error("Scheduler error: `{0}`")]
+    SchedulerError(#[from] SchedulerError),
+    #[error("Scheduler config error: `{0}`")]
+    SchedulerConfigError(#[from] SchedulerConfigError),
     #[error("Sequence error: `{0}`")]
     SequenceError(#[from] SequenceError),
     #[error("Send error: `{0}`")]

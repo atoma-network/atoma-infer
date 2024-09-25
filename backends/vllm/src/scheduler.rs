@@ -343,8 +343,8 @@ impl<P> Scheduler<P> {
         Ok(Self {
             block_manager: BlockSpaceManager::new(
                 cache_config.block_size(),
-                cache_config.num_cpu_blocks(),
-                cache_config.num_gpu_blocks(),
+                cache_config.num_cpu_blocks().unwrap(),
+                cache_config.num_gpu_blocks().uwnrap(),
                 cache_config.sliding_window(),
             )?,
             cache_config,

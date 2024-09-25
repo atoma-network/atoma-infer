@@ -1,5 +1,7 @@
+use config::Config;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use std::path::Path;
 
 const KB: usize = 1 << 10;
 const GB: usize = 1 << 30;
@@ -152,7 +154,7 @@ pub struct CacheConfig {
 
 impl CacheConfig { 
     /// Creates a new instance of `CacheConfig` from a `.toml` file.
-    pub fn from_file_path<P: AsRef<Path>>(path: P) -> Result<Self, CacheConfigError> { 
+    pub fn from_file_path<P: AsRef<Path>>(config_file_path: P) -> Result<Self, CacheConfigError> { 
         let builder = Config::builder().add_source(config::File::with_name(
             config_file_path.as_ref().to_str().unwrap(),
         ));
@@ -160,13 +162,13 @@ impl CacheConfig {
             .build()
             .expect("Failed to generate inference configuration file");
         let mut this = config
-            .get::<Self>("inference")
+            .get::<Self>("cache")
             .expect("Failed to generated config file");
 
         if this.swap_space_bytes.is_none() {
             assert!(this.swap_space_fraction.is_some());
             let swap_space_fraction = this.swap_space_fraction.unwrap();
-            this.swap_space_bytes = utils::calculate_swap_space(swap_space_fraction)?;
+            this.swap_space_bytes = Some(utils::calculate_swap_space(swap_space_fraction)?);
         }
 
         if let Some(num_gpu_blocks_override) = this.num_gpu_blocks_override {
@@ -239,12 +241,12 @@ impl CacheConfig {
 
     /// Verify `CacheConfig` cache dtype
     fn verify_cache_dtype(&self) -> Result<(), CacheConfigError> {
-        if let Some(cache_dtype) = &self.cache_dtype
-            && !vec!["auto", "bf16", "f16", "f32"].contains(cache_dtype)
-        {
-            return Err(CacheConfigError::InvalidCacheDtype(
-                self.cache_dtype.clone(),
-            ));
+        if let Some(cache_dtype) = &self.cache_dtype {
+            if !vec!["auto", "bf16", "f16", "f32"].contains(cache_dtype) {
+                return Err(CacheConfigError::InvalidCacheDtype(
+                    cache_dtype.clone(),
+                ));
+            }
         }
         Ok(())
     }
@@ -261,7 +263,7 @@ impl CacheConfig {
 
     /// Getter for `swap_space_bytes`
     pub fn swap_space_bytes(&self) -> usize {
-        self.swap_space_bytes
+        self.swap_space_bytes.unwrap()
     }
 
     /// Getter for `sliding_window`
@@ -297,6 +299,8 @@ pub enum CacheConfigError {
     InvalidSwapSpace(String),
     #[error("Failed to get GPU memory: `{0}`")]
     GpuMemoryQueryError(String),
+    #[error("Failed to get system memory")]
+    FailedToGetSystemMemory,
     #[error("Cannot leave unspecified either `num_gpu_blocks` and `num_cpu_blocks`")]
     InvalidNumBlocks(String),
 }
@@ -398,7 +402,7 @@ impl SchedulerConfig {
             .build()
             .expect("Failed to generate inference configuration file");
         let this = config
-            .get::<Self>("inference")
+            .get::<Self>("scheduler")
             .expect("Failed to generated config file");
 
         this.verify_args()?;
@@ -441,7 +445,7 @@ pub(crate) mod utils {
                 return Err(CacheConfigError::GpuMemoryQueryError(format!("Failed to get device count: {:?}", result)));
             }
 
-            let mut per_device_memory = Vec::with_capacity(device_count);
+            let mut per_device_memory = Vec::with_capacity(device_count as usize);
             for device in 0..device_count {
                 let result = cudaSetDevice(device);
                 if result != cudaError::cudaSuccess {
