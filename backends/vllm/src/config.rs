@@ -221,6 +221,35 @@ impl CacheConfig {
         Ok(this)
     }
 
+    /// Constructor from number of blocks, for testing purposes only
+    pub(crate) fn new_from_blocks(
+        block_size: usize,
+        cache_dtype: Option<String>,
+        gpu_memory_utilization: f32,
+        swap_space_fraction: f32,
+        num_gpu_blocks_override: Option<usize>,
+        sliding_window: Option<usize>,
+        num_cpu_blocks: usize,
+        num_gpu_blocks: usize,
+    ) -> Result<Self, CacheConfigError> {
+        let this = Self {
+            block_size,
+            gpu_memory_utilization,
+            swap_space_fraction: Some(swap_space_fraction),
+            swap_space_bytes: Some(swap_space_bytes),
+            num_gpu_blocks_override,
+            num_gpu_blocks: Some(num_gpu_blocks),
+            num_cpu_blocks: Some(num_cpu_blocks),
+            cache_dtype,
+            sliding_window,
+        };
+
+        this.verify_args()?;
+        this.verify_cache_dtype()?;
+
+        Ok(this)
+    }
+
     /// Verify `CacheConfig` arguments
     fn verify_args(&self) -> Result<(), CacheConfigError> {
         if self.gpu_memory_utilization > 1.0 {
