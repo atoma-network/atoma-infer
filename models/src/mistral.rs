@@ -288,7 +288,7 @@ struct Mlp {
 }
 
 impl Mlp {
-    fn new(cfg: &Config, vb: VarBuilder) -> Result<Self> {
+    fn new(cfg: &MistralConfig, vb: VarBuilder) -> Result<Self> {
         let hidden_sz = cfg.hidden_size;
         let intermediate_sz = cfg.intermediate_size;
         let gate_proj = linear(hidden_sz, intermediate_sz, vb.pp("gate_proj"))?;
