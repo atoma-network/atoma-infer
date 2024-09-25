@@ -7,11 +7,9 @@ use crate::{
 use std::{path::PathBuf, time::Instant};
 use tracing::info;
 
-const BLOCK_SIZE: usize = 16;
 const MAX_STOP_SEQUENCES: usize = 1;
 const MAX_TOP_N_TOKENS: u32 = 4;
 const MAX_INPUT_LENGTH: usize = 512;
-const MAX_NUM_SEQUENCES: usize = 32;
 const MAX_TOTAL_TOKENS: u32 = 2048;
 
 #[tokio::test]

@@ -5,6 +5,7 @@ use std::path::Path;
 use thiserror::Error;
 
 const KB: usize = 1 << 10;
+const GB: usize = 1 << 30;
 
 /// `ModelConfig` - Configuration for serving a large language model.
 ///
@@ -222,6 +223,7 @@ impl CacheConfig {
     }
 
     /// Constructor from number of blocks, for testing purposes only
+    #[allow(dead_code)]
     pub(crate) fn new_from_blocks(
         block_size: usize,
         cache_dtype: Option<String>,
@@ -460,12 +462,27 @@ pub(crate) mod utils {
             return Err(CacheConfigError::InvalidSwapSpaceFraction(fraction));
         }
 
-        let total_memory = sys_info::mem_info()
+        let free_cpu_memory = sys_info::mem_info()
             .map_err(|_| CacheConfigError::FailedToGetSystemMemory)?
-            .total as usize
+            .free as usize
             * KB; // Convert from KB to bytes
 
-        Ok((total_memory as f32 * fraction) as usize)
+        let swap_space_bytes = (free_cpu_memory as f32 * fraction) as usize;
+        // let cpu_memory_usage = swap_space_bytes * num_gpus_per_node;
+
+        let msg = format!(
+            "{:.2} GiB out of the {:.2} GiB total CPU memory is allocated for the swap space.",
+            cpu_memory_usage as f64 / GB as f64,
+            total_cpu_memory as f64 / GB as f64
+        );
+
+        if swap_space_bytes > (0.7 * free_cpu_memory as f64) as usize {
+            return Err(CacheConfigError::SwapSpaceTooLarge(msg));
+        } else if swap_space_bytes > (0.4 * free_cpu_memory as f64) as usize {
+            warn!("Possibly too large swap space. {}", msg);
+        }
+
+        Ok(swap_space_bytes)
     }
 
     /// Calculate the number of GPU blocks to use

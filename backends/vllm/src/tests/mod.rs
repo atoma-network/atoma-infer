@@ -7,11 +7,11 @@ use std::{
 mod llama;
 
 use candle_core::{DType, Device, Tensor};
+use hf_hub::{api::sync::ApiBuilder, Repo, RepoType};
 use models::FlashAttentionMetadata;
 use rand::Rng;
 use tokio::sync::mpsc;
 use tracing::info;
-use hf_hub::{api::sync::ApiBuilder, Repo, RepoType};
 
 use crate::{
     llm_service::LlmService,
