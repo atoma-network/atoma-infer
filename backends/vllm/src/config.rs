@@ -1,9 +1,11 @@
+use candle_core::DType;
 use config::Config;
 use dotenv::dotenv;
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::{path::Path, str::FromStr};
 use thiserror::Error;
 use tracing::warn;
+
 const KB: usize = 1 << 10;
 const GB: usize = 1 << 30;
 
@@ -136,7 +138,7 @@ pub struct CacheConfig {
     /// The size of a block, in number of tokens
     pub(crate) block_size: usize,
     /// The KV cache dtype, if different from the model dtype
-    pub(crate) cache_dtype: Option<String>,
+    pub(crate) cache_dtype: String,
     /// The fraction of GPU memory to use for the vLLM execution
     pub(crate) gpu_memory_utilization: f32,
     /// Fraction of total system memory to use for swap space, this value is
@@ -156,7 +158,11 @@ pub struct CacheConfig {
 
 impl CacheConfig {
     /// Creates a new instance of `CacheConfig` from a `.toml` file.
-    pub fn from_file_path<P: AsRef<Path>>(config_file_path: P) -> Result<Self, CacheConfigError> {
+    pub fn from_file_path<P: AsRef<Path>>(
+        config_file_path: P,
+        num_kv_heads: usize,
+        hidden_dim: usize,
+    ) -> Result<Self, CacheConfigError> {
         let builder = Config::builder().add_source(config::File::with_name(
             config_file_path.as_ref().to_str().unwrap(),
         ));
@@ -171,13 +177,24 @@ impl CacheConfig {
             assert!(this.swap_space_fraction.is_some());
             let swap_space_fraction = this.swap_space_fraction.unwrap();
             this.swap_space_bytes = Some(utils::calculate_swap_space(swap_space_fraction)?);
+            this.num_cpu_blocks = Some(utils::calculate_num_cpu_blocks(
+                this.block_size,
+                this.swap_space_bytes.unwrap(),
+                num_kv_heads,
+                hidden_dim,
+            )?);
         }
 
         if let Some(num_gpu_blocks_override) = this.num_gpu_blocks_override {
             this.num_gpu_blocks = Some(num_gpu_blocks_override);
         } else {
-            let num_gpu_blocks =
-                utils::calculate_num_gpu_blocks(this.block_size, this.gpu_memory_utilization)?;
+            let num_gpu_blocks = utils::calculate_num_gpu_blocks(
+                this.block_size,
+                this.gpu_memory_utilization,
+                num_kv_heads,
+                hidden_dim,
+                DType::from_str(&this.dtype)?,
+            )?;
             this.num_gpu_blocks = Some(num_gpu_blocks);
         }
 
@@ -191,42 +208,10 @@ impl CacheConfig {
 }
 
 impl CacheConfig {
-    /// Constructor
-    pub fn new(
-        block_size: usize,
-        cache_dtype: Option<String>,
-        gpu_memory_utilization: f32,
-        swap_space_fraction: f32,
-        num_gpu_blocks_override: Option<usize>,
-        sliding_window: Option<usize>,
-    ) -> Result<Self, CacheConfigError> {
-        let swap_space_bytes = utils::calculate_swap_space(swap_space_fraction)?;
-        let num_gpu_blocks = utils::calculate_num_gpu_blocks(block_size, gpu_memory_utilization)?;
-        let num_cpu_blocks = swap_space_bytes / block_size;
-
-        let this = Self {
-            block_size,
-            gpu_memory_utilization,
-            swap_space_fraction: Some(swap_space_fraction),
-            swap_space_bytes: Some(swap_space_bytes),
-            num_gpu_blocks_override,
-            num_gpu_blocks: Some(num_gpu_blocks),
-            num_cpu_blocks: Some(num_cpu_blocks),
-            cache_dtype,
-            sliding_window,
-        };
-
-        this.verify_args()?;
-        this.verify_cache_dtype()?;
-
-        Ok(this)
-    }
-
     /// Constructor from number of blocks, for testing purposes only
     #[allow(dead_code)]
     pub(crate) fn new_from_blocks(
         block_size: usize,
-        cache_dtype: Option<String>,
         gpu_memory_utilization: f32,
         swap_space_fraction: f32,
         num_gpu_blocks_override: Option<usize>,
@@ -244,7 +229,7 @@ impl CacheConfig {
             num_gpu_blocks_override,
             num_gpu_blocks: Some(num_gpu_blocks),
             num_cpu_blocks: Some(num_cpu_blocks),
-            cache_dtype,
+            cache_dtype: "bf16".to_string(),
             sliding_window,
         };
 
@@ -458,7 +443,7 @@ pub(crate) mod utils {
     use super::*;
     use cuda_runtime_sys::*;
 
-    /// Calculate the swap space in bytes based on the total system memory
+    /// Calculate the swap space in bytes based on the total system memory and the fraction of memory to be used for the swap space.
     pub(crate) fn calculate_swap_space(fraction: f32) -> Result<usize, CacheConfigError> {
         if fraction <= 0.0 || fraction > 1.0 {
             return Err(CacheConfigError::InvalidSwapSpaceFraction(fraction));
@@ -487,10 +472,14 @@ pub(crate) mod utils {
         Ok(swap_space_bytes)
     }
 
-    /// Calculate the number of GPU blocks to use
+    /// Calculate the number of GPU blocks to use based on the block size, the GPU memory utilization rate
+    /// and the model's number of key-value heads and hidden dimensions, as well as each weight's size in bytes.
     pub(crate) fn calculate_num_gpu_blocks(
         block_size: usize,
         gpu_memory_utilization: f32,
+        num_kv_heads: usize,
+        hidden_dim: usize,
+        dtype: DType,
     ) -> Result<usize, CacheConfigError> {
         unsafe {
             let mut device_count = 0;
@@ -533,10 +522,25 @@ pub(crate) mod utils {
                 .map(|(free, _)| free)
                 .min()
                 .unwrap();
-            let num_gpu_blocks =
-                (*free_memory as f32 * gpu_memory_utilization).floor() as usize / block_size;
+            let total_block_memory_in_bytes =
+                block_size * num_kv_heads * hidden_dim * dtype.size_in_bytes();
+            let num_gpu_blocks = (*free_memory as f32 * gpu_memory_utilization).floor() as usize
+                / (block_size * num_kv_heads * hidden_dim);
 
             Ok(num_gpu_blocks)
         }
+    }
+
+    fn calculate_num_cpu_blocks(
+        block_size: usize,
+        dtype: DType,
+        num_kv_heads: usize,
+        hidden_dim: usize,
+        swap_space_bytes: usize,
+    ) -> Result<usize, CacheConfigError> {
+        let total_block_memory_in_bytes =
+            block_size * num_kv_heads * hidden_dim * dtype.size_in_bytes();
+        let num_cpu_blocks = swap_space_bytes / total_block_memory_in_bytes;
+        Ok(num_cpu_blocks)
     }
 }

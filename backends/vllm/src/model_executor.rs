@@ -81,7 +81,7 @@ pub trait ModelMetadata: ModelLoader {
     /// Returns the End-of-Sequence (EOS) token IDs, if defined
     fn eos_token_ids(&self) -> Option<Vec<u32>>;
     /// Returns the size of the hidden layers in the model
-    fn hidden_size(&self) -> usize;
+    fn hidden_dim(&self) -> usize;
     /// Returns the number of attention heads in the model
     fn num_attention_heads(&self) -> usize;
     /// Returns the number of hidden layers in the model

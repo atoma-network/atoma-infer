@@ -76,7 +76,7 @@ where
             device.clone(),
             dtype,
             model.alibi_slopes(),
-            model.hidden_size() / model.num_attention_heads(),
+            model.hidden_dim(),
             model.num_attention_heads(),
             model.num_attention_heads(),
             model.num_kv_heads(),

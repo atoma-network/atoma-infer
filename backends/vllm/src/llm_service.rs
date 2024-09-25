@@ -96,8 +96,11 @@ impl LlmService {
         let dtype = DType::from_str(&model_config.dtype)?;
         let model = M::load(device.clone(), dtype, &file_paths)?;
 
-        let cache_config = CacheConfig::from_file_path(config_path.as_ref())?;
-        let model_config = ModelConfig::from_file_path(config_path.as_ref());
+        let cache_config = CacheConfig::from_file_path(
+            config_path.as_ref(),
+            model.num_kv_heads(),
+            model.hidden_dim(),
+        )?;
         let scheduler_config = SchedulerConfig::from_file_path(config_path.as_ref())?;
 
         let block_size = cache_config.block_size;

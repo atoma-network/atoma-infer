@@ -10,8 +10,9 @@ revision = "main"
 
 [cache]
 block_size = 16
+cache_type = "bf16" # Most often, it agrees with inference.dtype
 gpu_memory_utilization = 0.9
-swap_space_fraction = 0.75
+swap_space_fraction = 0.05
 
 [scheduler]
 max_num_batched_tokens = 32

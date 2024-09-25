@@ -104,8 +104,8 @@ impl ModelMetadata for LlamaModel {
         }
     }
 
-    fn hidden_size(&self) -> usize {
-        self.config.hidden_size
+    fn hidden_dim(&self) -> usize {
+        self.config.hidden_size / self.config.num_attention_heads
     }
 
     fn num_attention_heads(&self) -> usize {
@@ -121,7 +121,7 @@ impl ModelMetadata for LlamaModel {
     }
 
     fn softmax_scale(&self) -> f32 {
-        let head_dim = self.hidden_size() / self.num_attention_heads();
+        let head_dim = self.hidden_dim();
         1f32 / (head_dim as f32).sqrt()
     }
 

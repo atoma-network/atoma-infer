@@ -74,7 +74,7 @@ impl ModelMetadata for MockModel {
         Some(vec![EOS_TOKEN_ID])
     }
 
-    fn hidden_size(&self) -> usize {
+    fn hidden_dim(&self) -> usize {
         512
     }
 
