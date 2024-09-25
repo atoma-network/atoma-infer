@@ -152,7 +152,7 @@ async fn test_llm_engine() {
     let service = LlmService::start::<MockModel, PathBuf>(
         atoma_event_subscriber_receiver,
         atoma_client_sender,
-        "./test_config.toml".into::<PathBuf>(),
+        "./test_config.toml".parse::<PathBuf>(),
         tokenizer_receiver,
         validation,
         shutdown_signal,
@@ -251,7 +251,7 @@ async fn test_llm_engine_with_enable_chunking() {
     let service = LlmService::start::<MockModel, PathBuf>(
         atoma_event_subscriber_receiver,
         atoma_client_sender,
-        "./test_config_enable_chunked_prefill.toml".into::<PathBuf>(),
+        "./test_config_enable_chunked_prefill.toml".parse::<PathBuf>(),
         tokenizer_receiver,
         validation,
         shutdown_signal,
