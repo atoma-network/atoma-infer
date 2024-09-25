@@ -20,13 +20,6 @@ const MAX_TOTAL_TOKENS: u32 = 2048;
 async fn test_llama_model() {
     crate::tests::init_tracing();
 
-    let api_key = "".to_string();
-    let cache_dir: PathBuf = "./test_llama_cache_dir/".into();
-    let model_name = "TinyLlama/TinyLlama-1.1B-Chat-v1.0".to_string();
-    let device = Device::new_cuda(0).expect("Failed to create new CUDA device");
-    let dtype = DType::BF16;
-    let num_tokenizer_workers = 2;
-    let revision = "main".to_string();
     let (_shutdown_signal_sender, shutdown_signal_receiver) = tokio::sync::mpsc::channel(1);
 
     let (atoma_event_subscriber_sender, atoma_event_subscriber_receiver) =
