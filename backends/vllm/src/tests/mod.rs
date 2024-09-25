@@ -251,10 +251,10 @@ async fn test_llm_engine_with_enable_chunking() {
     let service = LlmService::start::<MockModel, PathBuf>(
         atoma_event_subscriber_receiver,
         atoma_client_sender,
-        Path::new(file!())
-            .parent()
-            .unwrap()
-            .join("test_config.toml"),
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("tests")
+            .join("test_config_enable_chunked_prefill.toml"),
         tokenizer_receiver,
         validation,
         shutdown_signal,
