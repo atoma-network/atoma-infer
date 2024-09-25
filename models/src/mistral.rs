@@ -284,7 +284,7 @@ struct Mlp {
     gate_proj: Linear,
     up_proj: Linear,
     down_proj: Linear,
-    act_fn: Activation,
+    act_fn: candle_nn::Activation,
 }
 
 impl Mlp {
