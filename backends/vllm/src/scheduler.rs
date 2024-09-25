@@ -3987,7 +3987,7 @@ mod tests {
             blocks_to_copy: &mut HashMap<u32, u32>,
             value: (u32, u32),
         ) -> Result<(), SchedulerError> {
-            info!(
+            trace!(
                 "Appending slot to sequence group with id = {}",
                 sequence_group.request_id
             );
@@ -4012,7 +4012,7 @@ mod tests {
             allocation_status: Option<AllocationStatus>,
             append_slots: Option<(u32, u32)>,
         ) -> Result<(VecDeque<SequenceGroup>, SchedulerSwappedInOutputs), SchedulerError> {
-            info!("Schedule swapped..");
+            trace!("Schedule swapped..");
             // Blocks that need to be swapped or copied before model execution.
             let mut blocks_to_swap_in = HashMap::<u32, u32>::new();
             let mut blocks_to_copy = HashMap::<u32, u32>::new();
@@ -4060,7 +4060,7 @@ mod tests {
                 )?;
 
                 if num_new_tokens == 0 || !budget.can_schedule(num_new_tokens, num_new_sequences)? {
-                    info!(
+                    trace!(
                         "Either no new tokens to be swapped or no available budget to swap tokens"
                     );
                     // push the sequence group back to `swapped_queue`
