@@ -4,7 +4,7 @@ use crate::{
     types::{GenerateParameters, GenerateRequest},
     validation::Validation,
 };
-use std::Instant;
+use std::time::Instant;
 use tracing::info;
 
 const BLOCK_SIZE: usize = 16;
