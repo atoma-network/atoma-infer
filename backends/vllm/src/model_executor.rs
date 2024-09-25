@@ -50,10 +50,10 @@ pub trait ModelLoader {
     /// # Returns
     /// `Result<ModelFilePaths, ModelLoaderError>` containing paths to the fetched files.
     fn fetch<T: AsRef<Path>>(
-        api_key: String,
+        api_key: &str,
         cache_dir: T,
-        model_id: String,
-        revision: String,
+        model_id: &str,
+        revision: &str,
     ) -> Result<ModelFilePaths, ModelLoaderError>;
 
     /// Loads the model into memory.

@@ -4,7 +4,7 @@ use std::{
 };
 
 use crate::{
-    config::{CacheConfig, SchedulerConfig},
+    config::{CacheConfig, ModelConfig, SchedulerConfig},
     llm_engine::{EngineError, GenerateRequestOutput, LlmEngine},
     model_executor::{ModelExecutor, ModelLoaderError, ModelThreadDispatcher, ModelThreadError},
     scheduler::{Scheduler, SchedulerError},
@@ -25,10 +25,7 @@ use tokio::{
 use tracing::{error, info, info_span, instrument, Span};
 
 // TODO:
-// 1. We should have a configurable number of tokenizer workers
-//     in the service. This can be a configurable parameter.
-// 2. Add a configuration file for the `LlmService` struct
-// 3. Add proper tokenizer shutdown logic, and other related services
+// 1. Add proper tokenizer shutdown logic, and other related services
 
 /// `LlmService` - the entrypoint of the Atoma's inference service.
 /// It receives requests from the Atoma's event subscriber
@@ -42,15 +39,11 @@ pub struct LlmService {
     /// Sender to communicate with an underlying
     /// `LlmEngine` running instance
     atoma_engine_sender: UnboundedSender<SequenceGroup>,
-    /// Block size
-    block_size: usize,
-    /// Model weights cache directory
-    cache_dir: PathBuf,
-    /// Flushes the model storage, once the service is stopped
-    flush_storage: bool,
     /// Join handle for the background task
     /// running the `LlmEngine` instance
     llm_engine_handle: JoinHandle<Result<(), LlmServiceError>>,
+    /// Model config
+    model_config: ModelConfig,
     /// Starting time of the instance
     start_time: Instant,
     /// Request counter
@@ -69,19 +62,10 @@ impl LlmService {
     /// Starts the service
     #[instrument(skip_all)]
     #[allow(clippy::too_many_arguments)]
-    pub async fn start<M, T: AsRef<Path>>(
-        api_key: String,
+    pub async fn start<M, P: AsRef<Path>>(
         atoma_event_subscriber_receiver: UnboundedReceiver<GenerateRequest>,
         atoma_client_sender: UnboundedSender<Vec<GenerateRequestOutput>>,
-        cache_config: CacheConfig,
-        cache_dir: T,
-        device: Device,
-        dtype: DType,
-        flush_storage: bool,
-        model_name: String,
-        num_tokenizer_workers: usize,
-        revision: String,
-        scheduler_config: SchedulerConfig,
+        config_path: P,
         tokenizer_receiver: mpsc::UnboundedReceiver<EncodeTokenizerRequest>,
         validation_service: Validation,
         shutdown_signal: mpsc::Receiver<()>,
@@ -95,22 +79,28 @@ impl LlmService {
 
         info!("Starting a new `LlmService` instance..");
 
-        let block_size = cache_config.block_size;
+        let model_config = ModelConfig::from_file_path(config_path.as_ref());
+        // NOTE: for now we use a synchronous model loader, on the instance's thread, as the service
+        // should not make any progress until the model is loaded in GPU memory 
+        let file_paths = M::fetch(&model_config.api_key, &model_config.cache_dir, &model_config.model_name, &model_config.revision)?;
+        let tokenizer = Tokenizer::from_file(&file_paths.tokenizer_path)?;
+        // NOTE: we load the model on GPU memory, as to properly compute the number of blocks
+        // during the system profiling stage. See `compute_num_gpu_blocks` comments
+        // in the file `config.rs` for more details.
+        let model = M::load(device.clone(), dtype, &file_paths)?;
+
+        let cache_config = CacheConfig::from_file_path(config_path.as_ref())?;
+        let model_config = ModelConfig::from_file_path(config_path.as_ref());
+        let scheduler_config = SchedulerConfig::from_file_path(config_path.as_ref())?;
+
         let scheduler = Scheduler::new(cache_config.clone(), scheduler_config.clone())?;
 
         let start_time = Instant::now();
 
-        // We do not need to spawn a new thread for fetching model weights files,
-        // as the service will not start until the model is loaded in memory
-        // NOTE: for now we use a synchronous model loader
-        let file_paths = M::fetch(api_key, &cache_dir, model_name, revision)?;
-        let tokenizer = Tokenizer::from_file(&file_paths.tokenizer_path)?;
-        let model = M::load(device.clone(), dtype, &file_paths)?;
-
         let cloned_tokenizer = tokenizer.clone();
         let tokenizer_handle = tokio::spawn(async move {
             Ok(
-                TokenizerWorker::start(cloned_tokenizer, tokenizer_receiver, num_tokenizer_workers)
+                TokenizerWorker::start(cloned_tokenizer, tokenizer_receiver, model_config.num_tokenizer_workers)
                     .await?,
             )
         });
@@ -140,11 +130,9 @@ impl LlmService {
         Ok(Self {
             atoma_event_subscriber_receiver,
             atoma_engine_sender: request_sender,
-            cache_dir: cache_dir.as_ref().to_path_buf(),
-            block_size,
-            flush_storage,
             llm_engine_handle,
             request_counter: 0,
+            model_config,
             start_time,
             validation_service,
             shutdown_signal,

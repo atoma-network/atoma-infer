@@ -5,6 +5,7 @@ edition.workspace = true
 
 [dependencies]
 atoma-vllm-backend = { path = "vllm", optional = true }
+sys-info = "0.9.1"
 
 [features]
 vllm = ["dep:atoma-vllm-backend"]
