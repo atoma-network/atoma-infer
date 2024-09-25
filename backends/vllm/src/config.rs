@@ -199,9 +199,7 @@ impl CacheConfig {
             )?;
             this.num_gpu_blocks = Some(num_gpu_blocks);
         }
-
-        this.num_cpu_blocks = Some(this.swap_space_bytes.unwrap() / this.block_size);
-
+        
         this.verify_args()?;
         this.verify_cache_dtype()?;
 
