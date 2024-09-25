@@ -1,6 +1,6 @@
 [inference]
 api_key = ""
-cache_dir = "./"
+cache_dir = "./cache/"
 flush_storage = true
 model_name = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
 device_ids = [0]

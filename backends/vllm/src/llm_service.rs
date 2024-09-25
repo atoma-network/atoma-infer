@@ -240,7 +240,7 @@ impl LlmService {
                     temperature: valid_request.parameters.temperature as f64,
                 }
             };
-
+            
         let logits_processor =
             LogitsProcessor::from_sampling(valid_request.parameters.random_seed, sampling);
 

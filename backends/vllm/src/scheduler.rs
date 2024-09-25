@@ -2342,7 +2342,7 @@ mod tests {
         const GPU_MEMORY_UTILIZATION: f32 = 1.;
         const NUM_CPU_BLOCKS: usize = 4;
         const NUM_GPU_BLOCKS: usize = 4;
-        const SWAP_SPACE_FRACTION: f32 = 1.;
+        const SWAP_SPACE_FRACTION: f32 = 0.4;
 
         const MAX_NUM_BATCHED_TOKENS: usize = 100;
         const MAX_NUM_SEQUENCES: usize = 64;
@@ -2385,7 +2385,7 @@ mod tests {
         const GPU_MEMORY_UTILIZATION: f32 = 1.0;
         const NUM_CPU_BLOCKS: usize = 4;
         const NUM_GPU_BLOCKS: usize = 4;
-        const SWAP_SPACE_FRACTION: f32 = 1.;
+        const SWAP_SPACE_FRACTION: f32 = 0.4;
 
         const MAX_NUM_BATCHED_TOKENS: usize = 100;
         const MAX_NUM_SEQUENCES: usize = 64;
@@ -2435,7 +2435,7 @@ mod tests {
         const GPU_MEMORY_UTILIZATION: f32 = 1.0;
         const NUM_CPU_BLOCKS: usize = 8;
         const NUM_GPU_BLOCKS: usize = 8;
-        const SWAP_SPACE_FRACTION: f32 = 1.;
+        const SWAP_SPACE_FRACTION: f32 = 0.4;
 
         const MAX_NUM_BATCHED_TOKENS: usize = 100;
         const MAX_NUM_SEQUENCES: usize = 4;
@@ -2564,7 +2564,7 @@ mod tests {
         const GPU_MEMORY_UTILIZATION: f32 = 1.;
         const NUM_CPU_BLOCKS: usize = 2;
         const NUM_GPU_BLOCKS: usize = 2;
-        const SWAP_SPACE_FRACTION: f32 = 1.;
+        const SWAP_SPACE_FRACTION: f32 = 0.4;
 
         const MAX_NUM_BATCHED_TOKENS: usize = 30;
         const MAX_NUM_SEQUENCES: usize = 2;
@@ -2696,7 +2696,7 @@ mod tests {
         const GPU_MEMORY_UTILIZATION: f32 = 1.;
         const NUM_CPU_BLOCKS: usize = 2;
         const NUM_GPU_BLOCKS: usize = 2;
-        const SWAP_SPACE_FRACTION: f32 = 1.;
+        const SWAP_SPACE_FRACTION: f32 = 0.4;
 
         const MAX_NUM_BATCHED_TOKENS: usize = 64;
         const MAX_NUM_SEQUENCES: usize = 2;
@@ -2884,7 +2884,7 @@ mod tests {
         const MAX_MODEL_LEN: usize = 16;
         const NUM_CPU_BLOCKS: usize = 8;
         const NUM_GPU_BLOCKS: usize = 8;
-        const SWAP_SPACE_FRACTION: f32 = 1.;
+        const SWAP_SPACE_FRACTION: f32 = 0.4;
         let scheduler_config = SchedulerConfig::new(64, MAX_SEQ_GROUP, MAX_MODEL_LEN, 0.0, false)
             .expect("Failed to get schedule config");
         let cache_config = CacheConfig::new_from_blocks(

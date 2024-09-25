@@ -444,7 +444,7 @@ impl SequenceData {
 }
 
 /// `Sequence` - Represents a single sequence in the generation process, storing its data, status, and block information.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct Sequence {
     /// Unique identifier for the sequence.
     sequence_id: u64,
@@ -470,6 +470,22 @@ pub struct Sequence {
     pub tokens: Vec<String>,
     /// Tracing span for the sequence.
     span: Span,
+}
+
+impl PartialEq for Sequence {
+    fn eq(&self, other: &Self) -> bool {
+        self.sequence_id == other.sequence_id
+            && self.prompt == other.prompt
+            && self.prompt_token_ids == other.prompt_token_ids
+            && self.sequence_data == other.sequence_data
+            && self.block_size == other.block_size
+            && self.logical_token_blocks == other.logical_token_blocks
+            && self.output_text == other.output_text
+            && self.output_logprobs == other.output_logprobs
+            && self.sequence_status == other.sequence_status
+            && self.stop_reason == other.stop_reason
+            && self.tokens == other.tokens
+    }
 }
 
 impl Sequence {
