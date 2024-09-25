@@ -146,13 +146,17 @@ async fn test_llm_engine() {
     );
     let (_, shutdown_signal) = mpsc::channel(1);
 
+    let config_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("src")
+        .join("tests")
+        .join("test_config_enable_chunked_prefill.toml");
+
+    println!("Attempting to load config from: {:?}", config_path);
+
     let service = LlmService::start::<MockModel, PathBuf>(
         atoma_event_subscriber_receiver,
         atoma_client_sender,
-        Path::new(file!())
-            .parent()
-            .unwrap()
-            .join("test_config.toml"),
+        config_path,
         tokenizer_receiver,
         validation,
         shutdown_signal,
@@ -248,13 +252,17 @@ async fn test_llm_engine_with_enable_chunking() {
     );
     let (_, shutdown_signal) = mpsc::channel(1);
 
+    let config_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("src")
+        .join("tests")
+        .join("test_config_enable_chunked_prefill.toml");
+
+    println!("Attempting to load config from: {:?}", config_path);
+
     let service = LlmService::start::<MockModel, PathBuf>(
         atoma_event_subscriber_receiver,
         atoma_client_sender,
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("src")
-            .join("tests")
-            .join("test_config_enable_chunked_prefill.toml"),
+        config_path,
         tokenizer_receiver,
         validation,
         shutdown_signal,
