@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-atoma-vllm-backend = { path = "vllm" }
+atoma-vllm-backend = { path = "vllm", optional = true }
 
 [features]
-vllm = ["dep:atoma-vllm-backend", "atoma-vllm-backend"]
+vllm = ["dep:atoma-vllm-backend"]
