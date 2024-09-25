@@ -158,7 +158,7 @@ pub struct RequestMetrics {
 ///
 /// This struct holds information about the prompt and generated output tokens,
 /// as well as metadata about the sequence's processing state.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct SequenceData {
     /// The token IDs of the initial prompt
     prompt_token_ids: Vec<u32>,
@@ -172,6 +172,16 @@ pub struct SequenceData {
     stage: SequenceStage,
     /// Tracing span
     span: Span,
+}
+
+impl PartialEq for SequenceData {
+    fn eq(&self, other: &Self) -> bool {
+        self.prompt_token_ids == other.prompt_token_ids
+            && self.output_token_ids == other.output_token_ids
+            && self.cumulative_logprob == other.cumulative_logprob
+            && self.num_computed_tokens == other.num_computed_tokens
+            && self.stage == other.stage
+    }
 }
 
 impl SequenceData {
