@@ -3,7 +3,7 @@ use dotenv::dotenv;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use thiserror::Error;
-
+use tracing::warn;
 const KB: usize = 1 << 10;
 const GB: usize = 1 << 30;
 
