@@ -111,7 +111,9 @@ impl RotaryEmbedding {
 use std::fmt;
 
 struct Attention {
-    qkv_proj: Linear,
+    q_proj: Linear,
+    k_proj: Linear,
+    v_proj: Linear,
     o_proj: Linear,
     num_heads: usize,
     num_kv_heads: usize,
@@ -127,7 +129,9 @@ struct Attention {
 impl fmt::Debug for Attention {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Attention")
-            .field("qkv_proj", &self.qkv_proj)
+            .field("q_proj", &self.q_proj)
+            .field("k_proj", &self.k_proj)
+            .field("v_proj", &self.v_proj)
             .field("o_proj", &self.o_proj)
             .field("num_heads", &self.num_heads)
             .field("num_kv_heads", &self.num_kv_heads)
@@ -144,7 +148,9 @@ impl fmt::Debug for Attention {
 impl Clone for Attention {
     fn clone(&self) -> Self {
         Self {
-            qkv_proj: self.qkv_proj.clone(),
+            q_proj: self.q_proj.clone(),
+            k_proj: self.k_proj.clone(),
+            v_proj: self.v_proj.clone(),
             o_proj: self.o_proj.clone(),
             num_heads: self.num_heads,
             num_kv_heads: self.num_kv_heads,
@@ -180,11 +186,15 @@ impl Attention {
         let num_kv_heads = cfg.num_key_value_heads;
         let head_dim = cfg.head_dim();
         let op_size = num_heads * head_dim + 2 * num_kv_heads * head_dim;
-        let qkv_proj = linear(cfg.hidden_size, op_size, vb.pp("qkv_proj"))?;
+        let q_proj = linear(cfg.hidden_size, num_heads * head_dim, vb.pp("q_proj"))?;
+        let k_proj = linear(cfg.hidden_size, num_kv_heads * head_dim, vb.pp("k_proj"))?;
+        let v_proj = linear(cfg.hidden_size, num_kv_heads * head_dim, vb.pp("v_proj"))?;
         let o_proj = linear(num_heads * head_dim, cfg.hidden_size, vb.pp("o_proj"))?;
 
         Ok(Self {
-            qkv_proj,
+            q_proj,
+            k_proj,
+            v_proj,
             o_proj,
             rotary_emb,
             num_heads,
@@ -221,15 +231,9 @@ impl Attention {
             );
         }
 
-        let qkv = self.qkv_proj.forward(xs)?;
-        let query_pos = self.num_heads * self.head_dim;
-        let query_states = qkv.narrow(D::Minus1, 0, query_pos)?;
-        let key_states = qkv.narrow(D::Minus1, query_pos, self.num_kv_heads * self.head_dim)?;
-        let value_states = qkv.narrow(
-            D::Minus1,
-            query_pos + self.num_kv_heads * self.head_dim,
-            self.num_kv_heads * self.head_dim,
-        )?;
+        let query_states = self.q_proj.forward(xs)?;
+        let key_states = self.k_proj.forward(xs)?;
+        let value_states = self.v_proj.forward(xs)?;
 
         let query_states = query_states
             .reshape((batch_size, num_total_tokens, self.num_heads, self.head_dim))?
