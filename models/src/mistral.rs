@@ -279,35 +279,35 @@ impl Attention {
 }
 
 #[derive(Debug, Clone)]
-struct Mlp {
-    gate_up_proj: Linear,
+#[allow(clippy::upper_case_acronyms)]
+struct MLP {
+    gate_proj: Linear,
+    up_proj: Linear,
     down_proj: Linear,
-    act_fn: candle_nn::Activation,
-    i_size: usize,
+    act_fn: Activation,
 }
 
-impl Mlp {
-    fn new(cfg: &MistralConfig, vb: VarBuilder) -> Result<Self> {
-        let hidden_size = cfg.hidden_size;
-        let i_size = cfg.intermediate_size;
-        let gate_up_proj = linear(hidden_size, 2 * i_size, vb.pp("gate_up_proj"))?;
-        let down_proj = linear(i_size, hidden_size, vb.pp("down_proj"))?;
+impl MLP {
+    fn new(cfg: &Config, vb: VarBuilder) -> Result<Self> {
+        let hidden_sz = cfg.hidden_size;
+        let intermediate_sz = cfg.intermediate_size;
+        let gate_proj = linear(hidden_sz, intermediate_sz, vb.pp("gate_proj"))?;
+        let up_proj = linear(hidden_sz, intermediate_sz, vb.pp("up_proj"))?;
+        let down_proj = linear(intermediate_sz, hidden_sz, vb.pp("down_proj"))?;
         Ok(Self {
-            gate_up_proj,
+            gate_proj,
+            up_proj,
             down_proj,
             act_fn: cfg.hidden_act,
-            i_size,
         })
     }
 }
 
-impl Module for Mlp {
+impl Module for MLP {
     fn forward(&self, xs: &Tensor) -> Result<Tensor> {
-        let up_states = xs.apply(&self.gate_up_proj)?;
-        let gate = up_states.narrow(D::Minus1, 0, self.i_size)?;
-        let up_states = up_states.narrow(D::Minus1, self.i_size, self.i_size)?;
-        let up_states = (up_states * gate.apply(&self.act_fn))?;
-        up_states.apply(&self.down_proj)
+        let lhs = xs.apply(&self.gate_proj)?.apply(&self.act_fn)?;
+        let rhs = xs.apply(&self.up_proj)?;
+        (lhs * rhs)?.apply(&self.down_proj)
     }
 }
 
