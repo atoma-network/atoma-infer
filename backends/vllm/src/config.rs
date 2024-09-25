@@ -232,6 +232,8 @@ impl CacheConfig {
         num_cpu_blocks: usize,
         num_gpu_blocks: usize,
     ) -> Result<Self, CacheConfigError> {
+        let swap_space_bytes = utils::calculate_swap_space(swap_space_fraction)?;
+
         let this = Self {
             block_size,
             gpu_memory_utilization,
