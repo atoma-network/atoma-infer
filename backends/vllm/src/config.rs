@@ -3,8 +3,8 @@ use dotenv::dotenv;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use thiserror::Error;
+
 const KB: usize = 1 << 10;
-const GB: usize = 1 << 30;
 
 /// `ModelConfig` - Configuration for serving a large language model.
 ///
@@ -41,6 +41,7 @@ pub struct ModelConfig {
 
 impl ModelConfig {
     /// Creates a new `ModelConfig`
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         api_key: String,
         cache_dir: String,
@@ -244,7 +245,7 @@ impl CacheConfig {
     /// Verify `CacheConfig` cache dtype
     fn verify_cache_dtype(&self) -> Result<(), CacheConfigError> {
         if let Some(cache_dtype) = &self.cache_dtype {
-            if !vec!["auto", "bf16", "f16", "f32"].contains(&cache_dtype.as_str()) {
+            if !["auto", "bf16", "f16", "f32"].contains(&cache_dtype.as_str()) {
                 return Err(CacheConfigError::InvalidCacheDtype(cache_dtype.clone()));
             }
         }

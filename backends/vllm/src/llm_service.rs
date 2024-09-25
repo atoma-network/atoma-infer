@@ -171,7 +171,7 @@ impl LlmService {
                             //       errors should also be committed to, by the node.
                         }
                     };
-                    self.atoma_engine_sender.send(sequence_group)?;
+                    self.atoma_engine_sender.send(sequence_group).map_err(Box::new)?;
                 },
                 _ = self.shutdown_signal.recv() => {
                     info!("Received shutdown signal, stopping `LlmService` instance..");
@@ -337,7 +337,7 @@ pub enum LlmServiceError {
     #[error("Sequence error: `{0}`")]
     SequenceError(#[from] SequenceError),
     #[error("Send error: `{0}`")]
-    SendError(#[from] SendError<SequenceGroup>),
+    SendError(#[from] Box<SendError<SequenceGroup>>),
     #[error("Tokenizer error: `{0}`")]
     TokenizerError(#[from] TokenizerError),
 }

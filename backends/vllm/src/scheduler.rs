@@ -500,23 +500,6 @@ impl<P> Scheduler<P> {
     /// This function will return an error if:
     /// - There is an issue freeing blocks in the `BlockManager`
     /// - An invalid `SequenceStatus` is provided
-    /// Frees blocks associated with sequences in a given `SequenceGroup` and removes the group from its current queue.
-    ///
-    /// # Arguments
-    ///
-    /// * `request_id` - The ID of the `SequenceGroup` to free.
-    /// * `sequences_ids` - A slice of sequence IDs within the group to free blocks for.
-    /// * `sequence_status` - The current status of the `SequenceGroup`, determining which queue to remove it from.
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(())` if successful, or a `SchedulerError` if there was an issue freeing the blocks.
-    ///
-    /// # Errors
-    ///
-    /// This function will return an error if:
-    /// - There is an issue freeing blocks in the `BlockManager`
-    /// - An invalid `SequenceStatus` is provided
     #[allow(dead_code)]
     fn free_sequences(
         &mut self,
