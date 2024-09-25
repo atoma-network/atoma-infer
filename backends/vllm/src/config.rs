@@ -173,6 +173,7 @@ impl CacheConfig {
             .get::<Self>("cache")
             .expect("Failed to generated config file");
 
+        let dtype = DType::from_str(&this.cache_dtype)?;
         if this.swap_space_bytes.is_none() {
             assert!(this.swap_space_fraction.is_some());
             let swap_space_fraction = this.swap_space_fraction.unwrap();
@@ -182,6 +183,7 @@ impl CacheConfig {
                 this.swap_space_bytes.unwrap(),
                 num_kv_heads,
                 hidden_dim,
+                dtype,
             )?);
         }
 
@@ -193,7 +195,7 @@ impl CacheConfig {
                 this.gpu_memory_utilization,
                 num_kv_heads,
                 hidden_dim,
-                DType::from_str(&this.dtype)?,
+                dtype,
             )?;
             this.num_gpu_blocks = Some(num_gpu_blocks);
         }
@@ -262,10 +264,8 @@ impl CacheConfig {
 
     /// Verify `CacheConfig` cache dtype
     fn verify_cache_dtype(&self) -> Result<(), CacheConfigError> {
-        if let Some(cache_dtype) = &self.cache_dtype {
-            if !["auto", "bf16", "f16", "f32"].contains(&cache_dtype.as_str()) {
-                return Err(CacheConfigError::InvalidCacheDtype(cache_dtype.clone()));
-            }
+        if !["auto", "bf16", "f16", "f32"].contains(&cache_dtype.as_str()) {
+            return Err(CacheConfigError::InvalidCacheDtype(cache_dtype.clone()));
         }
         Ok(())
     }
@@ -531,7 +531,7 @@ pub(crate) mod utils {
         }
     }
 
-    fn calculate_num_cpu_blocks(
+    pub(crate) fn calculate_num_cpu_blocks(
         block_size: usize,
         dtype: DType,
         num_kv_heads: usize,
