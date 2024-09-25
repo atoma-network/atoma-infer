@@ -34,12 +34,6 @@ async fn test_llama_model() {
     let (atoma_client_sender, mut atoma_client_receiver) = tokio::sync::mpsc::unbounded_channel();
     let (tokenizer_sender, tokenizer_receiver) = tokio::sync::mpsc::unbounded_channel();
 
-    let cache_config = CacheConfig::new(BLOCK_SIZE, 1.0, 1, None, None, 100, 100)
-        .expect("Failed to create cache config");
-
-    let scheduler_config = SchedulerConfig::new(512, MAX_NUM_SEQUENCES, 512, 0.0, false, 0)
-        .expect("Failed to create scheduler config");
-
     let validation_service = Validation::new(
         1,
         MAX_STOP_SEQUENCES,
@@ -50,18 +44,9 @@ async fn test_llama_model() {
     );
 
     let llm_service = LlmService::start::<LlamaModel, _>(
-        api_key,
         atoma_event_subscriber_receiver,
         atoma_client_sender,
-        cache_config,
-        cache_dir.clone(),
-        device,
-        dtype,
-        true,
-        model_name,
-        num_tokenizer_workers,
-        revision,
-        scheduler_config,
+        "./test_config.toml".into(),
         tokenizer_receiver,
         validation_service,
         shutdown_signal_receiver,

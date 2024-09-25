@@ -139,20 +139,6 @@ async fn test_llm_engine() {
     let (atoma_event_subscriber_sender, atoma_event_subscriber_receiver) =
         mpsc::unbounded_channel();
 
-    let cache_config = CacheConfig::new(
-        BLOCK_SIZE,
-        1.0,
-        1,
-        None,
-        None,
-        NUM_CPU_BLOCKS,
-        NUM_GPU_BLOCKS,
-    )
-    .expect("Failed to create cache config");
-
-    let scheduler_config = SchedulerConfig::new(512, MAX_NUM_SEQUENCES, 512, 0.0, false, 0)
-        .expect("Failed to create scheduler config");
-
     let (tokenizer_sender, tokenizer_receiver) = mpsc::unbounded_channel();
     let validation = Validation::new(
         1,
@@ -165,18 +151,9 @@ async fn test_llm_engine() {
     let (_, shutdown_signal) = mpsc::channel(1);
 
     let service = LlmService::start::<MockModel, PathBuf>(
-        "".to_string(),
         atoma_event_subscriber_receiver,
         atoma_client_sender,
-        cache_config,
-        "./cache/".into(),
-        Device::Cpu,
-        DType::F16,
-        true,
-        "anthony/tokenizers-test".to_string(),
-        4,
-        "".to_string(),
-        scheduler_config,
+        "./test_config.toml".into(),
         tokenizer_receiver,
         validation,
         shutdown_signal,
@@ -261,20 +238,6 @@ async fn test_llm_engine_with_enable_chunking() {
     let (atoma_event_subscriber_sender, atoma_event_subscriber_receiver) =
         mpsc::unbounded_channel();
 
-    let cache_config = CacheConfig::new(
-        BLOCK_SIZE,
-        1.0,
-        1,
-        None,
-        None,
-        NUM_CPU_BLOCKS,
-        NUM_GPU_BLOCKS,
-    )
-    .expect("Failed to create cache config");
-
-    let scheduler_config = SchedulerConfig::new(512, MAX_NUM_SEQUENCES, 512, 0.0, true, 0)
-        .expect("Failed to create scheduler config");
-
     let (tokenizer_sender, tokenizer_receiver) = mpsc::unbounded_channel();
     let validation = Validation::new(
         1,
@@ -287,18 +250,9 @@ async fn test_llm_engine_with_enable_chunking() {
     let (_, shutdown_signal) = mpsc::channel(1);
 
     let service = LlmService::start::<MockModel, PathBuf>(
-        "".to_string(),
         atoma_event_subscriber_receiver,
         atoma_client_sender,
-        cache_config,
-        "./cache/".into(),
-        Device::Cpu,
-        DType::F16,
-        true,
-        "anthony/tokenizers-test".to_string(),
-        4,
-        "".to_string(),
-        scheduler_config,
+        "./test_config_enable_chunked_prefill.toml".into(),
         tokenizer_receiver,
         validation,
         shutdown_signal,
