@@ -1,13 +1,13 @@
 [workspace]
-resolver = "2"
-
 members = [
     "backends",
+    "backends/vllm",
     "csrc",
     "help",
     "models",
     "server",
 ]
+resolver = "2"
 
 [workspace.package]
 version = "0.1.0"
@@ -16,6 +16,7 @@ edition = "2021"
 [workspace.dependencies]
 anyhow = "1.0.89"
 axum = "0.7"
+backends = { path = "backends" }
 bindgen_cuda = "0.1.5"
 candle-core = "0.6.0"
 candle-nn = "0.6.0"
