@@ -98,8 +98,10 @@ impl LogicalTokenBlock {
     /// ```
     /// let mut block = LogicalTokenBlock::new(0, 10);
     /// assert!(block.append_tokens(&[1, 2, 3]).is_ok());
-    /// assert!(block.append_tokens(&[4, 5, 6, 7, 8, 9, 10]).is_err());
-    /// ```    #[instrument(skip_all)]
+    /// assert!(block.append_tokens(&[4, 5, 6, 7, 8, 9, 10]).is_ok());
+    /// assert!(block.append_tokens(&[11]).is_err());
+    /// ```    
+    #[instrument(skip_all)]
     pub fn append_tokens(&mut self, token_ids: &[u32]) -> Result<(), BlockError> {
         if token_ids.len() <= self.get_num_empty_slots() {
             self.token_ids.extend(token_ids);
