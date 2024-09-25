@@ -1,5 +1,5 @@
 /// A Rust implementation of the Phi3 model, a transformer-based language model.
-use candle_core::{DType, Device, Module, Result, Tensor, D};
+use candle_core::{DType, Device, Module, Result, Tensor};
 
 use candle_nn::VarBuilder;
 use std::sync::Arc;

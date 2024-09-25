@@ -14,7 +14,7 @@ use crate::{
     types::{ReadLock, WriteLock},
 };
 use thiserror::Error;
-use tracing::{debug, error, instrument, trace, warn};
+use tracing::{debug, error, info, instrument, trace, warn};
 
 /// Preemption modes.
 ///
