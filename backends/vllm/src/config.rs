@@ -337,6 +337,8 @@ pub enum CacheConfigError {
     FailedToGetSystemMemory,
     #[error("Cannot leave unspecified either `num_gpu_blocks` and `num_cpu_blocks`")]
     InvalidNumBlocks(String),
+    #[error("Swap space is too large: `{0}`")]
+    SwapSpaceTooLarge(String),
 }
 
 /// Scheduler's configuration.
@@ -472,8 +474,8 @@ pub(crate) mod utils {
 
         let msg = format!(
             "{:.2} GiB out of the {:.2} GiB total CPU memory is allocated for the swap space.",
-            cpu_memory_usage as f64 / GB as f64,
-            total_cpu_memory as f64 / GB as f64
+            swap_space_bytes as f64 / GB as f64,
+            free_cpu_memory as f64 / GB as f64
         );
 
         if swap_space_bytes > (0.7 * free_cpu_memory as f64) as usize {
