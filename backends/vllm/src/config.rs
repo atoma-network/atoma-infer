@@ -265,7 +265,7 @@ impl CacheConfig {
     /// Verify `CacheConfig` cache dtype
     fn verify_cache_dtype(&self) -> Result<(), CacheConfigError> {
         if !["auto", "bf16", "f16", "f32"].contains(&self.cache_dtype.as_str()) {
-            return Err(CacheConfigError::InvalidCacheDtype(cache_dtype.clone()));
+            return Err(CacheConfigError::InvalidCacheDtype(self.cache_dtype.clone()));
         }
         Ok(())
     }
@@ -309,7 +309,7 @@ impl CacheConfig {
 #[derive(Debug, Error)]
 pub enum CacheConfigError {
     #[error("Invalid dtype parse error: `{0}`")]
-    InvalidDtype(DTypeParseError),
+    DtypeParseError(#[from] DTypeParseError),
     #[error("Invalid GPU memory utilization: `{0}`")]
     InvalidGpuMemoryUtilization(f32),
     #[error("Invalid cache dtype: `{0}`")]
