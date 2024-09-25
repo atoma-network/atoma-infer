@@ -527,7 +527,7 @@ pub(crate) mod utils {
             let total_block_memory_in_bytes =
                 block_size * num_kv_heads * hidden_dim * dtype.size_in_bytes();
             let num_gpu_blocks = (*free_memory as f32 * gpu_memory_utilization).floor() as usize
-                / (block_size * num_kv_heads * hidden_dim);
+                / total_block_memory_in_bytes;
 
             Ok(num_gpu_blocks)
         }
