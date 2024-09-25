@@ -82,7 +82,7 @@ impl ModelConfig {
     pub fn from_env_file() -> Self {
         dotenv().ok();
 
-        let api_key = std::env::var("API_KEY").ok();
+        let api_key = std::env::var("API_KEY").ok().unwrap_or_default();
         let cache_dir = std::env::var("CACHE_DIR")
             .unwrap_or_default()
             .parse()
@@ -244,7 +244,7 @@ impl CacheConfig {
     /// Verify `CacheConfig` cache dtype
     fn verify_cache_dtype(&self) -> Result<(), CacheConfigError> {
         if let Some(cache_dtype) = &self.cache_dtype {
-            if !vec!["auto", "bf16", "f16", "f32"].contains(&cache_dtype) {
+            if !vec!["auto", "bf16", "f16", "f32"].contains(&cache_dtype.as_str()) {
                 return Err(CacheConfigError::InvalidCacheDtype(cache_dtype.clone()));
             }
         }

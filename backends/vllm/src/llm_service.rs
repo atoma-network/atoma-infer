@@ -10,7 +10,7 @@ use crate::{
     types::GenerateRequest,
     validation::{ValidGenerateRequest, Validation, ValidationError},
 };
-use candle_core::{DType, DTypeParseError, Device};
+use candle_core::{DType, DTypeParseError, Device, Error as CandleError};
 use candle_transformers::generation::{LogitsProcessor, Sampling};
 use metrics::{counter, gauge};
 use thiserror::Error;
@@ -318,6 +318,8 @@ pub enum LlmServiceError {
     BoxedError(#[from] Box<dyn std::error::Error + Send + Sync>),
     #[error("Cache config error: `{0}`")]
     CacheConfigError(#[from] CacheConfigError),
+    #[error("Candle error: `{0}`")]
+    CandleError(#[from] CandleError),
     #[error("DType parse error: `{0}`")]
     DTypeParseError(#[from] DTypeParseError),
     #[error("Model loader error: `{0}`")]
