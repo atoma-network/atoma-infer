@@ -1,7 +1,7 @@
 # TODO: This could be a nix derivation instead which would be more ideal
 # since here we are checking out an unverified rust toolchain, on a system
 # we only know is running ubuntu-latest, etc.
-name: Integration Test on Pull Request
+name: Server Integration Tests
 
 on:
   pull_request:
