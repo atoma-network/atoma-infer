@@ -1,4 +1,4 @@
-use candle_core::DType;
+use candle_core::{DType, DTypeParseError};
 use config::Config;
 use dotenv::dotenv;
 use serde::{Deserialize, Serialize};
@@ -180,10 +180,10 @@ impl CacheConfig {
             this.swap_space_bytes = Some(utils::calculate_swap_space(swap_space_fraction)?);
             this.num_cpu_blocks = Some(utils::calculate_num_cpu_blocks(
                 this.block_size,
-                this.swap_space_bytes.unwrap(),
+                dtype,
                 num_kv_heads,
                 hidden_dim,
-                dtype,
+                this.swap_space_bytes.unwrap(),
             )?);
         }
 
@@ -264,7 +264,7 @@ impl CacheConfig {
 
     /// Verify `CacheConfig` cache dtype
     fn verify_cache_dtype(&self) -> Result<(), CacheConfigError> {
-        if !["auto", "bf16", "f16", "f32"].contains(&cache_dtype.as_str()) {
+        if !["auto", "bf16", "f16", "f32"].contains(&self.cache_dtype.as_str()) {
             return Err(CacheConfigError::InvalidCacheDtype(cache_dtype.clone()));
         }
         Ok(())
@@ -308,6 +308,8 @@ impl CacheConfig {
 
 #[derive(Debug, Error)]
 pub enum CacheConfigError {
+    #[error("Invalid dtype parse error: `{0}`")]
+    InvalidDtype(DTypeParseError),
     #[error("Invalid GPU memory utilization: `{0}`")]
     InvalidGpuMemoryUtilization(f32),
     #[error("Invalid cache dtype: `{0}`")]
