@@ -7,4 +7,4 @@ edition.workspace = true
 atoma-vllm-backend = { path = "vllm" }
 
 [features]
-vllm = ["dep:vllm", "atoma-vllm-backend"]
+vllm = ["dep:atoma-vllm-backend", "atoma-vllm-backend"]
