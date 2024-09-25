@@ -282,7 +282,7 @@ impl LlmService {
 
         // Flush storage if configured
         if self.model_config.flush_storage {
-            match tokio::fs::remove_dir(&self.model_config.cache_dir).await {
+            match tokio::fs::remove_dir_all(&self.model_config.cache_dir).await {
                 Ok(()) => info!("Successfully removed storage folder"),
                 Err(e) => error!("Failed to remove storage folder, on shutdown: {e}"),
             }
