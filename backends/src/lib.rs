@@ -1,2 +1,2 @@
 #[cfg(feature = "vllm")]
-pub mod vllm;
+pub mod atoma_vllm_backend;
