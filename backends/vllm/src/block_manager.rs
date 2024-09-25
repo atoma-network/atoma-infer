@@ -38,6 +38,8 @@ pub enum AllocationStatus {
 pub struct BlockSpaceManager {
     /// Block size
     pub(crate) block_size: usize,
+    /// Number of gpu blocks
+    pub(crate) num_gpu_blocks: usize,
     /// Block tables, mapping: `seq_id` -> `BlockTable`
     pub(crate) block_tables: HashMap<u64, BlockTable>,
     /// CPU allocator
@@ -79,6 +81,7 @@ impl BlockSpaceManager {
             block_tables: HashMap::new(),
             cpu_allocator,
             gpu_allocator,
+            num_gpu_blocks,
             block_sliding_window,
         })
     }
@@ -130,7 +133,7 @@ impl BlockSpaceManager {
 
             if num_free_gpu_blocks >= num_required_blocks {
                 AllocationStatus::Ok
-            } else if self.get_num_free_blocks(BlockDevice::Gpu) < num_required_blocks {
+            } else if self.num_gpu_blocks < num_required_blocks {
                 AllocationStatus::Never
             } else {
                 AllocationStatus::Later
