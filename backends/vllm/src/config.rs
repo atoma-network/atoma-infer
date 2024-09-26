@@ -4,7 +4,7 @@ use dotenv::dotenv;
 use serde::{Deserialize, Serialize};
 use std::{path::Path, str::FromStr};
 use thiserror::Error;
-use tracing::warn;
+use tracing::{info, warn};
 
 const KB: usize = 1 << 10;
 const GB: usize = 1 << 30;
@@ -448,7 +448,34 @@ pub(crate) mod utils {
     use super::*;
     use cuda_runtime_sys::*;
 
-    /// Calculate the swap space in bytes based on the total system memory and the fraction of memory to be used for the swap space.
+    /// Calculate the swap space in bytes based on the available system memory and the specified fraction.
+    ///
+    /// This function determines the amount of memory to allocate for the swap space, which is used
+    /// for storing parts of the KV cache that don't fit in GPU memory.
+    ///
+    /// # Arguments
+    ///
+    /// * `fraction` - A float between 0.0 and 1.0 representing the fraction of free system memory
+    ///                to use for the swap space.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(usize)` - The calculated swap space size in bytes.
+    /// * `Err(CacheConfigError)` - If there's an error in the calculation or if the input is invalid.
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error in the following cases:
+    /// * If `fraction` is not between 0.0 and 1.0 (inclusive).
+    /// * If it fails to retrieve system memory information.
+    /// * If the calculated swap space is too large (> 70% of free memory).
+    ///
+    /// # Notes
+    ///
+    /// * The function will log a warning if the swap space is between 40% and 70% of free memory.
+    /// * The calculation is based on the currently available free system memory.
+    /// * The result is in bytes, converted from the system's reporting in kilobytes.
+    ///
     pub(crate) fn calculate_swap_space(fraction: f32) -> Result<usize, CacheConfigError> {
         if fraction <= 0.0 || fraction > 1.0 {
             return Err(CacheConfigError::InvalidSwapSpaceFraction(fraction));
@@ -467,6 +494,7 @@ pub(crate) mod utils {
             swap_space_bytes as f64 / GB as f64,
             free_cpu_memory as f64 / GB as f64
         );
+        info!("{}", msg);
 
         if swap_space_bytes > (0.7 * free_cpu_memory as f64) as usize {
             return Err(CacheConfigError::SwapSpaceTooLarge(msg));
@@ -477,8 +505,39 @@ pub(crate) mod utils {
         Ok(swap_space_bytes)
     }
 
-    /// Calculate the number of GPU blocks to use based on the block size, the GPU memory utilization rate
-    /// and the model's number of key-value heads and hidden dimensions, as well as each weight's size in bytes.
+    /// Calculates the number of GPU blocks that can be used for the KV cache based on available GPU memory.
+    ///
+    /// This function determines the number of blocks that can be allocated on the GPU for the key-value cache,
+    /// taking into account the GPU memory utilization rate, model architecture, and data type.
+    ///
+    /// # Arguments
+    ///
+    /// * `block_size` - The size of each block in number of tokens.
+    /// * `gpu_memory_utilization` - The fraction of free GPU memory to be used for the KV cache (0.0 to 1.0).
+    /// * `num_hidden_layers` - The number of hidden layers in the model.
+    /// * `num_kv_heads` - The number of key-value attention heads.
+    /// * `hidden_dim` - The dimension of the hidden layers.
+    /// * `dtype` - The data type used for the tensors, which affects memory usage.
+    ///
+    /// # Returns
+    ///
+    /// Returns a `Result` containing the number of GPU blocks that can be allocated,
+    /// or a `CacheConfigError` if there's an issue with GPU memory querying or calculation.
+    ///
+    /// # Errors
+    ///
+    /// This function can return the following errors:
+    /// - `CacheConfigError::GpuMemoryQueryError` if there's a failure in querying GPU information or memory.
+    ///
+    /// # Safety
+    ///
+    /// This function is marked as `unsafe` due to its use of CUDA API calls.
+    ///
+    /// # Note
+    ///
+    /// - This function assumes that the model weights have already been loaded into GPU memory.
+    /// - It calculates based on the GPU with the least available memory to ensure consistency across all devices.
+    /// - The actual number of blocks is determined by the available free memory and the specified utilization rate.
     pub(crate) fn calculate_num_gpu_blocks(
         block_size: usize,
         gpu_memory_utilization: f32,
@@ -542,6 +601,28 @@ pub(crate) mod utils {
         }
     }
 
+    /// Calculates the number of CPU blocks that can be allocated in the swap space.
+    ///
+    /// This function determines how many blocks of the KV cache can be stored in the CPU memory,
+    /// given the available swap space and the memory requirements of each block.
+    ///
+    /// # Arguments
+    ///
+    /// * `block_size` - The size of each block in number of tokens.
+    /// * `dtype` - The data type used for the cache, which affects the memory usage.
+    /// * `num_hidden_layers` - The number of hidden layers in the model.
+    /// * `num_kv_heads` - The number of key-value heads in the model.
+    /// * `hidden_dim` - The dimension of the hidden layers.
+    /// * `swap_space_bytes` - The total amount of swap space available in bytes.
+    ///
+    /// # Returns
+    ///
+    /// Returns a `Result` containing the number of CPU blocks that can be allocated,
+    /// or a `CacheConfigError` if the calculation fails.
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if the calculation of the total block memory fails.
     pub(crate) fn calculate_num_cpu_blocks(
         block_size: usize,
         dtype: DType,
@@ -561,6 +642,26 @@ pub(crate) mod utils {
         Ok(num_cpu_blocks)
     }
 
+    /// Computes the total memory required for a single block in the KV cache.
+    ///
+    /// This function calculates the total memory needed for both Key and Value tensors
+    /// in a single block of the KV cache, based on the model's architecture and the chosen data type.
+    ///
+    /// # Arguments
+    ///
+    /// * `block_size` - The number of tokens in each block.
+    /// * `num_hidden_layers` - The number of hidden layers in the model.
+    /// * `num_kv_heads` - The number of key-value attention heads.
+    /// * `hidden_dim` - The dimension of the hidden layers.
+    /// * `dtype` - The data type used for the tensors, which determines the size in bytes for each element.
+    ///
+    /// # Returns
+    ///
+    /// Returns the total memory required for a single block in bytes.
+    ///
+    /// # Note
+    ///
+    /// The function doubles the calculated memory to account for both Key and Value tensors.
     fn compute_total_block_memory_in_bytes(
         block_size: usize,
         num_hidden_layers: usize,
