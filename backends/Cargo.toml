@@ -1,0 +1,10 @@
+[package]
+name = "atoma-backends"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+atoma-vllm-backend = { path = "vllm", optional = true }
+
+[features]
+vllm = ["dep:atoma-vllm-backend"]
