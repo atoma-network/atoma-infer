@@ -2,7 +2,7 @@
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize};
-use serde_json::{json, Value};
+use serde_json::Value;
 
 // TODO: fields that are named `r#type` should have values that represent
 // actual expected types that are deserializable from a string instead of
@@ -206,7 +206,7 @@ impl RequestBody {
                         r#type: "function".into(),
                         function: ToolCallFunction {
                             name: "myFunction".into(),
-                            arguments: json!({"key": "value"}),
+                            arguments: serde_json::json!({"key": "value"}),
                         },
                     }],
                 },

@@ -21,6 +21,7 @@ pub mod api;
 pub const CHAT_COMPLETIONS_PATH: &str = "/chat/completions";
 pub const DEFAULT_SERVER_ADDRESS: &str = "0.0.0.0";
 pub const DEFAULT_SERVER_PORT: &str = "8080";
+pub const AUTH_BEARER_PREFIX: &str = "Bearer ";
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -49,14 +50,15 @@ pub async fn completion_handler(
     headers: HeaderMap,
     Json(request): Json<RequestBody>,
 ) -> impl IntoResponse {
-    if let Some(auth_header) = headers.get(header::AUTHORIZATION) {
-        if let Ok(auth_str) = auth_header.to_str() {
-            // Check if it starts with "Bearer" and extract the token
-            if let Some(token) = auth_str.strip_prefix("Bearer ") {
-                println!("Authorization token: {}", token);
-            }
-        }
-    }
+    let _auth_key = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|auth_value| -> Option<&str> {
+            auth_value
+                .to_str()
+                .ok()
+                .and_then(|auth_header_str| auth_header_str.strip_prefix(AUTH_BEARER_PREFIX))
+        })
+        .unwrap_or_default();
     match &request.model() {
         // TODO: Use information from the deserialized request
         // and return the response from the model
