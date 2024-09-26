@@ -1,0 +1,23 @@
+[inference]
+api_key = ""
+cache_dir = "./cache/"
+flush_storage = true
+model_name = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+device_ids = [0]
+dtype = "bf16"
+num_tokenizer_workers = 4
+revision = "main"
+
+[cache]
+block_size = 16
+cache_dtype = "bf16" # Most often, it agrees with inference.dtype
+gpu_memory_utilization = 0.5
+swap_space_fraction = 0.1
+
+[scheduler]
+max_num_batched_tokens = 1024
+max_num_sequences = 1024
+max_model_len = 32
+delay_factor = 0.8
+enable_chunked_prefill = true
+block_size = 16

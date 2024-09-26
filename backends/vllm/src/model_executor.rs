@@ -81,7 +81,7 @@ pub trait ModelMetadata: ModelLoader {
     /// Returns the End-of-Sequence (EOS) token IDs, if defined
     fn eos_token_ids(&self) -> Option<Vec<u32>>;
     /// Returns the size of the hidden layers in the model
-    fn hidden_size(&self) -> usize;
+    fn hidden_dim(&self) -> usize;
     /// Returns the number of attention heads in the model
     fn num_attention_heads(&self) -> usize;
     /// Returns the number of hidden layers in the model
@@ -343,16 +343,11 @@ impl ModelThreadDispatcher {
         let (sender, receiver) = mpsc::unbounded_channel();
 
         let join_handle = tokio::task::spawn_blocking(move || {
-            let block_size = cache_config.block_size();
-            let num_cpu_blocks = cache_config.num_cpu_blocks();
-            let num_gpu_blocks = cache_config.num_gpu_blocks();
             let model_worker = ModelWorker::<M>::new(
-                block_size,
+                cache_config,
                 device,
                 dtype,
                 model,
-                num_cpu_blocks,
-                num_gpu_blocks,
                 scheduler_config.enable_chunked_prefill(),
             )?;
             let model_thread = ModelThread {

@@ -9,7 +9,6 @@ license = "MIT OR Apache-2.0"
 [dependencies]
 candle-core = { workspace = true, features = ["cuda"] }
 cuda-runtime-sys = { workspace = true }
-cuda-sys = { workspace = true }
 half = { workspace = true, features = ["num-traits"] }
 help = { workspace = true }
 

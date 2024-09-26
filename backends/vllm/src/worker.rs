@@ -1,6 +1,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use crate::{
+    config::CacheConfig,
     model_executor::{ModelExecutor, ModelExecutorError, ModelLoaderError},
     sequence::{ExecuteModelRequest, SequenceGroupMetadata, SequenceGroupOutput},
 };
@@ -59,12 +60,10 @@ where
     /// Constructor
     #[instrument(skip_all)]
     pub fn new(
-        block_size: usize,
+        cache_config: CacheConfig,
         device: Device,
         dtype: DType,
         model: M,
-        num_cpu_blocks: usize,
-        num_gpu_blocks: usize,
         enable_chunked_prefill: bool,
     ) -> Result<Self, ModelWorkerError> {
         let span = info_span!("model-worker");
@@ -73,16 +72,14 @@ where
 
         info!("Starting a new `ModelWorker` instance");
         let cache_engine = CacheEngine::new(
-            block_size,
+            cache_config,
             device.clone(),
             dtype,
             model.alibi_slopes(),
-            model.hidden_size() / model.num_attention_heads(),
+            model.hidden_dim(),
             model.num_attention_heads(),
-            model.num_attention_heads(),
+            model.num_hidden_layers(),
             model.num_kv_heads(),
-            num_cpu_blocks,
-            num_gpu_blocks,
             model.softmax_scale(),
             model.sliding_window(),
         )?;
@@ -102,7 +99,7 @@ where
 
     /// Determines the number of available GPU blocks
     pub fn num_available_gpu_blocks(&self) -> usize {
-        todo!()
+        self.cache_engine.get_num_gpu_blocks()
     }
 
     /// Executes model's forward pass
@@ -305,8 +302,9 @@ where
 
                     // 7. If sliding window is used, we need to trim the block table
                     if let Some(sliding_window) = self.model.sliding_window() {
-                        let sw_block_num = (sliding_window + self.cache_engine.block_size - 1)
-                            / self.cache_engine.block_size;
+                        let sw_block_num = (sliding_window + self.cache_engine.get_block_size()
+                            - 1)
+                            / self.cache_engine.get_block_size();
                         let start = block_table.len().saturating_sub(sw_block_num);
                         block_table = block_table[start..].to_vec();
                     }
@@ -378,10 +376,10 @@ where
                     if i < start_index {
                         PAD_SLOT_ID
                     } else {
-                        let block_number = block_table[i / self.cache_engine.block_size];
-                        let block_offset = i % self.cache_engine.block_size;
-                        ((block_number as usize) * self.cache_engine.block_size + block_offset)
-                            as i64
+                        let block_number = block_table[i / self.cache_engine.get_block_size()];
+                        let block_offset = i % self.cache_engine.get_block_size();
+                        ((block_number as usize) * self.cache_engine.get_block_size()
+                            + block_offset) as i64
                     }
                 }));
             }
@@ -469,16 +467,12 @@ pub enum ModelWorkerError {
 /// caches. It also provides methods for performing KV cache operations, such
 /// as swapping and copying.
 pub struct CacheEngine {
-    /// Block size
-    block_size: usize,
+    /// Cache config
+    cache_config: CacheConfig,
     /// Model's Cache dtype
     dtype: DType,
     /// Number of layers
-    num_layers: usize,
-    /// Number of CPU blocks
-    num_cpu_blocks: usize,
-    /// Number of GPU blocks
-    num_gpu_blocks: usize,
+    num_hidden_layers: usize,
     /// Flash attention backend,
     /// compatible with paged attention
     attention: FlashAttention,
@@ -495,26 +489,22 @@ impl CacheEngine {
     #[instrument(skip_all)]
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        block_size: usize,
+        cache_config: CacheConfig,
         device: Device,
         dtype: DType,
         alibi_slopes: Option<&Tensor>,
         head_dim: usize,
         num_attention_heads: usize,
-        num_layers: usize,
+        num_hidden_layers: usize,
         num_kv_heads: usize,
-        num_cpu_blocks: usize,
-        num_gpu_blocks: usize,
         softmax_scale: f32,
         sliding_window: Option<usize>,
     ) -> Result<Self, CacheEngineError> {
         info!("Starting a new `CacheEngine` instance");
         let mut this = Self {
-            block_size,
+            cache_config,
             dtype,
-            num_layers,
-            num_cpu_blocks,
-            num_gpu_blocks,
+            num_hidden_layers,
             attention: FlashAttention::new(
                 num_attention_heads,
                 num_kv_heads,
@@ -530,8 +520,8 @@ impl CacheEngine {
             span: info_span!("cache-engine"),
         };
 
-        this.cpu_cache = this.allocate_blocks(this.num_cpu_blocks, &Device::Cpu)?;
-        this.gpu_cache = this.allocate_blocks(this.num_gpu_blocks, &device)?;
+        this.cpu_cache = this.allocate_blocks(this.get_num_cpu_blocks(), &Device::Cpu)?;
+        this.gpu_cache = this.allocate_blocks(this.get_num_gpu_blocks(), &device)?;
 
         Ok(this)
     }
@@ -546,12 +536,12 @@ impl CacheEngine {
         let _enter = self.span.enter();
         let kv_cache_shape = FlashAttention::get_kv_cache_shape(
             num_blocks,
-            self.block_size,
+            self.get_block_size(),
             self.attention.num_kv_heads,
             self.attention.head_dim,
         );
-        let mut kv_caches = Vec::with_capacity(self.num_layers);
-        for _ in 0..self.num_layers {
+        let mut kv_caches = Vec::with_capacity(self.num_hidden_layers);
+        for _ in 0..self.num_hidden_layers {
             kv_caches.push(Tensor::zeros(kv_cache_shape.clone(), self.dtype, device)?);
         }
 
@@ -565,7 +555,7 @@ impl CacheEngine {
         blocks_to_swap_in: &HashMap<u32, u32>,
     ) -> Result<(), CacheEngineError> {
         let _enter = self.span.enter();
-        for i in 0..self.num_layers {
+        for i in 0..self.num_hidden_layers {
             self.attention.swap_blocks(
                 &self.cpu_cache[i],
                 &mut self.gpu_cache[i],
@@ -582,7 +572,7 @@ impl CacheEngine {
         blocks_to_swap_out: &HashMap<u32, u32>,
     ) -> Result<(), CacheEngineError> {
         let _enter = self.span.enter();
-        for i in 0..self.num_layers {
+        for i in 0..self.num_hidden_layers {
             self.attention.swap_blocks(
                 &self.gpu_cache[i],
                 &mut self.cpu_cache[i],
@@ -600,6 +590,18 @@ impl CacheEngine {
             &mut self.gpu_cache,
             blocks_to_copy,
         )?)
+    }
+
+    pub fn get_block_size(&self) -> usize {
+        self.cache_config.block_size()
+    }
+
+    pub fn get_num_cpu_blocks(&self) -> usize {
+        self.cache_config.num_cpu_blocks().unwrap()
+    }
+
+    pub fn get_num_gpu_blocks(&self) -> usize {
+        self.cache_config.num_gpu_blocks().unwrap()
     }
 }
 

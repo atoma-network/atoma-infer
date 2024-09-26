@@ -104,7 +104,10 @@ impl LogicalTokenBlock {
     #[instrument(skip_all)]
     pub fn append_tokens(&mut self, token_ids: &[u32]) -> Result<(), BlockError> {
         let _enter = self.span.enter();
-        trace!("Appending tokens to block with number: {}", self.block_number);
+        trace!(
+            "Appending tokens to block with number: {}",
+            self.block_number
+        );
         if token_ids.len() <= self.get_num_empty_slots() {
             self.token_ids.extend(token_ids);
             self.num_tokens += token_ids.len();

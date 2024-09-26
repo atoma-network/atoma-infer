@@ -158,7 +158,7 @@ pub struct RequestMetrics {
 ///
 /// This struct holds information about the prompt and generated output tokens,
 /// as well as metadata about the sequence's processing state.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct SequenceData {
     /// The token IDs of the initial prompt
     prompt_token_ids: Vec<u32>,
@@ -172,6 +172,16 @@ pub struct SequenceData {
     stage: SequenceStage,
     /// Tracing span
     span: Span,
+}
+
+impl PartialEq for SequenceData {
+    fn eq(&self, other: &Self) -> bool {
+        self.prompt_token_ids == other.prompt_token_ids
+            && self.output_token_ids == other.output_token_ids
+            && self.cumulative_logprob == other.cumulative_logprob
+            && self.num_computed_tokens == other.num_computed_tokens
+            && self.stage == other.stage
+    }
 }
 
 impl SequenceData {
@@ -444,7 +454,7 @@ impl SequenceData {
 }
 
 /// `Sequence` - Represents a single sequence in the generation process, storing its data, status, and block information.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct Sequence {
     /// Unique identifier for the sequence.
     sequence_id: u64,
@@ -470,6 +480,22 @@ pub struct Sequence {
     pub tokens: Vec<String>,
     /// Tracing span for the sequence.
     span: Span,
+}
+
+impl PartialEq for Sequence {
+    fn eq(&self, other: &Self) -> bool {
+        self.sequence_id == other.sequence_id
+            && self.prompt == other.prompt
+            && self.prompt_token_ids == other.prompt_token_ids
+            && self.sequence_data == other.sequence_data
+            && self.block_size == other.block_size
+            && self.logical_token_blocks == other.logical_token_blocks
+            && self.output_text == other.output_text
+            && self.output_logprobs == other.output_logprobs
+            && self.sequence_status == other.sequence_status
+            && self.stop_reason == other.stop_reason
+            && self.tokens == other.tokens
+    }
 }
 
 impl Sequence {

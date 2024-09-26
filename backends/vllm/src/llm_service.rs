@@ -1,10 +1,7 @@
-use std::{
-    path::{Path, PathBuf},
-    time::Instant,
-};
+use std::{path::Path, str::FromStr, time::Instant};
 
 use crate::{
-    config::{CacheConfig, SchedulerConfig},
+    config::{CacheConfig, CacheConfigError, ModelConfig, SchedulerConfig, SchedulerConfigError},
     llm_engine::{EngineError, GenerateRequestOutput, LlmEngine},
     model_executor::{ModelExecutor, ModelLoaderError, ModelThreadDispatcher, ModelThreadError},
     scheduler::{Scheduler, SchedulerError},
@@ -13,7 +10,7 @@ use crate::{
     types::GenerateRequest,
     validation::{ValidGenerateRequest, Validation, ValidationError},
 };
-use candle_core::{DType, Device};
+use candle_core::{DType, DTypeParseError, Device, Error as CandleError};
 use candle_transformers::generation::{LogitsProcessor, Sampling};
 use metrics::{counter, gauge};
 use thiserror::Error;
@@ -25,10 +22,7 @@ use tokio::{
 use tracing::{error, info, info_span, instrument, Span};
 
 // TODO:
-// 1. We should have a configurable number of tokenizer workers
-//     in the service. This can be a configurable parameter.
-// 2. Add a configuration file for the `LlmService` struct
-// 3. Add proper tokenizer shutdown logic, and other related services
+// 1. Add proper tokenizer shutdown logic, and other related services
 
 /// `LlmService` - the entrypoint of the Atoma's inference service.
 /// It receives requests from the Atoma's event subscriber
@@ -44,13 +38,11 @@ pub struct LlmService {
     atoma_engine_sender: UnboundedSender<SequenceGroup>,
     /// Block size
     block_size: usize,
-    /// Model weights cache directory
-    cache_dir: PathBuf,
-    /// Flushes the model storage, once the service is stopped
-    flush_storage: bool,
     /// Join handle for the background task
     /// running the `LlmEngine` instance
     llm_engine_handle: JoinHandle<Result<(), LlmServiceError>>,
+    /// Model config
+    model_config: ModelConfig,
     /// Starting time of the instance
     start_time: Instant,
     /// Request counter
@@ -69,19 +61,10 @@ impl LlmService {
     /// Starts the service
     #[instrument(skip_all)]
     #[allow(clippy::too_many_arguments)]
-    pub async fn start<M, T: AsRef<Path>>(
-        api_key: String,
+    pub async fn start<M, P: AsRef<Path>>(
         atoma_event_subscriber_receiver: UnboundedReceiver<GenerateRequest>,
         atoma_client_sender: UnboundedSender<Vec<GenerateRequestOutput>>,
-        cache_config: CacheConfig,
-        cache_dir: T,
-        device: Device,
-        dtype: DType,
-        flush_storage: bool,
-        model_name: String,
-        num_tokenizer_workers: usize,
-        revision: String,
-        scheduler_config: SchedulerConfig,
+        config_path: P,
         tokenizer_receiver: mpsc::UnboundedReceiver<EncodeTokenizerRequest>,
         validation_service: Validation,
         shutdown_signal: mpsc::Receiver<()>,
@@ -95,24 +78,45 @@ impl LlmService {
 
         info!("Starting a new `LlmService` instance..");
 
+        let model_config = ModelConfig::from_file_path(config_path.as_ref());
+        // NOTE: for now we use a synchronous model loader, on the instance's thread, as the service
+        // should not make any progress until the model is loaded in GPU memory
+        let file_paths = M::fetch(
+            model_config.api_key.clone(),
+            model_config.cache_dir.clone(),
+            model_config.model_name.clone(),
+            model_config.revision.clone(),
+        )?;
+        let tokenizer = Tokenizer::from_file(&file_paths.tokenizer_path)?;
+        // NOTE: we load the model on GPU memory, as to properly compute the number of blocks
+        // during the system profiling stage. See `compute_num_gpu_blocks` comments
+        // in the file `config.rs` for more details.
+        // TODO: support multi-GPUs
+        let device = Device::new_cuda(model_config.device_ids[0])?;
+        let dtype = DType::from_str(&model_config.dtype)?;
+        let model = M::load(device.clone(), dtype, &file_paths)?;
+
+        let cache_config = CacheConfig::from_file_path(
+            config_path.as_ref(),
+            model.num_kv_heads(),
+            model.hidden_dim(),
+            model.num_hidden_layers(),
+        )?;
+        let scheduler_config = SchedulerConfig::from_file_path(config_path.as_ref())?;
+
         let block_size = cache_config.block_size;
         let scheduler = Scheduler::new(cache_config.clone(), scheduler_config.clone())?;
 
         let start_time = Instant::now();
 
-        // We do not need to spawn a new thread for fetching model weights files,
-        // as the service will not start until the model is loaded in memory
-        // NOTE: for now we use a synchronous model loader
-        let file_paths = M::fetch(api_key, &cache_dir, model_name, revision)?;
-        let tokenizer = Tokenizer::from_file(&file_paths.tokenizer_path)?;
-        let model = M::load(device.clone(), dtype, &file_paths)?;
-
         let cloned_tokenizer = tokenizer.clone();
         let tokenizer_handle = tokio::spawn(async move {
-            Ok(
-                TokenizerWorker::start(cloned_tokenizer, tokenizer_receiver, num_tokenizer_workers)
-                    .await?,
+            Ok(TokenizerWorker::start(
+                cloned_tokenizer,
+                tokenizer_receiver,
+                model_config.num_tokenizer_workers,
             )
+            .await?)
         });
 
         let model_thread_dispatcher = ModelThreadDispatcher::start::<M>(
@@ -140,10 +144,9 @@ impl LlmService {
         Ok(Self {
             atoma_event_subscriber_receiver,
             atoma_engine_sender: request_sender,
-            cache_dir: cache_dir.as_ref().to_path_buf(),
             block_size,
-            flush_storage,
             llm_engine_handle,
+            model_config,
             request_counter: 0,
             start_time,
             validation_service,
@@ -172,7 +175,7 @@ impl LlmService {
                             //       errors should also be committed to, by the node.
                         }
                     };
-                    self.atoma_engine_sender.send(sequence_group)?;
+                    self.atoma_engine_sender.send(sequence_group).map_err(Box::new)?;
                 },
                 _ = self.shutdown_signal.recv() => {
                     info!("Received shutdown signal, stopping `LlmService` instance..");
@@ -279,8 +282,8 @@ impl LlmService {
         );
 
         // Flush storage if configured
-        if self.flush_storage {
-            match tokio::fs::remove_dir(&self.cache_dir).await {
+        if self.model_config.flush_storage {
+            match tokio::fs::remove_dir_all(&self.model_config.cache_dir).await {
                 Ok(()) => info!("Successfully removed storage folder"),
                 Err(e) => error!("Failed to remove storage folder, on shutdown: {e}"),
             }
@@ -317,20 +320,28 @@ impl LlmService {
 pub enum LlmServiceError {
     #[error("Boxed error: `{0}`")]
     BoxedError(#[from] Box<dyn std::error::Error + Send + Sync>),
+    #[error("Cache config error: `{0}`")]
+    CacheConfigError(#[from] CacheConfigError),
+    #[error("Candle error: `{0}`")]
+    CandleError(#[from] CandleError),
+    #[error("DType parse error: `{0}`")]
+    DTypeParseError(#[from] DTypeParseError),
     #[error("Model loader error: `{0}`")]
     ModelLoaderError(#[from] ModelLoaderError),
     #[error("Model thread error: `{0}`")]
     ModelThreadError(#[from] ModelThreadError),
-    #[error("Scheduler error: `{0}`")]
-    SchedulerError(#[from] SchedulerError),
     #[error("Engine error: `{0}`")]
     EngineError(#[from] EngineError),
     #[error("Validation error: `{0}`")]
     ValidationError(#[from] ValidationError),
+    #[error("Scheduler error: `{0}`")]
+    SchedulerError(#[from] SchedulerError),
+    #[error("Scheduler config error: `{0}`")]
+    SchedulerConfigError(#[from] SchedulerConfigError),
     #[error("Sequence error: `{0}`")]
     SequenceError(#[from] SequenceError),
     #[error("Send error: `{0}`")]
-    SendError(#[from] SendError<SequenceGroup>),
+    SendError(#[from] Box<SendError<SequenceGroup>>),
     #[error("Tokenizer error: `{0}`")]
     TokenizerError(#[from] TokenizerError),
 }

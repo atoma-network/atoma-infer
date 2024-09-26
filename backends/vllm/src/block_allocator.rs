@@ -28,7 +28,6 @@ impl BlockAllocator {
     /// Constructor
     pub fn new(block_size: usize, device: BlockDevice, num_blocks: usize) -> Self {
         let free_blocks = (0..(num_blocks as u32))
-            .rev()
             .map(|i| {
                 Arc::new(RwLock::new(PhysicalTokenBlock::new(
                     i,

@@ -7,13 +7,13 @@ use std::{
 mod llama;
 
 use candle_core::{DType, Device, Tensor};
+use hf_hub::{api::sync::ApiBuilder, Repo, RepoType};
 use models::FlashAttentionMetadata;
 use rand::Rng;
 use tokio::sync::mpsc;
 use tracing::info;
 
 use crate::{
-    config::{CacheConfig, SchedulerConfig},
     llm_service::LlmService,
     model_executor::{
         ModelExecutor, ModelExecutorError, ModelFilePaths, ModelLoader, ModelLoaderError,
@@ -24,14 +24,11 @@ use crate::{
     validation::Validation,
 };
 
-const BLOCK_SIZE: usize = 16;
 const MAX_ELAPSED_INTERNAL: u64 = 50;
 const MAX_STOP_SEQUENCES: usize = 1;
 const MAX_TOP_N_TOKENS: u32 = 0;
 const MAX_INPUT_LENGTH: usize = 16;
 const MAX_TOTAL_TOKENS: u32 = 32;
-const NUM_CPU_BLOCKS: usize = 4096;
-const NUM_GPU_BLOCKS: usize = 4096;
 const EOS_TOKEN_ID: u32 = 2048;
 const VOCAB_SIZE: usize = 128;
 
@@ -39,14 +36,26 @@ struct MockModel {}
 
 impl ModelLoader for MockModel {
     fn fetch<T: AsRef<Path>>(
-        _: String,
-        _: T,
-        _: String,
-        _: String,
+        api_key: String,
+        cache_dir: T,
+        model_id: String,
+        revision: String,
     ) -> Result<ModelFilePaths, ModelLoaderError> {
+        let api = ApiBuilder::new()
+            .with_progress(true)
+            .with_token(Some(api_key))
+            .with_cache_dir(cache_dir.as_ref().to_path_buf())
+            .build()?;
+        let repo = api.repo(Repo::with_revision(
+            model_id.clone(),
+            RepoType::Model,
+            revision,
+        ));
+        let tokenizer_file_path = repo.get("tokenizer.json")?;
+
         Ok(ModelFilePaths {
             config_path: "".into(),
-            tokenizer_path: "".into(),
+            tokenizer_path: tokenizer_file_path,
             weights_path: vec![],
         })
     }
@@ -65,7 +74,7 @@ impl ModelMetadata for MockModel {
         Some(vec![EOS_TOKEN_ID])
     }
 
-    fn hidden_size(&self) -> usize {
+    fn hidden_dim(&self) -> usize {
         512
     }
 
@@ -139,20 +148,6 @@ async fn test_llm_engine() {
     let (atoma_event_subscriber_sender, atoma_event_subscriber_receiver) =
         mpsc::unbounded_channel();
 
-    let cache_config = CacheConfig::new(
-        BLOCK_SIZE,
-        1.0,
-        1,
-        None,
-        None,
-        NUM_CPU_BLOCKS,
-        NUM_GPU_BLOCKS,
-    )
-    .expect("Failed to create cache config");
-
-    let scheduler_config = SchedulerConfig::new(512, MAX_NUM_SEQUENCES, 512, 0.0, false, 0)
-        .expect("Failed to create scheduler config");
-
     let (tokenizer_sender, tokenizer_receiver) = mpsc::unbounded_channel();
     let validation = Validation::new(
         1,
@@ -164,19 +159,15 @@ async fn test_llm_engine() {
     );
     let (_, shutdown_signal) = mpsc::channel(1);
 
+    let config_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("src")
+        .join("tests")
+        .join("test_config_enable_chunked_prefill.toml");
+
     let service = LlmService::start::<MockModel, PathBuf>(
-        "".to_string(),
         atoma_event_subscriber_receiver,
         atoma_client_sender,
-        cache_config,
-        "./cache/".into(),
-        Device::Cpu,
-        DType::F16,
-        true,
-        "anthony/tokenizers-test".to_string(),
-        4,
-        "".to_string(),
-        scheduler_config,
+        config_path,
         tokenizer_receiver,
         validation,
         shutdown_signal,
@@ -261,20 +252,6 @@ async fn test_llm_engine_with_enable_chunking() {
     let (atoma_event_subscriber_sender, atoma_event_subscriber_receiver) =
         mpsc::unbounded_channel();
 
-    let cache_config = CacheConfig::new(
-        BLOCK_SIZE,
-        1.0,
-        1,
-        None,
-        None,
-        NUM_CPU_BLOCKS,
-        NUM_GPU_BLOCKS,
-    )
-    .expect("Failed to create cache config");
-
-    let scheduler_config = SchedulerConfig::new(512, MAX_NUM_SEQUENCES, 512, 0.0, true, 0)
-        .expect("Failed to create scheduler config");
-
     let (tokenizer_sender, tokenizer_receiver) = mpsc::unbounded_channel();
     let validation = Validation::new(
         1,
@@ -286,19 +263,15 @@ async fn test_llm_engine_with_enable_chunking() {
     );
     let (_, shutdown_signal) = mpsc::channel(1);
 
+    let config_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("src")
+        .join("tests")
+        .join("test_config_enable_chunked_prefill.toml");
+
     let service = LlmService::start::<MockModel, PathBuf>(
-        "".to_string(),
         atoma_event_subscriber_receiver,
         atoma_client_sender,
-        cache_config,
-        "./cache/".into(),
-        Device::Cpu,
-        DType::F16,
-        true,
-        "anthony/tokenizers-test".to_string(),
-        4,
-        "".to_string(),
-        scheduler_config,
+        config_path,
         tokenizer_receiver,
         validation,
         shutdown_signal,
