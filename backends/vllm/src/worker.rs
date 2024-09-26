@@ -78,7 +78,7 @@ where
             model.alibi_slopes(),
             model.hidden_dim(),
             model.num_attention_heads(),
-            model.num_attention_heads(),
+            model.num_hidden_layers(),
             model.num_kv_heads(),
             model.softmax_scale(),
             model.sliding_window(),
@@ -472,7 +472,7 @@ pub struct CacheEngine {
     /// Model's Cache dtype
     dtype: DType,
     /// Number of layers
-    num_layers: usize,
+    num_hidden_layers: usize,
     /// Flash attention backend,
     /// compatible with paged attention
     attention: FlashAttention,
@@ -495,7 +495,7 @@ impl CacheEngine {
         alibi_slopes: Option<&Tensor>,
         head_dim: usize,
         num_attention_heads: usize,
-        num_layers: usize,
+        num_hidden_layers: usize,
         num_kv_heads: usize,
         softmax_scale: f32,
         sliding_window: Option<usize>,
@@ -504,7 +504,7 @@ impl CacheEngine {
         let mut this = Self {
             cache_config,
             dtype,
-            num_layers,
+            num_hidden_layers,
             attention: FlashAttention::new(
                 num_attention_heads,
                 num_kv_heads,
@@ -540,8 +540,8 @@ impl CacheEngine {
             self.attention.num_kv_heads,
             self.attention.head_dim,
         );
-        let mut kv_caches = Vec::with_capacity(self.num_layers);
-        for _ in 0..self.num_layers {
+        let mut kv_caches = Vec::with_capacity(self.num_hidden_layers);
+        for _ in 0..self.num_hidden_layers {
             kv_caches.push(Tensor::zeros(kv_cache_shape.clone(), self.dtype, device)?);
         }
 
@@ -555,7 +555,7 @@ impl CacheEngine {
         blocks_to_swap_in: &HashMap<u32, u32>,
     ) -> Result<(), CacheEngineError> {
         let _enter = self.span.enter();
-        for i in 0..self.num_layers {
+        for i in 0..self.num_hidden_layers {
             self.attention.swap_blocks(
                 &self.cpu_cache[i],
                 &mut self.gpu_cache[i],
@@ -572,7 +572,7 @@ impl CacheEngine {
         blocks_to_swap_out: &HashMap<u32, u32>,
     ) -> Result<(), CacheEngineError> {
         let _enter = self.span.enter();
-        for i in 0..self.num_layers {
+        for i in 0..self.num_hidden_layers {
             self.attention.swap_blocks(
                 &self.gpu_cache[i],
                 &mut self.cpu_cache[i],
