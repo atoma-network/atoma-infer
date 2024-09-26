@@ -100,6 +100,7 @@ impl LlmService {
             config_path.as_ref(),
             model.num_kv_heads(),
             model.hidden_dim(),
+            model.num_hidden_layers(),
         )?;
         let scheduler_config = SchedulerConfig::from_file_path(config_path.as_ref())?;
 
@@ -240,7 +241,7 @@ impl LlmService {
                     temperature: valid_request.parameters.temperature as f64,
                 }
             };
-            
+
         let logits_processor =
             LogitsProcessor::from_sampling(valid_request.parameters.random_seed, sampling);
 

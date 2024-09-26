@@ -139,9 +139,9 @@ pub struct CacheConfig {
     pub(crate) block_size: usize,
     /// The KV cache dtype, if different from the model dtype
     pub(crate) cache_dtype: String,
-    /// The fraction of GPU memory to use for the vLLM execution
+    /// The fraction of free GPU memory to be allocated for the KV cache
     pub(crate) gpu_memory_utilization: f32,
-    /// Fraction of total system memory to use for swap space, this value is
+    /// Fraction of free system memory to use for swap space, this value is
     /// used to calculate the swap space in bytes if the latter is not specified
     pub(crate) swap_space_fraction: Option<f32>,
     /// Size of the CPU swap space per GPU, in bytes, filled using system profiling if not specified
@@ -162,6 +162,7 @@ impl CacheConfig {
         config_file_path: P,
         num_kv_heads: usize,
         hidden_dim: usize,
+        num_hidden_layers: usize,
     ) -> Result<Self, CacheConfigError> {
         let builder = Config::builder().add_source(config::File::with_name(
             config_file_path.as_ref().to_str().unwrap(),
@@ -181,6 +182,7 @@ impl CacheConfig {
             this.num_cpu_blocks = Some(utils::calculate_num_cpu_blocks(
                 this.block_size,
                 dtype,
+                num_hidden_layers,
                 num_kv_heads,
                 hidden_dim,
                 this.swap_space_bytes.unwrap(),
@@ -193,13 +195,14 @@ impl CacheConfig {
             let num_gpu_blocks = utils::calculate_num_gpu_blocks(
                 this.block_size,
                 this.gpu_memory_utilization,
+                num_hidden_layers,
                 num_kv_heads,
                 hidden_dim,
                 dtype,
             )?;
             this.num_gpu_blocks = Some(num_gpu_blocks);
         }
-        
+
         this.verify_args()?;
         this.verify_cache_dtype()?;
 
@@ -263,7 +266,9 @@ impl CacheConfig {
     /// Verify `CacheConfig` cache dtype
     fn verify_cache_dtype(&self) -> Result<(), CacheConfigError> {
         if !["auto", "bf16", "f16", "f32"].contains(&self.cache_dtype.as_str()) {
-            return Err(CacheConfigError::InvalidCacheDtype(self.cache_dtype.clone()));
+            return Err(CacheConfigError::InvalidCacheDtype(
+                self.cache_dtype.clone(),
+            ));
         }
         Ok(())
     }
@@ -477,6 +482,7 @@ pub(crate) mod utils {
     pub(crate) fn calculate_num_gpu_blocks(
         block_size: usize,
         gpu_memory_utilization: f32,
+        num_hidden_layers: usize,
         num_kv_heads: usize,
         hidden_dim: usize,
         dtype: DType,
@@ -522,8 +528,13 @@ pub(crate) mod utils {
                 .map(|(free, _)| free)
                 .min()
                 .unwrap();
-            let total_block_memory_in_bytes =
-                block_size * num_kv_heads * hidden_dim * dtype.size_in_bytes();
+            let total_block_memory_in_bytes = compute_total_block_memory_in_bytes(
+                block_size,
+                num_hidden_layers,
+                num_kv_heads,
+                hidden_dim,
+                dtype,
+            );
             let num_gpu_blocks = (*free_memory as f32 * gpu_memory_utilization).floor() as usize
                 / total_block_memory_in_bytes;
 
@@ -534,13 +545,31 @@ pub(crate) mod utils {
     pub(crate) fn calculate_num_cpu_blocks(
         block_size: usize,
         dtype: DType,
+        num_hidden_layers: usize,
         num_kv_heads: usize,
         hidden_dim: usize,
         swap_space_bytes: usize,
     ) -> Result<usize, CacheConfigError> {
-        let total_block_memory_in_bytes =
-            block_size * num_kv_heads * hidden_dim * dtype.size_in_bytes();
+        let total_block_memory_in_bytes = compute_total_block_memory_in_bytes(
+            block_size,
+            num_hidden_layers,
+            num_kv_heads,
+            hidden_dim,
+            dtype,
+        );
         let num_cpu_blocks = swap_space_bytes / total_block_memory_in_bytes;
         Ok(num_cpu_blocks)
+    }
+
+    fn compute_total_block_memory_in_bytes(
+        block_size: usize,
+        num_hidden_layers: usize,
+        num_kv_heads: usize,
+        hidden_dim: usize,
+        dtype: DType,
+    ) -> usize {
+        // We need to allocate twice the memory since we need to account for
+        // both the Key and Value tensors.
+        2 * block_size * num_hidden_layers * num_kv_heads * hidden_dim * dtype.size_in_bytes()
     }
 }

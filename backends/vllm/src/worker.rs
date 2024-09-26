@@ -99,7 +99,7 @@ where
 
     /// Determines the number of available GPU blocks
     pub fn num_available_gpu_blocks(&self) -> usize {
-        todo!()
+        self.cache_engine.get_num_gpu_blocks()
     }
 
     /// Executes model's forward pass
