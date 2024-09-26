@@ -32,10 +32,15 @@ async fn test_llama_model() {
         tokenizer_sender,
     );
 
+    let config_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("src")
+        .join("tests")
+        .join("test_config.toml");
+
     let llm_service = LlmService::start::<LlamaModel, _>(
         atoma_event_subscriber_receiver,
         atoma_client_sender,
-        "./test_config.toml".parse::<PathBuf>().unwrap(),
+        config_path,
         tokenizer_receiver,
         validation_service,
         shutdown_signal_receiver,
