@@ -19,13 +19,19 @@
       flake = false;
     };
 
+    nix-core = {
+      url = "github:Cloud-Scythe-Labs/nix-core";
+      inputs.nixpkgs.follows = "nixpkgs";
+      inputs.fenix.follows = "fenix";
+    };
+
     cutlass = {
       url = "github:NVIDIA/cutlass/56b46e2d13875b46b8f6a03f9f5ac91e2bfdc01a";
       flake = false;
     };
   };
 
-  outputs = { self, nixpkgs, crane, fenix, flake-utils, advisory-db, cutlass, ... }:
+  outputs = inputs@{ self, nixpkgs, crane, flake-utils, advisory-db, nix-core, ... }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = import nixpkgs {
@@ -38,18 +44,18 @@
 
         inherit (pkgs) lib;
 
-        craneLib = crane.mkLib pkgs;
+        rustToolchain = nix-core.toolchains.${system}.mkRustToolchainFromTOML
+          ./rust-toolchain.toml
+          "sha256-VZZnlyP69+Y3crrLHQyJirqlHrTtGTsyiSnZB8jEvVo=";
+        craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain.fenix-pkgs;
         src = craneLib.cleanCargoSource ./.;
 
+        # TODO: Currently packages fail to build since they rely on the
+        # cutlass submodule source code.
         # Common arguments can be set here to avoid repeating them later
         commonArgs = {
           inherit src;
           strictDeps = true;
-
-          preBuildPhase = ''
-            mkdir -p csrc/cutlass
-            cp -r ${cutlass}/* csrc/cutlass/
-          '';
 
           buildInputs = with pkgs; [
             # Add additional build inputs here
@@ -84,13 +90,6 @@
           # Then export the following env var like so:
           # `export CUDA_COMPUTE_CAP=89`
         };
-
-        craneLibLLvmTools = craneLib.overrideToolchain
-          (fenix.packages.${system}.complete.withComponents [
-            "cargo"
-            "llvm-tools"
-            "rustc"
-          ]);
 
         # Build *just* the cargo dependencies (of the entire workspace),
         # so we can reuse all of that work (e.g. via cachix) when running in CI
@@ -184,7 +183,7 @@
         packages = {
           inherit csrc models;
         } // lib.optionalAttrs (!pkgs.stdenv.isDarwin) {
-          my-workspace-llvm-coverage = craneLibLLvmTools.cargoLlvmCov (commonArgs // {
+          my-workspace-llvm-coverage = craneLib.cargoLlvmCov (commonArgs // {
             inherit cargoArtifacts;
           });
         };

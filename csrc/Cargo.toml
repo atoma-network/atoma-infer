@@ -5,6 +5,7 @@ edition = "2021"
 description = "Flash attention 2 kernels, with paged attention enabled"
 categories = ["science"]
 license = "MIT OR Apache-2.0"
+publish = false
 
 [dependencies]
 candle-core = { workspace = true, features = ["cuda"] }

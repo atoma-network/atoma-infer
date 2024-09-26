@@ -2,6 +2,7 @@
 name = "help"
 version = "0.1.0"
 edition = "2021"
+publish = false
 
 [dependencies]
 candle-core = { version = "0.6.0", features = ["cuda"] }

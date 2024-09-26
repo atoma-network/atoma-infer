@@ -5,6 +5,7 @@ edition = "2021"
 description = "Large language models library, with fast and efficient memory management attention"
 categories = ["science"]
 license = "MIT OR Apache-2.0"
+publish = false
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
