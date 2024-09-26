@@ -206,6 +206,9 @@ impl CacheConfig {
         this.verify_args()?;
         this.verify_cache_dtype()?;
 
+        info!("There are {} GPU blocks allocated for the KV cache", this.num_gpu_blocks.unwrap());
+        info!("There are {} CPU blocks allocated for the KV cache", this.num_cpu_blocks.unwrap());
+
         Ok(this)
     }
 }
@@ -487,7 +490,6 @@ pub(crate) mod utils {
             * KB; // Convert from KB to bytes
 
         let swap_space_bytes = (free_cpu_memory as f32 * fraction) as usize;
-        // let cpu_memory_usage = swap_space_bytes * num_gpus_per_node;
 
         let msg = format!(
             "{:.2} GiB out of the {:.2} GiB total CPU memory is allocated for the swap space.",
