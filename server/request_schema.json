@@ -7,6 +7,40 @@
     "model"
   ],
   "properties": {
+    "frequency_penalty": {
+      "description": "Number between -2.0 and 2.0. Positive values penalize new tokens based on their existing frequency in the text so far, decreasing the model's likelihood to repeat the same line verbatim.",
+      "type": [
+        "number",
+        "null"
+      ],
+      "format": "float"
+    },
+    "logit_bias": {
+      "description": "Modify the likelihood of specified tokens appearing in the completion. Accepts a JSON object that maps tokens (specified as their token ID in the tokenizer) to an associated bias value from -100 to 100.",
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": {
+        "type": "number",
+        "format": "float"
+      }
+    },
+    "logprobs": {
+      "description": "Whether to return log probabilities of the output tokens or not. If true, returns the log probabilities of each output token returned in the content of message.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "max_completion_tokens": {
+      "description": "An upper bound for the number of tokens that can be generated for a completion,",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "int32"
+    },
     "messages": {
       "description": "A list of messages comprising the conversation so far.",
       "type": "array",
@@ -20,6 +54,91 @@
         {
           "$ref": "#/definitions/model"
         }
+      ]
+    },
+    "n": {
+      "description": "How many chat completion choices to generate for each input message.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint",
+      "minimum": 0.0
+    },
+    "presence_penalty": {
+      "description": "Number between -2.0 and 2.0. Positive values penalize new tokens based on whether they appear in the text so far, increasing the model's likelihood to talk about new topics.",
+      "type": [
+        "number",
+        "null"
+      ],
+      "format": "float"
+    },
+    "seed": {
+      "description": "A seed to use for random number generation.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint64",
+      "minimum": 0.0
+    },
+    "stop": {
+      "description": "Up to 4 sequences where the API will stop generating further tokens. The returned text will not contain the stop sequence.",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/stop"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "stream": {
+      "description": "If set, the server will stream the results as they come in.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "temperature": {
+      "description": "What sampling temperature to use, between 0 and 2. Higher values like 0.8 will make the output more random, while lower values like 0.2 will make it more focused and deterministic.",
+      "type": [
+        "number",
+        "null"
+      ],
+      "format": "float"
+    },
+    "tools": {
+      "description": "A list of tools the model may call. Currently, only functions are supported as a tool. Use this to provide a list of functions the model may generate JSON inputs for. A max of 128 functions are supported.",
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "#/definitions/tool"
+      }
+    },
+    "top_logprobs": {
+      "description": "An integer between 0 and 20 specifying the number of most likely tokens to return at each token position, each with an associated log probability. logprobs must be set to true if this parameter is used.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "int32"
+    },
+    "top_p": {
+      "description": "An alternative to sampling with temperature, called nucleus sampling, where the model considers the results of the tokens with top_p probability mass. So 0.1 means only the tokens comprising the top 10% probability mass are considered.",
+      "type": [
+        "number",
+        "null"
+      ],
+      "format": "float"
+    },
+    "user": {
+      "description": "A unique identifier representing your end-user, which can help the system to monitor and detect abuse.",
+      "type": [
+        "string",
+        "null"
       ]
     }
   },
@@ -224,7 +343,7 @@
         }
       ]
     },
-    "function": {
+    "ToolCallFunction": {
       "type": "object",
       "required": [
         "arguments",
@@ -237,6 +356,35 @@
         "name": {
           "description": "The name of the function to call.",
           "type": "string"
+        }
+      }
+    },
+    "ToolFunction": {
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "description": {
+          "description": "Description of the function to call.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "description": "The name of the function to call.",
+          "type": "string"
+        },
+        "parameters": {
+          "description": "The arguments to call the function with, as generated by the model in JSON format."
+        },
+        "strict": {
+          "description": "Whether to enable strict schema adherence when generating the function call. If set to true, the model will follow the exact schema defined in the parameters field. Only a subset of JSON Schema is supported when strict is true",
+          "type": [
+            "boolean",
+            "null"
+          ]
         }
       }
     },
@@ -266,6 +414,41 @@
         "llama3"
       ]
     },
+    "stop": {
+      "description": "The stop condition for the chat completion.",
+      "anyOf": [
+        {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        {
+          "type": "string"
+        }
+      ]
+    },
+    "tool": {
+      "type": "object",
+      "required": [
+        "function",
+        "type"
+      ],
+      "properties": {
+        "function": {
+          "description": "The function that the model called.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/ToolFunction"
+            }
+          ]
+        },
+        "type": {
+          "description": "The type of the tool. Currently, only function is supported.",
+          "type": "string"
+        }
+      }
+    },
     "tool_call": {
       "type": "object",
       "required": [
@@ -278,7 +461,7 @@
           "description": "The function that the model called.",
           "allOf": [
             {
-              "$ref": "#/definitions/function"
+              "$ref": "#/definitions/ToolCallFunction"
             }
           ]
         },

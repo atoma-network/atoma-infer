@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 anyhow.workspace = true
+async-openai.workspace = true
 axum.workspace = true
 jsonschema = "0.20"
 schemars = "0.8"
@@ -14,3 +15,4 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [dev-dependencies]
 expect-test.workspace = true
+async-openai.workspace = true

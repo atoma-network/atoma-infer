@@ -41,6 +41,7 @@ impl<'a> From<ValidationError<'a>> for RequestValidationError {
 trait ErrString {
     fn err_string(&self) -> String;
 }
+
 impl ErrString for ValidationErrorKind {
     fn err_string(&self) -> String {
         match self {
