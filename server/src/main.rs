@@ -1,6 +1,11 @@
 use std::env;
 
-use axum::{response::IntoResponse, routing::post, Json, Router};
+use axum::{
+    http::{header, HeaderMap},
+    response::IntoResponse,
+    routing::post,
+    Json, Router,
+};
 use serde_json::json;
 use tokio::net::TcpListener;
 
@@ -40,7 +45,18 @@ pub async fn run_server(listener: TcpListener) -> anyhow::Result<()> {
 
 /// Deserialize the `[RequestBody]` from JSON, and pass the information to the specified model,
 /// returning the generated content as a `[Response]` in JSON.
-pub async fn completion_handler(Json(request): Json<RequestBody>) -> impl IntoResponse {
+pub async fn completion_handler(
+    headers: HeaderMap,
+    Json(request): Json<RequestBody>,
+) -> impl IntoResponse {
+    if let Some(auth_header) = headers.get(header::AUTHORIZATION) {
+        if let Ok(auth_str) = auth_header.to_str() {
+            // Check if it starts with "Bearer" and extract the token
+            if let Some(token) = auth_str.strip_prefix("Bearer ") {
+                println!("Authorization token: {}", token);
+            }
+        }
+    }
     match &request.model() {
         // TODO: Use information from the deserialized request
         // and return the response from the model
