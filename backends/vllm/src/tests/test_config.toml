@@ -15,9 +15,9 @@ gpu_memory_utilization = 0.5
 swap_space_fraction = 0.1
 
 [scheduler]
-max_num_batched_tokens = 32
+max_num_batched_tokens = 1024
 max_num_sequences = 32
-max_model_len = 32
+max_model_len = 1024
 delay_factor = 0.8
 enable_chunked_prefill = false
-block_size = 512
+block_size = 16
