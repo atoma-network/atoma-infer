@@ -1,6 +1,11 @@
 use std::env;
 
-use axum::{response::IntoResponse, routing::post, Json, Router};
+use axum::{
+    http::{header, HeaderMap},
+    response::IntoResponse,
+    routing::post,
+    Json, Router,
+};
 use serde_json::json;
 use tokio::net::TcpListener;
 
@@ -16,6 +21,7 @@ pub mod api;
 pub const CHAT_COMPLETIONS_PATH: &str = "/chat/completions";
 pub const DEFAULT_SERVER_ADDRESS: &str = "0.0.0.0";
 pub const DEFAULT_SERVER_PORT: &str = "8080";
+pub const AUTH_BEARER_PREFIX: &str = "Bearer ";
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -40,7 +46,19 @@ pub async fn run_server(listener: TcpListener) -> anyhow::Result<()> {
 
 /// Deserialize the `[RequestBody]` from JSON, and pass the information to the specified model,
 /// returning the generated content as a `[Response]` in JSON.
-pub async fn completion_handler(Json(request): Json<RequestBody>) -> impl IntoResponse {
+pub async fn completion_handler(
+    headers: HeaderMap,
+    Json(request): Json<RequestBody>,
+) -> impl IntoResponse {
+    let _auth_key = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|auth_value| -> Option<&str> {
+            auth_value
+                .to_str()
+                .ok()
+                .and_then(|auth_header_str| auth_header_str.strip_prefix(AUTH_BEARER_PREFIX))
+        })
+        .unwrap_or_default();
     match &request.model() {
         // TODO: Use information from the deserialized request
         // and return the response from the model
