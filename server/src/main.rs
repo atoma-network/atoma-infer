@@ -9,6 +9,8 @@ use api::{
     validate_schema::validate_with_schema,
 };
 
+#[cfg(test)]
+pub mod tests;
 pub mod api;
 
 // TODO: Add version path prefix, eg. `/v1` although maybe something along the lines of `/beta` would be more fitting?
