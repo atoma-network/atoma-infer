@@ -2,9 +2,9 @@
 pub use atoma_vllm_backend::{
     llm_engine::GenerateRequestOutput,
     llm_service::{LlmService, LlmServiceError},
+    models::llama::LlamaModel,
     types::GenerateRequest,
     validation::Validation,
-    models::llama::LlamaModel,
 };
 
 #[cfg(not(feature = "vllm"))]

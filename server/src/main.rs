@@ -2,7 +2,7 @@ use std::{env, sync::Arc};
 
 #[cfg(feature = "vllm")]
 use atoma_backends::{
-    GenerateRequest, GenerateRequestOutput, LlmService, LlmServiceError, Validation, LlamaModel,
+    GenerateRequest, GenerateRequestOutput, LlamaModel, LlmService, LlmServiceError, Validation,
 };
 use axum::{
     extract::State,
@@ -56,10 +56,13 @@ async fn main() -> anyhow::Result<()> {
     let (llm_service_sender, llm_service_receiver) = mpsc::unbounded_channel();
     let (shutdown_signal_sender, shutdown_signal_receiver) = mpsc::channel(1);
     // TODO: Add model dispatcher
-    let llm_service =
-        LlmService::start::<LlamaModel, _>(llm_service_receiver, config_path, shutdown_signal_receiver)
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to start `LlmService`, with error: {e}"))?;
+    let llm_service = LlmService::start::<LlamaModel, _>(
+        llm_service_receiver,
+        config_path,
+        shutdown_signal_receiver,
+    )
+    .await
+    .map_err(|e| anyhow::anyhow!("Failed to start `LlmService`, with error: {e}"))?;
 
     let join_handle = tokio::spawn(async move {
         llm_service
