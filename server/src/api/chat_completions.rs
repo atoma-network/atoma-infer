@@ -293,7 +293,7 @@ impl RequestBody {
                         r#type: "function".into(),
                         function: ToolCallFunction {
                             name: "myFunction".into(),
-                            arguments: json!({"key": "value"}),
+                            arguments: serde_json::json!({"key": "value"}),
                         },
                     }],
                 },
