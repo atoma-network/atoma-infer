@@ -30,12 +30,10 @@ use tracing::{error, info, info_span, instrument, Span};
 /// and sends the valid request to the `LlmEngine`
 pub struct LlmService {
     /// A receiver channel, it is responsible for
-    /// receiving incoming requests from the
-    /// atoma event subscriber
-    atoma_event_subscriber_receiver: UnboundedReceiver<GenerateRequest>,
-    /// Sender to communicate with an underlying
-    /// `LlmEngine` running instance
-    atoma_engine_sender: UnboundedSender<SequenceGroup>,
+    /// receiving incoming requests from the OpenAI API server
+    service_request_receiver: UnboundedReceiver<GenerateRequest>,
+    /// Sender to communicate generated responses with the OpenAI API server
+    service_response_sender: UnboundedSender<Vec<GenerateRequestOutput>>,
     /// Block size
     block_size: usize,
     /// Join handle for the background task
@@ -62,8 +60,8 @@ impl LlmService {
     #[instrument(skip_all)]
     #[allow(clippy::too_many_arguments)]
     pub async fn start<M, P: AsRef<Path>>(
-        atoma_event_subscriber_receiver: UnboundedReceiver<GenerateRequest>,
-        atoma_client_sender: UnboundedSender<Vec<GenerateRequestOutput>>,
+        service_request_receiver: UnboundedReceiver<GenerateRequest>,
+        service_response_sender: UnboundedSender<Vec<GenerateRequestOutput>>,
         config_path: P,
         tokenizer_receiver: mpsc::UnboundedReceiver<EncodeTokenizerRequest>,
         validation_service: Validation,
@@ -130,7 +128,7 @@ impl LlmService {
         let (request_sender, request_receiver) = mpsc::unbounded_channel();
         let llm_engine_handle = tokio::spawn(async move {
             let llm_engine = LlmEngine::new(
-                atoma_client_sender,
+                service_response_sender,
                 model_thread_dispatcher,
                 request_receiver,
                 scheduler,
@@ -142,8 +140,8 @@ impl LlmService {
         });
 
         Ok(Self {
-            atoma_event_subscriber_receiver,
-            atoma_engine_sender: request_sender,
+            service_request_receiver,
+            service_response_sender,
             block_size,
             llm_engine_handle,
             model_config,

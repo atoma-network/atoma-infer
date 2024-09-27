@@ -255,6 +255,66 @@ impl RequestBody {
         &self.model
     }
 
+    pub fn messages(&self) -> &Vec<Message> {
+        &self.messages
+    }
+
+    pub fn frequency_penalty(&self) -> Option<f32> {
+        self.frequency_penalty
+    }
+
+    pub fn logit_bias(&self) -> Option<HashMap<String, f32>> {
+        self.logit_bias.clone()
+    }
+
+    pub fn logprobs(&self) -> Option<bool> {
+        self.logprobs
+    }
+
+    pub fn top_logprobs(&self) -> Option<i32> {
+        self.top_logprobs
+    }
+
+    pub fn max_completion_tokens(&self) -> Option<i32> {
+        self.max_completion_tokens
+    }
+
+    pub fn n(&self) -> Option<usize> {
+        self.n
+    }
+
+    pub fn presence_penalty(&self) -> Option<f32> {
+        self.presence_penalty
+    }
+
+    pub fn seed(&self) -> Option<u64> {
+        self.seed
+    }
+
+    pub fn stop(&self) -> Option<&StopCondition> {
+        self.stop.as_ref()
+    }
+
+    pub fn stream(&self) -> Option<bool> {
+        self.stream
+    }
+
+    pub fn temperature(&self) -> Option<f32> {
+        self.temperature
+    }
+
+    pub fn top_p(&self) -> Option<f32> {
+        self.top_p
+    }
+
+    pub fn tools(&self) -> Option<&Vec<Tool>> {
+        self.tools.as_ref()
+    }
+
+    pub fn user(&self) -> Option<&String> {
+        self.user.as_ref()
+    }
+
     /// The control structure for testing the rust to json api, and schema.
     /// Represents all possible values for serialization.
     #[cfg(test)]

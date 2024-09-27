@@ -6,17 +6,22 @@ use axum::{
     routing::post,
     Json, Router,
 };
+use backends::vllm::LlmService;
 use serde_json::json;
-use tokio::net::TcpListener;
+use tokio::{
+    net::TcpListener,
+    sync::{mpsc::UnboundedSender, oneshot},
+    task::JoinHandle,
+};
 
 use api::{
     chat_completions::{Model, RequestBody},
     validate_schema::validate_with_schema,
 };
 
+pub mod api;
 #[cfg(test)]
 pub mod tests;
-pub mod api;
 
 // TODO: Add version path prefix, eg. `/v1` although maybe something along the lines of `/beta` would be more fitting?
 /// The URL path to POST JSON for model chat completions.
@@ -24,6 +29,14 @@ pub const CHAT_COMPLETIONS_PATH: &str = "/chat/completions";
 pub const DEFAULT_SERVER_ADDRESS: &str = "0.0.0.0";
 pub const DEFAULT_SERVER_PORT: &str = "8080";
 pub const AUTH_BEARER_PREFIX: &str = "Bearer ";
+
+pub struct LlmServiceState {
+    join_handle: JoinHandle<Result<(), LlmServiceError>>,
+    service_sender: UnboundedSender<(
+        GenerateRequest,
+        oneshot::Receiver<Vec<GenerateRequestOutput>>,
+    )>,
+}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -61,11 +74,28 @@ pub async fn completion_handler(
                 .and_then(|auth_header_str| auth_header_str.strip_prefix(AUTH_BEARER_PREFIX))
         })
         .unwrap_or_default();
-    match &request.model() {
+    let model = match &request.model() {
         // TODO: Use information from the deserialized request
         // and return the response from the model
         Model::Llama3 => Json(json!({"status": "success"})),
-    }
+    };
+    let messages = request.messages();
+    let frequency_penalty = request.frequency_penalty();
+    let logit_bias = request.logit_bias();
+    let logprobs = request.logprobs();
+    let top_logprobs = request.top_logprobs();
+    let max_completion_tokens = request.max_completion_tokens();
+    let n = request.n();
+    let presence_penalty = request.presence_penalty();
+    let seed = request.seed();
+    let stop = request.stop();
+    let stream = request.stream();
+    let temperature = request.temperature();
+    let top_p = request.top_p();
+    let tools = request.tools();
+    let user = request.user();
+
+    Json(json!({"status": "success"}))
 }
 
 pub async fn validate_completion_handler(
