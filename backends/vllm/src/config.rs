@@ -206,8 +206,14 @@ impl CacheConfig {
         this.verify_args()?;
         this.verify_cache_dtype()?;
 
-        info!("There are {} GPU blocks allocated for the KV cache", this.num_gpu_blocks.unwrap());
-        info!("There are {} CPU blocks allocated for the KV cache", this.num_cpu_blocks.unwrap());
+        info!(
+            "There are {} GPU blocks allocated for the KV cache",
+            this.num_gpu_blocks.unwrap()
+        );
+        info!(
+            "There are {} CPU blocks allocated for the KV cache",
+            this.num_cpu_blocks.unwrap()
+        );
 
         Ok(this)
     }

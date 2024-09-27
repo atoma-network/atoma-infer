@@ -14,3 +14,4 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [dev-dependencies]
 expect-test.workspace = true
+async-openai.workspace = true
