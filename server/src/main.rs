@@ -1,17 +1,23 @@
-use std::env;
+use std::{env, sync::Arc};
 
+#[cfg(feature = "vllm")]
+use atoma_backends::{
+    GenerateRequest, GenerateRequestOutput, LlmService, LlmServiceError, Validation, LlamaModel,
+};
 use axum::{
+    extract::State,
     http::{header, HeaderMap},
     response::IntoResponse,
     routing::post,
     Json, Router,
 };
-#[cfg(feature = "vllm")]
-use atoma_backends::atoma_vllm_backend::{LlmService, LlmServiceError, GenerateRequest, GenerateRequestOutput};
 use serde_json::json;
 use tokio::{
     net::TcpListener,
-    sync::{mpsc::UnboundedSender, oneshot},
+    sync::{
+        mpsc::{self, UnboundedSender},
+        oneshot,
+    },
     task::JoinHandle,
 };
 
@@ -31,12 +37,11 @@ pub const DEFAULT_SERVER_ADDRESS: &str = "0.0.0.0";
 pub const DEFAULT_SERVER_PORT: &str = "8080";
 pub const AUTH_BEARER_PREFIX: &str = "Bearer ";
 
+#[derive(Clone)]
 pub struct LlmServiceState {
-    join_handle: JoinHandle<Result<(), LlmServiceError>>,
-    service_sender: UnboundedSender<(
-        GenerateRequest,
-        oneshot::Receiver<Vec<GenerateRequestOutput>>,
-    )>,
+    join_handle: Arc<JoinHandle<anyhow::Result<()>>>,
+    llm_service_sender: UnboundedSender<(GenerateRequest, oneshot::Sender<GenerateRequestOutput>)>,
+    shutdown_signal_sender: mpsc::Sender<()>,
 }
 
 #[tokio::main]
@@ -44,18 +49,44 @@ async fn main() -> anyhow::Result<()> {
     // TODO: Write a clap cli for passing arguments
     let address =
         env::var("ATOMA_NODE_INFERENCE_SERVER_ADDRESS").unwrap_or(DEFAULT_SERVER_ADDRESS.into());
+    let config_path = env::var("LLM_SERVICE_CONFIG_PATH").unwrap();
     let port = env::var("ATOMA_NODE_INFERENCE_SERVER_PORT").unwrap_or(DEFAULT_SERVER_PORT.into());
     let listener = TcpListener::bind(format!("{address}:{port}")).await?;
-    run_server(listener).await
+
+    let (llm_service_sender, llm_service_receiver) = mpsc::unbounded_channel();
+    let (shutdown_signal_sender, shutdown_signal_receiver) = mpsc::channel(1);
+    // TODO: Add model dispatcher
+    let llm_service =
+        LlmService::start::<LlamaModel, _>(llm_service_receiver, config_path, shutdown_signal_receiver)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to start `LlmService`, with error: {e}"))?;
+
+    let join_handle = tokio::spawn(async move {
+        llm_service
+            .run()
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to run `LlmService`, with error: {e}"))
+    });
+
+    let llm_service_state = LlmServiceState {
+        join_handle: Arc::new(join_handle),
+        llm_service_sender,
+        shutdown_signal_sender,
+    };
+    run_server(listener, llm_service_state).await
 }
 
-pub async fn run_server(listener: TcpListener) -> anyhow::Result<()> {
+pub async fn run_server(
+    listener: TcpListener,
+    llm_service_state: LlmServiceState,
+) -> anyhow::Result<()> {
     let http_router = Router::new()
         .route(CHAT_COMPLETIONS_PATH, post(completion_handler))
         .route(
             &format!("{CHAT_COMPLETIONS_PATH}/validate"),
             post(validate_completion_handler),
-        );
+        )
+        .with_state(llm_service_state);
 
     Ok(axum::serve(listener, http_router.into_make_service()).await?)
 }
@@ -63,6 +94,7 @@ pub async fn run_server(listener: TcpListener) -> anyhow::Result<()> {
 /// Deserialize the `[RequestBody]` from JSON, and pass the information to the specified model,
 /// returning the generated content as a `[Response]` in JSON.
 pub async fn completion_handler(
+    app_state: State<LlmServiceState>,
     headers: HeaderMap,
     Json(request): Json<RequestBody>,
 ) -> impl IntoResponse {
@@ -95,6 +127,23 @@ pub async fn completion_handler(
     let top_p = request.top_p();
     let tools = request.tools();
     let user = request.user();
+
+    // let (sender, receiver) = oneshot::channel();
+    // let generate_request = GenerateRequest {
+    //     messages,
+    //     frequency_penalty,
+    //     logit_bias,
+    //     logprobs,
+    //     max_completion_tokens,
+    //     n,
+    //     presence_penalty,
+    //     seed,
+    //     stop,
+    //     stream,
+    // };
+
+    // app_state.sender.send((generate_request, sender))?;
+    // let outputs = receiver.await?;
 
     Json(json!({"status": "success"}))
 }

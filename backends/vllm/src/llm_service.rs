@@ -1,15 +1,15 @@
 use std::{path::Path, str::FromStr, time::Instant};
 
 use crate::{
-    config::{CacheConfig, CacheConfigError, ModelConfig, SchedulerConfig, SchedulerConfigError},
+    config::{CacheConfig, CacheConfigError, ModelConfig, SchedulerConfig, SchedulerConfigError, ValidationConfig},
     llm_engine::{EngineError, GenerateRequestOutput, LlmEngine},
     model_executor::{ModelExecutor, ModelLoaderError, ModelThreadDispatcher, ModelThreadError},
     scheduler::{Scheduler, SchedulerError},
     sequence::{Sequence, SequenceError, SequenceGroup},
-    tokenizer::{EncodeTokenizerRequest, TokenizerError, TokenizerWorker},
+    tokenizer::{TokenizerError, TokenizerWorker},
+    types::GenerateRequest,
     validation::{ValidGenerateRequest, Validation, ValidationError},
 };
-use crate::GenerateRequest;
 use candle_core::{DType, DTypeParseError, Device, Error as CandleError};
 use candle_transformers::generation::{LogitsProcessor, Sampling};
 use metrics::{counter, gauge};
@@ -35,9 +35,9 @@ pub struct LlmService {
     /// A receiver channel, it is responsible for
     /// receiving incoming requests from the OpenAI API server
     service_request_receiver:
-        UnboundedReceiver<(GenerateRequest, oneshot::Sender<Vec<GenerateRequestOutput>>)>,
-    /// Sender to communicate generated responses with the OpenAI API server
-    service_response_sender: UnboundedSender<Vec<GenerateRequestOutput>>,
+        UnboundedReceiver<(GenerateRequest, oneshot::Sender<GenerateRequestOutput>)>,
+    /// Sender to communicate with the `LlmEngine` serviceservice_response_sender,
+    engine_sender: UnboundedSender<(SequenceGroup, oneshot::Sender<GenerateRequestOutput>)>,
     /// Block size
     block_size: usize,
     /// Join handle for the background task
@@ -62,13 +62,12 @@ pub struct LlmService {
 impl LlmService {
     /// Starts the service
     #[instrument(skip_all)]
-    #[allow(clippy::too_many_arguments)]
     pub async fn start<M, P: AsRef<Path>>(
-        service_request_receiver: UnboundedReceiver<GenerateRequest>,
-        service_response_sender: UnboundedSender<Vec<GenerateRequestOutput>>,
+        service_request_receiver: UnboundedReceiver<(
+            GenerateRequest,
+            oneshot::Sender<GenerateRequestOutput>,
+        )>,
         config_path: P,
-        tokenizer_receiver: mpsc::UnboundedReceiver<EncodeTokenizerRequest>,
-        validation_service: Validation,
         shutdown_signal: mpsc::Receiver<()>,
     ) -> Result<Self, LlmServiceError>
     where
@@ -105,6 +104,17 @@ impl LlmService {
             model.num_hidden_layers(),
         )?;
         let scheduler_config = SchedulerConfig::from_file_path(config_path.as_ref())?;
+        let validation_config = ValidationConfig::from_file_path(config_path.as_ref());
+
+        let (tokenizer_sender, tokenizer_receiver) = mpsc::unbounded_channel();
+        let validation_service = Validation::new(
+            validation_config.best_of,
+            validation_config.max_stop_sequences,
+            validation_config.max_top_n_tokens,
+            validation_config.max_input_length,
+            validation_config.max_total_tokens,
+            tokenizer_sender,
+        );
 
         let block_size = cache_config.block_size;
         let scheduler = Scheduler::new(cache_config.clone(), scheduler_config.clone())?;
@@ -129,12 +139,11 @@ impl LlmService {
             scheduler_config,
         )?;
 
-        let (request_sender, request_receiver) = mpsc::unbounded_channel();
+        let (engine_sender, engine_receiver) = mpsc::unbounded_channel();
         let llm_engine_handle = tokio::spawn(async move {
             let llm_engine = LlmEngine::new(
-                service_response_sender,
                 model_thread_dispatcher,
-                request_receiver,
+                engine_receiver,
                 scheduler,
                 tokenizer,
             );
@@ -145,7 +154,7 @@ impl LlmService {
 
         Ok(Self {
             service_request_receiver,
-            service_response_sender,
+            engine_sender,
             block_size,
             llm_engine_handle,
             model_config,
@@ -166,7 +175,7 @@ impl LlmService {
     pub async fn run(mut self) -> Result<(), LlmServiceError> {
         loop {
             tokio::select! {
-                Some(request) = self.atoma_event_subscriber_receiver.recv() => {
+                Some((request, response_sender)) = self.service_request_receiver.recv() => {
                     let sequence_group = match self.handle_request(request).await {
                         Ok(sequence_group) => sequence_group,
                         Err(e) => {
@@ -177,7 +186,7 @@ impl LlmService {
                             //       errors should also be committed to, by the node.
                         }
                     };
-                    self.atoma_engine_sender.send(sequence_group).map_err(Box::new)?;
+                    self.engine_sender.send((sequence_group, response_sender)).map_err(Box::new)?;
                 },
                 _ = self.shutdown_signal.recv() => {
                     info!("Received shutdown signal, stopping `LlmService` instance..");
@@ -343,7 +352,7 @@ pub enum LlmServiceError {
     #[error("Sequence error: `{0}`")]
     SequenceError(#[from] SequenceError),
     #[error("Send error: `{0}`")]
-    SendError(#[from] Box<SendError<SequenceGroup>>),
+    SendError(#[from] Box<SendError<(SequenceGroup, oneshot::Sender<GenerateRequestOutput>)>>),
     #[error("Tokenizer error: `{0}`")]
     TokenizerError(#[from] TokenizerError),
 }
