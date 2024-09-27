@@ -6,7 +6,8 @@ use axum::{
     routing::post,
     Json, Router,
 };
-use backends::vllm::LlmService;
+#[cfg(feature = "vllm")]
+use atoma_backends::atoma_vllm_backend::{LlmService, LlmServiceError, GenerateRequest, GenerateRequestOutput};
 use serde_json::json;
 use tokio::{
     net::TcpListener,

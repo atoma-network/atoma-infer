@@ -17,7 +17,7 @@ edition = "2021"
 anyhow = "1.0.89"
 async-openai = "0.24.1"
 axum = "0.7"
-backends = { path = "backends" }
+atoma-backends = { path = "./backends/" }
 bindgen_cuda = "0.1.5"
 candle-core = "0.6.0"
 candle-nn = "0.6.0"

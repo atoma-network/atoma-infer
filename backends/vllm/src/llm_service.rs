@@ -7,16 +7,19 @@ use crate::{
     scheduler::{Scheduler, SchedulerError},
     sequence::{Sequence, SequenceError, SequenceGroup},
     tokenizer::{EncodeTokenizerRequest, TokenizerError, TokenizerWorker},
-    types::GenerateRequest,
     validation::{ValidGenerateRequest, Validation, ValidationError},
 };
+use crate::GenerateRequest;
 use candle_core::{DType, DTypeParseError, Device, Error as CandleError};
 use candle_transformers::generation::{LogitsProcessor, Sampling};
 use metrics::{counter, gauge};
 use thiserror::Error;
 use tokenizers::Tokenizer;
 use tokio::{
-    sync::mpsc::{self, error::SendError, UnboundedReceiver, UnboundedSender},
+    sync::{
+        mpsc::{self, error::SendError, UnboundedReceiver, UnboundedSender},
+        oneshot,
+    },
     task::JoinHandle,
 };
 use tracing::{error, info, info_span, instrument, Span};
@@ -31,7 +34,8 @@ use tracing::{error, info, info_span, instrument, Span};
 pub struct LlmService {
     /// A receiver channel, it is responsible for
     /// receiving incoming requests from the OpenAI API server
-    service_request_receiver: UnboundedReceiver<GenerateRequest>,
+    service_request_receiver:
+        UnboundedReceiver<(GenerateRequest, oneshot::Sender<Vec<GenerateRequestOutput>>)>,
     /// Sender to communicate generated responses with the OpenAI API server
     service_response_sender: UnboundedSender<Vec<GenerateRequestOutput>>,
     /// Block size
