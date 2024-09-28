@@ -1,5 +1,7 @@
 //! Responsible for creating the json schema associated with the AtomaAPI, which is modeled after OpenAI's own API.
 
+#[cfg(feature = "vllm")]
+use atoma_backends::{GenerateParameters, GenerateRequest};
 use std::collections::HashMap;
 
 use schemars::JsonSchema;
@@ -70,6 +72,80 @@ pub enum Message {
     },
 }
 
+impl Message {
+    pub fn to_prompt_string(&self) -> String {
+        match self {
+            Message::System { content, name } => {
+                let role = "System";
+                messages::format_message(role, content, name)
+            }
+            Message::User { content, name } => {
+                let role = "User";
+                messages::format_message(role, content, name)
+            }
+            Message::Assistant {
+                content,
+                name,
+                refusal,
+                tool_calls,
+            } => {
+                let role = "Assistant";
+                let mut prompt = messages::format_message(role, content, name);
+                if let Some(refusal_message) = refusal {
+                    prompt.push_str(&format!("\nRefusal: {}", refusal_message));
+                }
+                if !tool_calls.is_empty() {
+                    prompt.push_str(&format!("\nTool Calls: {:?}", tool_calls));
+                }
+                prompt
+            }
+            Message::Tool {
+                content,
+                tool_call_id,
+            } => {
+                let role = "Tool";
+                let mut prompt = messages::format_message(role, content, &None);
+                prompt.push_str(&format!("\nTool Call ID: {}", tool_call_id));
+                prompt
+            }
+        }
+    }
+}
+
+pub(crate) mod messages {
+    use super::{Message, MessageContent};
+
+    /// Helper function to format a message
+    pub(crate) fn format_message(
+        role: &str,
+        content: &Option<MessageContent>,
+        name: &Option<String>,
+    ) -> String {
+        let name_str = if let Some(name) = name {
+            format!(" ({})", name)
+        } else {
+            String::new()
+        };
+
+        let content_str = if let Some(content) = content {
+            format!("{}", content)
+        } else {
+            String::new()
+        };
+
+        format!("{}{}: {}", role, name_str, content_str)
+    }
+
+    /// Function to convert a list of messages to a prompt string
+    pub(crate) fn messages_to_prompt(messages: &[Message]) -> String {
+        messages
+            .iter()
+            .map(|message| message.to_prompt_string())
+            .collect::<Vec<_>>()
+            .join("\n\n") // Separate each message by two newlines
+    }
+}
+
 #[derive(Debug, PartialEq, Eq, Serialize, JsonSchema)]
 #[serde(untagged)]
 pub enum MessageContent {
@@ -81,6 +157,22 @@ pub enum MessageContent {
     #[serde(rename(serialize = "array", deserialize = "array"))]
     Array(Vec<MessageContentPart>),
 }
+
+impl std::fmt::Display for MessageContent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MessageContent::Text(text) => write!(f, "{}", text),
+            MessageContent::Array(parts) => {
+                let mut content = String::new();
+                for part in parts {
+                    content.push_str(&format!("{}\n", part))
+                }
+                write!(f, "{}", content)
+            }
+        }
+    }
+}
+
 // We manually implement Deserialize here for more control.
 impl<'de> Deserialize<'de> for MessageContent {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
@@ -127,6 +219,19 @@ pub enum MessageContentPart {
     },
 }
 
+impl std::fmt::Display for MessageContentPart {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MessageContentPart::Text { r#type, text } => {
+                write!(f, "{}: {}", r#type, text)
+            }
+            MessageContentPart::Image { r#type, image_url } => {
+                write!(f, "{}: [Image URL: {}]", r#type, image_url)
+            }
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename(serialize = "image_url", deserialize = "image_url"))]
 pub struct MessageContentPartImageUrl {
@@ -134,6 +239,16 @@ pub struct MessageContentPartImageUrl {
     url: String,
     /// Specifies the detail level of the image.
     detail: Option<String>,
+}
+
+/// Implementing Display for MessageContentPartImageUrl
+impl std::fmt::Display for MessageContentPartImageUrl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.detail {
+            Some(detail) => write!(f, "Image URL: {}, Detail: {}", self.url, detail),
+            None => write!(f, "Image URL: {}", self.url),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -217,7 +332,7 @@ pub struct RequestBody {
     top_logprobs: Option<i32>,
     /// An upper bound for the number of tokens that can be generated for a completion,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    max_completion_tokens: Option<i32>,
+    max_completion_tokens: Option<u32>,
     /// How many chat completion choices to generate for each input message.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     n: Option<usize>,
@@ -275,7 +390,7 @@ impl RequestBody {
         self.top_logprobs
     }
 
-    pub fn max_completion_tokens(&self) -> Option<i32> {
+    pub fn max_completion_tokens(&self) -> Option<u32> {
         self.max_completion_tokens
     }
 
@@ -384,6 +499,50 @@ impl RequestBody {
                 },
             }]),
             user: Some("test".into()),
+        }
+    }
+}
+
+impl RequestBody {
+    pub fn to_generate_request(self, request_id: String) -> GenerateRequest {
+        let inputs = self.messages();
+        let frequency_penalty = self.frequency_penalty();
+        let max_new_tokens = self.max_completion_tokens();
+        let decoder_input_details = self.logprobs().unwrap_or_default();
+        let repetition_penalty = self.presence_penalty();
+        let stop = match self.stop() {
+            Some(StopCondition::Array(stop_tokens)) => stop_tokens.clone(),
+            Some(StopCondition::String(stop_token)) => vec![stop_token.clone()],
+            None => Vec::new(),
+        };
+        let seed = self.seed();
+        let temperature = self.temperature();
+        let top_p = self.top_p();
+        let user = self.user();
+        let n = self.n.unwrap_or(1);
+        let parameters = GenerateParameters {
+            best_of: None,
+            temperature,
+            repetition_penalty,
+            frequency_penalty,
+            max_new_tokens,
+            repeat_last_n: None,
+            top_k: None,
+            top_p,
+            typical_p: None,
+            do_sample: true,
+            return_full_text: Some(false),
+            stop,
+            truncate: None,
+            decoder_input_details,
+            random_seed: seed,
+            top_n_tokens: None,
+            n,
+        };
+        GenerateRequest {
+            request_id,
+            inputs: messages::messages_to_prompt(&self.messages()),
+            parameters,
         }
     }
 }

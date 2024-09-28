@@ -1,9 +1,14 @@
-use std::{env, sync::Arc};
+use std::{
+    env,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+};
 
 #[cfg(feature = "vllm")]
-use atoma_backends::{
-    GenerateRequest, GenerateRequestOutput, LlamaModel, LlmService, LlmServiceError, Validation,
-};
+use atoma_backends::{GenerateRequest, GenerateRequestOutput, LlamaModel, LlmService};
 use axum::{
     extract::State,
     http::{header, HeaderMap},
@@ -14,12 +19,14 @@ use axum::{
 use serde_json::json;
 use tokio::{
     net::TcpListener,
+    signal,
     sync::{
         mpsc::{self, UnboundedSender},
         oneshot,
     },
     task::JoinHandle,
 };
+use tracing::{error, info};
 
 use api::{
     chat_completions::{Model, RequestBody},
@@ -38,14 +45,16 @@ pub const DEFAULT_SERVER_PORT: &str = "8080";
 pub const AUTH_BEARER_PREFIX: &str = "Bearer ";
 
 #[derive(Clone)]
-pub struct LlmServiceState {
-    join_handle: Arc<JoinHandle<anyhow::Result<()>>>,
+pub struct AppState {
+    request_counter: Arc<AtomicU64>,
     llm_service_sender: UnboundedSender<(GenerateRequest, oneshot::Sender<GenerateRequestOutput>)>,
     shutdown_signal_sender: mpsc::Sender<()>,
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    tracing_subscriber::fmt::init();
+
     // TODO: Write a clap cli for passing arguments
     let address =
         env::var("ATOMA_NODE_INFERENCE_SERVER_ADDRESS").unwrap_or(DEFAULT_SERVER_ADDRESS.into());
@@ -71,36 +80,75 @@ async fn main() -> anyhow::Result<()> {
             .map_err(|e| anyhow::anyhow!("Failed to run `LlmService`, with error: {e}"))
     });
 
-    let llm_service_state = LlmServiceState {
-        join_handle: Arc::new(join_handle),
+    let app_state = AppState {
+        request_counter: Arc::new(AtomicU64::new(0)),
         llm_service_sender,
         shutdown_signal_sender,
     };
-    run_server(listener, llm_service_state).await
+    run_server(listener, app_state, join_handle).await
 }
 
 pub async fn run_server(
     listener: TcpListener,
-    llm_service_state: LlmServiceState,
+    app_state: AppState,
+    join_handle: JoinHandle<anyhow::Result<()>>,
 ) -> anyhow::Result<()> {
+    let shutdown_signal_sender = app_state.shutdown_signal_sender.clone();
     let http_router = Router::new()
         .route(CHAT_COMPLETIONS_PATH, post(completion_handler))
         .route(
             &format!("{CHAT_COMPLETIONS_PATH}/validate"),
             post(validate_completion_handler),
         )
-        .with_state(llm_service_state);
+        .with_state(app_state);
 
-    Ok(axum::serve(listener, http_router.into_make_service()).await?)
+    let shutdown_signal = async {
+        signal::ctrl_c()
+            .await
+            .expect("Failed to parse Ctrl+C signal");
+        info!("Shutting down server...");
+    };
+
+    let server = axum::serve(listener, http_router.into_make_service())
+        .with_graceful_shutdown(shutdown_signal);
+
+    info!("OpenAI API server running, press Ctrl+C to shut it down");
+    server.await?;
+
+    // Shutdown the app state
+    shutdown_signal_sender.send(()).await?;
+
+    // Wait for LLM service to gracefully shut down
+    match tokio::time::timeout(Duration::from_secs(30), join_handle).await {
+        Ok(Ok(_)) => {
+            info!("LlmService shutdown successfully");
+        }
+        Ok(Err(e)) => {
+            error!("LlmService encountered an error during shutdown: {:?}", e);
+        }
+        Err(_) => {
+            error!("LlmService shutdown timed out");
+        }
+    }
+    info!("Server and LlmService shutdown complete");
+
+    Ok(())
 }
 
 /// Deserialize the `[RequestBody]` from JSON, and pass the information to the specified model,
 /// returning the generated content as a `[Response]` in JSON.
 pub async fn completion_handler(
-    app_state: State<LlmServiceState>,
+    app_state: State<AppState>,
     headers: HeaderMap,
     Json(request): Json<RequestBody>,
 ) -> impl IntoResponse {
+    let request_number = app_state.request_counter.fetch_add(1, Ordering::SeqCst);
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("Time went backwards")
+        .as_nanos();
+    let request_id = format!("{request_number}-{now}");
+
     let _auth_key = headers
         .get(header::AUTHORIZATION)
         .and_then(|auth_value| -> Option<&str> {
@@ -110,26 +158,26 @@ pub async fn completion_handler(
                 .and_then(|auth_header_str| auth_header_str.strip_prefix(AUTH_BEARER_PREFIX))
         })
         .unwrap_or_default();
-    let model = match &request.model() {
-        // TODO: Use information from the deserialized request
-        // and return the response from the model
-        Model::Llama3 => Json(json!({"status": "success"})),
-    };
-    let messages = request.messages();
-    let frequency_penalty = request.frequency_penalty();
-    let logit_bias = request.logit_bias();
-    let logprobs = request.logprobs();
-    let top_logprobs = request.top_logprobs();
-    let max_completion_tokens = request.max_completion_tokens();
-    let n = request.n();
-    let presence_penalty = request.presence_penalty();
-    let seed = request.seed();
-    let stop = request.stop();
-    let stream = request.stream();
-    let temperature = request.temperature();
-    let top_p = request.top_p();
-    let tools = request.tools();
-    let user = request.user();
+    // let model = match &request.model() {
+    //     // TODO: Use information from the deserialized request
+    //     // and return the response from the model
+    //     Model::Llama3 => Json(json!({"status": "success"})),
+    // };
+    // let messages = request.messages();
+    // let frequency_penalty = request.frequency_penalty();
+    // let logit_bias = request.logit_bias();
+    // let logprobs = request.logprobs();
+    // let top_logprobs = request.top_logprobs();
+    // let max_completion_tokens = request.max_completion_tokens();
+    // let n = request.n();
+    // let presence_penalty = request.presence_penalty();
+    // let seed = request.seed();
+    // let stop = request.stop();
+    // let stream = request.stream();
+    // let temperature = request.temperature();
+    // let top_p = request.top_p();
+    // let tools = request.tools();
+    // let user = request.user();
 
     // let (sender, receiver) = oneshot::channel();
     // let generate_request = GenerateRequest {
