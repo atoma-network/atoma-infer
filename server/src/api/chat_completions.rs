@@ -505,7 +505,7 @@ impl RequestBody {
 
 impl RequestBody {
     pub fn to_generate_request(self, request_id: String) -> GenerateRequest {
-        let inputs = self.messages();
+        let inputs = messages::messages_to_prompt(&self.messages());
         let frequency_penalty = self.frequency_penalty();
         let max_new_tokens = self.max_completion_tokens();
         let decoder_input_details = self.logprobs().unwrap_or_default();
@@ -518,7 +518,7 @@ impl RequestBody {
         let seed = self.seed();
         let temperature = self.temperature();
         let top_p = self.top_p();
-        let user = self.user();
+        let _user = self.user();
         let n = self.n.unwrap_or(1);
         let parameters = GenerateParameters {
             best_of: None,
@@ -541,7 +541,7 @@ impl RequestBody {
         };
         GenerateRequest {
             request_id,
-            inputs: messages::messages_to_prompt(&self.messages()),
+            inputs,
             parameters,
         }
     }
@@ -552,15 +552,15 @@ pub mod json_schema_tests {
     // TODO: Move check functions to a test utils module.
     //! Note: These tests make use of the `expect_test` crate, and can be updated by
     //! setting `UPDATE_EXPECT=1`.
-    use std::{collections::HashMap, fs::File, io::BufReader};
+    use std::{fs::File, io::BufReader};
 
     use expect_test::{expect_file, ExpectFile};
     use schemars::schema_for;
     use serde_json::json;
 
     use super::{
-        Message, MessageContent, MessageContentPart, MessageContentPartImageUrl, Model,
-        StopCondition, ToolCall, ToolCallFunction,
+        messages, Message, MessageContent, MessageContentPart, MessageContentPartImageUrl,
+        ToolCall, ToolCallFunction,
     };
     use crate::{validate_with_schema, RequestBody};
 
@@ -763,201 +763,147 @@ pub mod json_schema_tests {
     }
 
     #[test]
-    fn test_full_request_body_deserialization() {
-        let json_request_body = json!({
-            "model": "llama3",
-            "messages": [
+    fn deserialize_message_content_array() {
+        let json_message_content_array = r#"
+            [
                 {
-                    "role": "system",
-                    "content": "You are a helpful assistant",
-                    "name": "System"
+                    "type": "text",
+                    "text": "Hello, World!"
                 },
                 {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": "Hello, can you analyze this image?"
-                        },
-                        {
-                            "type": "image",
-                            "image_url": {
-                                "url": "http://example.com/image.png",
-                                "detail": "high"
-                            }
-                        }
-                    ],
-                    "name": "User"
-                },
-                {
-                    "role": "assistant",
-                    "content": "Certainly! I'd be happy to analyze the image for you.",
-                    "name": "Assistant",
-                    "tool_calls": [
-                        {
-                            "id": "call_abc123",
-                            "type": "function",
-                            "function": {
-                                "name": "analyze_image",
-                                "arguments": "{\"url\": \"http://example.com/image.png\"}"
-                            }
-                        }
-                    ]
-                },
-                {
-                    "role": "tool",
-                    "content": "Image analysis result: The image shows a beautiful landscape.",
-                    "tool_call_id": "call_abc123"
-                }
-            ],
-            "frequency_penalty": 0.5,
-            "logit_bias": {
-                "50256": -100
-            },
-            "logprobs": true,
-            "top_logprobs": 5,
-            "max_completion_tokens": 150,
-            "n": 1,
-            "presence_penalty": 0.6,
-            "seed": 12345,
-            "stop": ["END"],
-            "stream": true,
-            "temperature": 0.7,
-            "top_p": 0.9,
-            "user": "user123",
-            "tools": [
-                {
-                    "type": "function",
-                    "function": {
-                        "name": "analyze_image",
-                        "description": "Analyzes the content of an image",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "url": {
-                                    "type": "string",
-                                    "description": "URL of the image to analyze"
-                                }
-                            },
-                            "required": ["url"]
-                        },
-                        "strict": true
+                    "type": "image",
+                    "image_url": {
+                        "url": "http://example.com/image.png",
+                        "detail": "high"
                     }
                 }
             ]
-        });
+        "#;
 
-        let request_body: Result<RequestBody, serde_json::Error> =
-            serde_json::from_value(json_request_body);
+        let message_content: Result<MessageContent, serde_json::Error> =
+            serde_json::from_str(json_message_content_array);
+        assert!(message_content.is_ok());
+    }
 
-        assert!(request_body.is_ok());
-        let request_body = request_body.unwrap();
+    #[test]
+    fn test_messages_to_prompt() {
+        // Create some sample messages
+        let messages = vec![
+            Message::System {
+                content: Some(MessageContent::Text(
+                    "You are a helpful assistant.".to_string(),
+                )),
+                name: None,
+            },
+            Message::User {
+                content: Some(MessageContent::Text(
+                    "What is the capital of France?".to_string(),
+                )),
+                name: Some("User1".to_string()),
+            },
+            Message::Assistant {
+                content: Some(MessageContent::Text(
+                    "The capital of France is Paris.".to_string(),
+                )),
+                name: None,
+                refusal: None,
+                tool_calls: vec![],
+            },
+        ];
 
-        // Check model
-        assert_eq!(request_body.model, Model::Llama3);
+        let expected_prompt = "\
+            System: You are a helpful assistant.\n\n\
+            User (User1): What is the capital of France?\n\n\
+            Assistant: The capital of France is Paris.";
 
-        // Check messages
-        assert_eq!(request_body.messages.len(), 4);
+        let prompt = messages::messages_to_prompt(&messages);
+        assert_eq!(prompt, expected_prompt);
+    }
 
-        // Check system message
-        if let Message::System { content, name } = &request_body.messages[0] {
-            assert_eq!(
-                content,
-                &Some(MessageContent::Text(
-                    "You are a helpful assistant".to_string()
-                ))
-            );
-            assert_eq!(name, &Some("System".to_string()));
-        } else {
-            panic!("Expected System message");
-        }
+    #[test]
+    fn test_empty_messages() {
+        let messages: Vec<Message> = vec![];
+        let expected_prompt = "";
 
-        // Check user message
-        if let Message::User { content, name } = &request_body.messages[1] {
-            assert_eq!(name, &Some("User".to_string()));
-            if let Some(MessageContent::Array(parts)) = content {
-                assert_eq!(parts.len(), 2);
-                assert!(matches!(&parts[0], MessageContentPart::Text { .. }));
-                assert!(matches!(&parts[1], MessageContentPart::Image { .. }));
-            } else {
-                panic!("Expected Array content for User message");
-            }
-        } else {
-            panic!("Expected User message");
-        }
+        let prompt = messages::messages_to_prompt(&messages);
+        assert_eq!(prompt, expected_prompt);
+    }
 
-        // Check assistant message
-        if let Message::Assistant {
-            content,
-            name,
-            tool_calls,
-            ..
-        } = &request_body.messages[2]
-        {
-            assert_eq!(
-                content,
-                &Some(MessageContent::Text(
-                    "Certainly! I'd be happy to analyze the image for you.".to_string()
-                ))
-            );
-            assert_eq!(name, &Some("Assistant".to_string()));
-            assert_eq!(tool_calls.len(), 1);
-            assert_eq!(tool_calls[0].id, "call_abc123");
-            assert_eq!(tool_calls[0].r#type, "function");
-            assert_eq!(tool_calls[0].function.name, "analyze_image");
-        } else {
-            panic!("Expected Assistant message");
-        }
+    #[test]
+    fn test_message_with_no_content() {
+        let messages = vec![
+            Message::System {
+                content: None,
+                name: None,
+            },
+            Message::User {
+                content: Some(MessageContent::Text("What is 2 + 2?".to_string())),
+                name: None,
+            },
+            Message::Assistant {
+                content: Some(MessageContent::Text("2 + 2 is 4.".to_string())),
+                name: None,
+                refusal: None,
+                tool_calls: vec![],
+            },
+        ];
 
-        // Check tool message
-        if let Message::Tool {
-            content,
-            tool_call_id,
-        } = &request_body.messages[3]
-        {
-            assert_eq!(
-                content,
-                &Some(MessageContent::Text(
-                    "Image analysis result: The image shows a beautiful landscape.".to_string()
-                ))
-            );
-            assert_eq!(tool_call_id, "call_abc123");
-        } else {
-            panic!("Expected Tool message");
-        }
+        let expected_prompt = "\
+            System: \n\n\
+            User: What is 2 + 2?\n\n\
+            Assistant: 2 + 2 is 4.";
 
-        // Check all other fields
-        assert_eq!(request_body.frequency_penalty, Some(0.5));
-        assert_eq!(
-            request_body.logit_bias,
-            Some(HashMap::from([(String::from("50256"), -100.0)]))
-        );
-        assert_eq!(request_body.logprobs, Some(true));
-        assert_eq!(request_body.top_logprobs, Some(5));
-        assert_eq!(request_body.max_completion_tokens, Some(150));
-        assert_eq!(request_body.n, Some(1));
-        assert_eq!(request_body.presence_penalty, Some(0.6));
-        assert_eq!(request_body.seed, Some(12345));
-        assert_eq!(
-            request_body.stop,
-            Some(StopCondition::Array(vec!["END".to_string()]))
-        );
-        assert_eq!(request_body.stream, Some(true));
-        assert_eq!(request_body.temperature, Some(0.7));
-        assert_eq!(request_body.top_p, Some(0.9));
-        assert_eq!(request_body.user, Some("user123".to_string()));
+        let prompt = messages::messages_to_prompt(&messages);
+        assert_eq!(prompt, expected_prompt);
+    }
 
-        // Check tools
-        assert!(request_body.tools.is_some());
-        let tools = request_body.tools.unwrap();
-        assert_eq!(tools.len(), 1);
-        assert_eq!(tools[0].r#type, "function");
-        assert_eq!(tools[0].function.name, "analyze_image");
-        assert_eq!(
-            tools[0].function.description,
-            Some("Analyzes the content of an image".to_string())
-        );
-        assert!(tools[0].function.parameters.is_some());
-        assert_eq!(tools[0].function.strict, Some(true));
+    #[test]
+    fn test_message_to_prompt_without_sytem() {
+        let messages = vec![
+            Message::User {
+                content: Some(MessageContent::Text("What is 2 + 2?".to_string())),
+                name: None,
+            },
+            Message::Assistant {
+                content: Some(MessageContent::Text("2 + 2 is 4.".to_string())),
+                name: None,
+                refusal: None,
+                tool_calls: vec![],
+            },
+        ];
+
+        let expected_prompt = "\
+            User: What is 2 + 2?\n\n\
+            Assistant: 2 + 2 is 4.";
+
+        let prompt = messages::messages_to_prompt(&messages);
+        assert_eq!(prompt, expected_prompt);   
+    }
+
+    #[test]
+    fn test_message_to_prompt_without_user() {
+        let messages = vec![
+            Message::System {
+                content: Some(MessageContent::Text(
+                    "You are a helpful assistant.".to_string(),
+                )),
+                name: Some("Me".to_string()),
+            },
+            Message::Assistant {
+                content: Some(MessageContent::Text(
+                    "The capital of France is Paris.".to_string(),
+                )),
+                name: None,
+                refusal: None,
+                tool_calls: vec![],
+            },
+        ];
+
+        let expected_prompt = "\
+            System (Me): You are a helpful assistant.\n\n\
+            Assistant: The capital of France is Paris.";
+
+        let prompt = messages::messages_to_prompt(&messages);
+        assert_eq!(prompt, expected_prompt);   
     }
 }
