@@ -4,14 +4,14 @@ use std::{
         atomic::{AtomicU64, Ordering},
         Arc,
     },
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 #[cfg(feature = "vllm")]
 use atoma_backends::{GenerateRequest, GenerateRequestOutput, LlamaModel, LlmService};
 use axum::{
     extract::State,
-    http::{header, HeaderMap},
+    http::{header, HeaderMap, StatusCode},
     response::IntoResponse,
     routing::post,
     Json, Router,
@@ -29,7 +29,7 @@ use tokio::{
 use tracing::{error, info};
 
 use api::{
-    chat_completions::{Model, RequestBody},
+    chat_completions::{ChatCompletionResponse, RequestBody},
     validate_schema::validate_with_schema,
 };
 
@@ -135,13 +135,41 @@ pub async fn run_server(
     Ok(())
 }
 
-/// Deserialize the `[RequestBody]` from JSON, and pass the information to the specified model,
-/// returning the generated content as a `[Response]` in JSON.
+/// Handles chat completion requests by processing the input, sending it to the LLM service,
+/// and returning the generated response.
+///
+/// # Arguments
+///
+/// * `app_state` - The shared application state containing the request counter and LLM service sender.
+/// * `headers` - The HTTP headers of the incoming request.
+/// * `request` - The deserialized JSON request body containing the chat completion parameters.
+///
+/// # Returns
+///
+/// Returns a `Result` containing either:
+/// - `Ok(Json<ChatCompletionResponse>)`: The successful chat completion response.
+/// - `Err((StatusCode, Json<serde_json::Value>))`: An error response with appropriate status code and message.
+///
+/// # Flow
+///
+/// 1. Generates a unique request ID.
+/// 2. Extracts the authorization key from headers (currently unused).
+/// 3. Converts the request to a `GenerateRequest` for the LLM service.
+/// 4. Sends the request to the LLM service and awaits the response.
+/// 5. Converts the LLM service output to a `ChatCompletionResponse`.
+/// 6. Returns the response or an error if any step fails.
+///
+/// # Error Handling
+///
+/// - Returns a 500 Internal Server Error if:
+///   - Sending the request to the LLM service fails.
+///   - Receiving the response from the LLM service fails.
+///   - Converting the LLM output to a `ChatCompletionResponse` fails.
 pub async fn completion_handler(
     app_state: State<AppState>,
     headers: HeaderMap,
     Json(request): Json<RequestBody>,
-) -> impl IntoResponse {
+) -> Result<Json<ChatCompletionResponse>, (StatusCode, Json<serde_json::Value>)> {
     let request_number = app_state.request_counter.fetch_add(1, Ordering::SeqCst);
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -158,47 +186,73 @@ pub async fn completion_handler(
                 .and_then(|auth_header_str| auth_header_str.strip_prefix(AUTH_BEARER_PREFIX))
         })
         .unwrap_or_default();
-    // let model = match &request.model() {
-    //     // TODO: Use information from the deserialized request
-    //     // and return the response from the model
-    //     Model::Llama3 => Json(json!({"status": "success"})),
-    // };
-    // let messages = request.messages();
-    // let frequency_penalty = request.frequency_penalty();
-    // let logit_bias = request.logit_bias();
-    // let logprobs = request.logprobs();
-    // let top_logprobs = request.top_logprobs();
-    // let max_completion_tokens = request.max_completion_tokens();
-    // let n = request.n();
-    // let presence_penalty = request.presence_penalty();
-    // let seed = request.seed();
-    // let stop = request.stop();
-    // let stream = request.stream();
-    // let temperature = request.temperature();
-    // let top_p = request.top_p();
-    // let tools = request.tools();
-    // let user = request.user();
+    let model = request.model().to_string();
+    let generate_request = request.to_generate_request(request_id.clone());
+    let (sender, receiver) = oneshot::channel();
 
-    // let (sender, receiver) = oneshot::channel();
-    // let generate_request = GenerateRequest {
-    //     messages,
-    //     frequency_penalty,
-    //     logit_bias,
-    //     logprobs,
-    //     max_completion_tokens,
-    //     n,
-    //     presence_penalty,
-    //     seed,
-    //     stop,
-    //     stream,
-    // };
+    if let Err(send_error) = app_state
+        .llm_service_sender
+        .send((generate_request, sender))
+    {
+        error!("Failed to send request to LLM Service: {}", send_error);
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({
+                "error": {
+                    "message": "Internal server error: failed to process request",
+                    "type": "internal_error",
+                    "request_id": request_id,
+                }
+            })),
+        ));
+    }
 
-    // app_state.sender.send((generate_request, sender))?;
-    // let outputs = receiver.await?;
+    let outputs = match receiver.await {
+        Ok(outputs) => outputs,
+        Err(_) => {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "error": {
+                        "message": "Failed to receive response from LLM Service",
+                        "type": "internal_error",
+                        "request_id": request_id,
+                    }
+                })),
+            ));
+        }
+    };
 
-    Json(json!({"status": "success"}))
+    let chat_response = ChatCompletionResponse::try_from((model, outputs)).map_err(|err| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({
+                "error": {
+                    "message": err,
+                    "type": "internal_error",
+                    "request_id": request_id,
+                }
+            })),
+        )
+    })?;
+
+    Ok(Json(chat_response))
 }
 
+/// Validates the incoming JSON request body against the OpenAI Chat Completion API schema.
+///
+/// This handler is used to validate the structure and content of a request body
+/// before it's processed by the actual completion handler. It helps clients
+/// ensure their requests are properly formatted.
+///
+/// # Arguments
+///
+/// * `instance` - The JSON request body to validate, extracted from the request.
+///
+/// # Returns
+///
+/// Returns a JSON response indicating whether the validation was successful or not.
+/// If validation fails, it returns details about the validation errors.
 pub async fn validate_completion_handler(
     Json(instance): Json<serde_json::Value>,
 ) -> impl IntoResponse {

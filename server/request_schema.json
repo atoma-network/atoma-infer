@@ -39,7 +39,8 @@
         "integer",
         "null"
       ],
-      "format": "int32"
+      "format": "uint32",
+      "minimum": 0.0
     },
     "messages": {
       "description": "A list of messages comprising the conversation so far.",

@@ -7,6 +7,7 @@ use std::{
 
 use candle_core::Tensor;
 use candle_transformers::generation::LogitsProcessor;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracing::{debug, error, info_span, instrument, trace, Span};
 
@@ -17,7 +18,7 @@ use crate::{
 };
 
 /// Represents log probabilities, token ranks, and decoded tokens for a given token.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct LogProb {
     /// The log probability of the token.
     logprob: f32,

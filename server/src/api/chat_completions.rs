@@ -1,8 +1,11 @@
 //! Responsible for creating the json schema associated with the AtomaAPI, which is modeled after OpenAI's own API.
 
 #[cfg(feature = "vllm")]
-use atoma_backends::{GenerateParameters, GenerateRequest};
-use std::collections::HashMap;
+use atoma_backends::{GenerateParameters, GenerateRequest, GenerateRequestOutput};
+use std::{
+    collections::HashMap,
+    time::{Instant, SystemTime},
+};
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize};
@@ -15,6 +18,12 @@ use serde_json::Value;
 // type. For now a naive version of this is OK, but may want to do this
 // before deploying v1 of the schema to avoid misuse.
 
+// ========================================================================================
+// ||                                                                                    ||
+// ||                                     Model                                          ||
+// ||                                                                                    ||
+// ========================================================================================
+
 /// ID of the model to use.
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename(serialize = "model", deserialize = "model"))]
@@ -22,6 +31,20 @@ pub enum Model {
     #[serde(rename(serialize = "llama3", deserialize = "llama3"))]
     Llama3,
 }
+
+impl std::fmt::Display for Model {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Model::Llama3 => write!(f, "llama3"),
+        }
+    }
+}
+
+// ========================================================================================
+// ||                                                                                    ||
+// ||                                     Message                                        ||
+// ||                                                                                    ||
+// ========================================================================================
 
 /// A message that is part of a conversation which is based on the role
 /// of the author of the message.
@@ -251,6 +274,12 @@ impl std::fmt::Display for MessageContentPartImageUrl {
     }
 }
 
+// ========================================================================================
+// ||                                                                                    ||
+// ||                                     Tools                                       ||
+// ||                                                                                    ||
+// ========================================================================================
+
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename(serialize = "tool_call", deserialize = "tool_call"))]
 pub struct ToolCall {
@@ -307,6 +336,12 @@ pub enum StopCondition {
     Array(Vec<String>),
     String(String),
 }
+
+// ========================================================================================
+// ||                                                                                    ||
+// ||                                     Request Body                                   ||
+// ||                                                                                    ||
+// ========================================================================================
 
 #[derive(Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename(serialize = "requestBody", deserialize = "requestBody"))]
@@ -505,7 +540,7 @@ impl RequestBody {
 
 impl RequestBody {
     pub fn to_generate_request(self, request_id: String) -> GenerateRequest {
-        let inputs = messages::messages_to_prompt(&self.messages());
+        let inputs = messages::messages_to_prompt(self.messages());
         let frequency_penalty = self.frequency_penalty();
         let max_new_tokens = self.max_completion_tokens();
         let decoder_input_details = self.logprobs().unwrap_or_default();
@@ -547,6 +582,119 @@ impl RequestBody {
     }
 }
 
+// ========================================================================================
+// ||                                                                                    ||
+// ||                               Chat Completion Response                             ||
+// ||                                                                                    ||
+// ========================================================================================
+
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChatCompletionResponse {
+    pub id: String,
+    pub object: String,
+    pub created: u64,
+    pub model: String,
+    pub system_fingerprint: String,
+    pub choices: Vec<Choice>,
+    pub usage: Usage,
+}
+
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Choice {
+    pub index: u32,
+    pub message: Message,
+    pub logprobs: Option<Value>,
+    pub finish_reason: FinishReason,
+}
+
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FinishReason {
+    Stop,
+    Length,
+    ContentFilter,
+}
+
+impl TryFrom<Option<&str>> for FinishReason {
+    type Error = String;
+
+    fn try_from(value: Option<&str>) -> Result<Self, Self::Error> {
+        match value {
+            Some("stop") => Ok(FinishReason::Stop),
+            Some("length") => Ok(FinishReason::Length),
+            Some("content_filter") => Ok(FinishReason::ContentFilter),
+            None => Ok(FinishReason::Stop),
+            _ => Err(format!("Invalid finish reason: {}", value.unwrap())),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Usage {
+    pub prompt_tokens: u32,
+    pub completion_tokens: u32,
+    pub total_tokens: u32,
+}
+
+impl TryFrom<(String, GenerateRequestOutput)> for ChatCompletionResponse {
+    type Error = String;
+
+    fn try_from((model, value): (String, GenerateRequestOutput)) -> Result<Self, Self::Error> {
+        let inference_outputs = value.inference_outputs;
+        let choices = inference_outputs
+            .iter()
+            .map(|output| {
+                Ok(Choice {
+                    index: output.index as u32,
+                    message: Message::Assistant {
+                        content: Some(MessageContent::Text(output.output_text.clone())),
+                        name: None,
+                        refusal: None,
+                        tool_calls: vec![],
+                    },
+                    logprobs: Some(
+                        serde_json::to_value(&output.logprobs)
+                            .map_err(|e| format!("Failed to convert logprobs to JSON: {}", e))?,
+                    ),
+                    finish_reason: FinishReason::try_from(output.finish_reason.as_deref())?,
+                })
+            })
+            .collect::<Result<Vec<Choice>, Self::Error>>()?;
+        let prompt_tokens = value.prompt_token_ids.len() as u32;
+        let completion_tokens = inference_outputs
+            .iter()
+            .map(|o| o.token_ids.len())
+            .sum::<usize>() as u32;
+        let total_tokens = prompt_tokens + completion_tokens;
+
+        let now = Instant::now();
+        let finished_time = value
+            .metrics
+            .read()
+            .unwrap()
+            .finished_time
+            .ok_or("Finished time not found")?;
+        let duration = now.duration_since(finished_time);
+        let system_now = SystemTime::now();
+        let system_duration = system_now.duration_since(SystemTime::UNIX_EPOCH).unwrap();
+        let created = system_duration.as_millis() as u64 - duration.as_millis() as u64;
+
+        Ok(ChatCompletionResponse {
+            id: value.request_id,
+            object: "chat.completions".into(),
+            created,
+            model,
+            system_fingerprint: "vllm".into(),
+            choices,
+            usage: Usage {
+                prompt_tokens,
+                completion_tokens,
+                total_tokens,
+            },
+        })
+    }
+}
+
 #[cfg(test)]
 pub mod json_schema_tests {
     // TODO: Move check functions to a test utils module.
@@ -559,8 +707,8 @@ pub mod json_schema_tests {
     use serde_json::json;
 
     use super::{
-        messages, Message, MessageContent, MessageContentPart, MessageContentPartImageUrl,
-        ToolCall, ToolCallFunction,
+        messages, ChatCompletionResponse, Choice, FinishReason, Message, MessageContent,
+        MessageContentPart, MessageContentPartImageUrl, ToolCall, ToolCallFunction, Usage,
     };
     use crate::{validate_with_schema, RequestBody};
 
@@ -877,7 +1025,7 @@ pub mod json_schema_tests {
             Assistant: 2 + 2 is 4.";
 
         let prompt = messages::messages_to_prompt(&messages);
-        assert_eq!(prompt, expected_prompt);   
+        assert_eq!(prompt, expected_prompt);
     }
 
     #[test]
@@ -904,6 +1052,142 @@ pub mod json_schema_tests {
             Assistant: The capital of France is Paris.";
 
         let prompt = messages::messages_to_prompt(&messages);
-        assert_eq!(prompt, expected_prompt);   
+        assert_eq!(prompt, expected_prompt);
+    }
+
+    #[test]
+    fn test_deserialize_chat_completion_response() {
+        let json = json!({
+            "id": "chatcmpl-123",
+            "object": "chat.completion",
+            "created": 1677652288,
+            "model": "llama",
+            "system_fingerprint": "fp_44709d6fcb",
+            "choices": [{
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": "Hello, how can I help you today?"
+                },
+                "finish_reason": "stop"
+            }],
+            "usage": {
+                "prompt_tokens": 9,
+                "completion_tokens": 12,
+                "total_tokens": 21
+            }
+        });
+
+        let response: ChatCompletionResponse = serde_json::from_value(json).unwrap();
+
+        assert_eq!(response.id, "chatcmpl-123");
+        assert_eq!(response.object, "chat.completion");
+        assert_eq!(response.created, 1677652288);
+        assert_eq!(response.model, "llama");
+        assert_eq!(response.system_fingerprint, "fp_44709d6fcb");
+        assert_eq!(response.choices.len(), 1);
+        assert_eq!(response.choices[0].index, 0);
+        assert_eq!(
+            response.choices[0].message,
+            Message::Assistant {
+                content: Some(MessageContent::Text(
+                    "Hello, how can I help you today?".to_string()
+                )),
+                name: None,
+                refusal: None,
+                tool_calls: vec![],
+            }
+        );
+        assert_eq!(response.choices[0].finish_reason, FinishReason::Stop);
+        assert_eq!(response.usage.prompt_tokens, 9);
+        assert_eq!(response.usage.completion_tokens, 12);
+        assert_eq!(response.usage.total_tokens, 21);
+    }
+
+    #[test]
+    fn test_deserialize_choice() {
+        let json = json!({
+            "index": 0,
+            "message": {
+                "role": "assistant",
+                "content": "Hello, how can I help you today?"
+            },
+            "finish_reason": "stop"
+        });
+
+        let choice: Choice = serde_json::from_value(json).unwrap();
+
+        assert_eq!(choice.index, 0);
+        assert!(matches!(choice.message, Message::Assistant { .. }));
+        assert!(matches!(choice.finish_reason, FinishReason::Stop));
+    }
+
+    #[test]
+    fn test_deserialize_finish_reason() {
+        assert_eq!(
+            serde_json::from_str::<FinishReason>("\"stop\"").unwrap(),
+            FinishReason::Stop
+        );
+        assert_eq!(
+            serde_json::from_str::<FinishReason>("\"length\"").unwrap(),
+            FinishReason::Length
+        );
+        assert_eq!(
+            serde_json::from_str::<FinishReason>("\"content_filter\"").unwrap(),
+            FinishReason::ContentFilter
+        );
+    }
+
+    #[test]
+    fn test_deserialize_usage() {
+        let json = json!({
+            "prompt_tokens": 9,
+            "completion_tokens": 12,
+            "total_tokens": 21
+        });
+
+        let usage: Usage = serde_json::from_value(json).unwrap();
+
+        assert_eq!(usage.prompt_tokens, 9);
+        assert_eq!(usage.completion_tokens, 12);
+        assert_eq!(usage.total_tokens, 21);
+    }
+
+    #[test]
+    fn test_deserialize_choice_with_logprobs() {
+        let json = json!({
+            "index": 0,
+            "message": {
+                "role": "assistant",
+                "content": "Hello, how can I help you today?"
+            },
+            "logprobs": {
+                "token_logprobs": [-0.5, -0.2, -0.3],
+                "top_logprobs": [
+                    {"Hello": -0.5, "Hi": -0.7},
+                    {"how": -0.2, "what": -0.4},
+                    {"can": -0.3, "may": -0.5}
+                ]
+            },
+            "finish_reason": "stop"
+        });
+
+        let choice: Choice = serde_json::from_value(json).unwrap();
+
+        assert_eq!(choice.index, 0);
+        assert!(matches!(choice.message, Message::Assistant { .. }));
+        assert!(choice.logprobs.is_some());
+        assert_eq!(
+            choice.logprobs.unwrap(),
+            json!({
+                "token_logprobs": [-0.5, -0.2, -0.3],
+                "top_logprobs": [
+                    {"Hello": -0.5, "Hi": -0.7},
+                    {"how": -0.2, "what": -0.4},
+                    {"can": -0.3, "may": -0.5}
+                ]
+            })
+        );
+        assert!(matches!(choice.finish_reason, FinishReason::Stop));
     }
 }
