@@ -15,31 +15,28 @@ use api::{
 };
 
 pub mod api;
+mod config;
 #[cfg(test)]
 pub mod tests;
+use config::CONFIG;
 
 // TODO: Add version path prefix, eg. `/v1` although maybe something along the lines of `/beta` would be more fitting?
-/// The URL path to POST JSON for model chat completions.
-pub const CHAT_COMPLETIONS_PATH: &str = "/chat/completions";
-pub const DEFAULT_SERVER_ADDRESS: &str = "0.0.0.0";
-pub const DEFAULT_SERVER_PORT: &str = "8080";
-pub const AUTH_BEARER_PREFIX: &str = "Bearer ";
+pub const AUTH_BEARER_PREFIX: &str = "Bearer "; // TODO: This will always be bearer, as per the OpenAI spec. Maybe remove this constant?
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // TODO: Write a clap cli for passing arguments
-    let address =
-        env::var("ATOMA_NODE_INFERENCE_SERVER_ADDRESS").unwrap_or(DEFAULT_SERVER_ADDRESS.into());
-    let port = env::var("ATOMA_NODE_INFERENCE_SERVER_PORT").unwrap_or(DEFAULT_SERVER_PORT.into());
+    let address = CONFIG.server_address.clone();
+    let port = CONFIG.server_port.clone();
     let listener = TcpListener::bind(format!("{address}:{port}")).await?;
     run_server(listener).await
 }
 
 pub async fn run_server(listener: TcpListener) -> anyhow::Result<()> {
     let http_router = Router::new()
-        .route(CHAT_COMPLETIONS_PATH, post(completion_handler))
+        .route(&CONFIG.chat_completions_path, post(completion_handler))
         .route(
-            &format!("{CHAT_COMPLETIONS_PATH}/validate"),
+            &format!("{}/validate", CONFIG.chat_completions_path.clone()),
             post(validate_completion_handler),
         );
 

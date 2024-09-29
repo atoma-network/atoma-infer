@@ -2,7 +2,7 @@
 
 ![Atoma Logo](https://github.com/atoma-network/atoma-paged-attention/blob/main/assets/atoma-symbol.jpg)
 
-The Atoma Node Inference repository is a collection of optimized infrastructure for Large Language Models (LLMs) compute. We rely on highly optimized KV cache memory management software, through block pagination, such as 
+The Atoma Node Inference repository is a collection of optimized infrastructure for Large Language Models (LLMs) compute. We rely on highly optimized KV cache memory management software, through block pagination, such as
 [PagedAttention](https://github.com/vllm-project/vllm) and [FlashAttention2](https://github.com/Dao-AILab/flash-attention). The codebase is mostly written in the Rust programming language, which leads to safe and highly optimized inference request scheduling, enhancing LLM inference serving.
 
 ## Features
@@ -38,8 +38,9 @@ This project leverages [Candle](https://github.com/huggingface/candle), HuggingF
 3. Install Rust: Follow the instructions at [https://www.rust-lang.org/tools/install](https://www.rust-lang.org/tools/install)
 4. Navigate to the project directory: `cd atoma-node-inference`
 5. Initialize the git submodules: `git submodule init` and then `git pull --recurse-submodules`
-6. Build the project: `cargo build --release`
-7. Run tests: `cargo test`
+6. Setup env variables: `cp .env.development .env` (development) or `cp .env.production` (production)
+7. Build the project: `cargo build --release`
+8. Run tests: `cargo test`
 
 For more detailed instructions, please refer to our [documentation](docs/README.md).
 
@@ -58,7 +59,6 @@ minimise the burden on the reviewer.
 Here are a few specific guidelines for the three main categories of
 PRs that we expect:
 
-
 #### The PR fixes a bug
 
 In the PR description, please clearly but briefly describe
@@ -72,7 +72,6 @@ In the PR description, please clearly but briefly describe
 Wherever possible, PRs that fix bugs should include additional tests
 that (i) trigger the original bug and (ii) pass after applying the PR.
 
-
 #### The PR implements a new feature
 
 In the PR description, please clearly but briefly describe
@@ -82,26 +81,22 @@ In the PR description, please clearly but briefly describe
 
 All PRs for new features must include a suitable test suite.
 
-
 #### The PR improves performance
 
-Performance improvements are particularly welcome! 
+Performance improvements are particularly welcome!
 
 1. The target bottleneck (only one per PR to avoid confusing things!)
 2. How performance is measured
 3. Characteristics of the machine used (CPU, OS, GPU, etc.)
 4. Performance gains in terms of speedups and memory usage (e.g. 2x speedup and 50% memory reduction).
 
-
 #### Report bugs
 
 If you find a bug, please open an issue in our GitHub repository with a clear description and steps to reproduce.
 
-
 #### Documentation
 
 Help us enhance our documentation by fixing typos, clarifying explanations, or adding examples.
-
 
 #### Share knowledge
 
