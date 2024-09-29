@@ -7,11 +7,11 @@ use std::{
 mod llama;
 
 use candle_core::{DType, Device, Tensor};
-use futures::stream::FuturesUnordered;
+use futures::{stream::FuturesUnordered, StreamExt};
 use hf_hub::{api::sync::ApiBuilder, Repo, RepoType};
 use models::FlashAttentionMetadata;
 use rand::Rng;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 use tracing::info;
 
 use crate::{
@@ -22,14 +22,9 @@ use crate::{
     },
     sequence::ExecuteModelRequest,
     types::{GenerateParameters, GenerateRequest},
-    validation::Validation,
 };
 
 const MAX_ELAPSED_INTERNAL: u64 = 50;
-const MAX_STOP_SEQUENCES: usize = 1;
-const MAX_TOP_N_TOKENS: u32 = 0;
-const MAX_INPUT_LENGTH: usize = 16;
-const MAX_TOTAL_TOKENS: u32 = 32;
 const EOS_TOKEN_ID: u32 = 2048;
 const VOCAB_SIZE: usize = 128;
 
@@ -156,7 +151,7 @@ async fn test_llm_engine() {
     let service = LlmService::start::<MockModel, PathBuf>(
         service_request_receiver,
         config_path,
-        shutdown_signal,
+        shutdown_signal_receiver,
     )
     .await
     .expect("Failed to start LLM service");
@@ -206,8 +201,9 @@ async fn test_llm_engine() {
     let mut elapsed_times = Vec::with_capacity(100);
 
     while let Some(responses) = futures.next().await {
+        let responses = responses.unwrap();
         elapsed_times.push(start.elapsed());
-        for response in responses.iter() {
+        for response in responses.inference_outputs.iter() {
             number_of_responses += 1;
             info!("Got new response: {response:?}");
         }
@@ -226,6 +222,8 @@ async fn test_llm_engine() {
         let right_run_time = elapsed_times[i + 1];
         assert!(right_run_time - left_run_time <= max_elapsed_interval);
     }
+
+    shutdown_signal_sender.send(()).await.unwrap();
 }
 
 #[tokio::test]
@@ -247,7 +245,7 @@ async fn test_llm_engine_with_enable_chunking() {
     let service = LlmService::start::<MockModel, PathBuf>(
         service_request_receiver,
         config_path,
-        shutdown_signal,
+        shutdown_signal_receiver,
     )
     .await
     .expect("Failed to start LLM service");
@@ -297,8 +295,9 @@ async fn test_llm_engine_with_enable_chunking() {
     let mut elapsed_times = Vec::with_capacity(100);
 
     while let Some(responses) = futures.next().await {
+        let responses = responses.unwrap();
         elapsed_times.push(start.elapsed());
-        for response in responses.iter() {
+        for response in responses.inference_outputs.iter() {
             number_of_responses += 1;
             info!("Got new response: {response:?}");
         }
@@ -317,6 +316,8 @@ async fn test_llm_engine_with_enable_chunking() {
         // Give enough variability time for different machines
         assert!(right_run_time - left_run_time <= max_elapsed_interval);
     }
+
+    shutdown_signal_sender.send(()).await.unwrap();
 }
 
 pub fn init_tracing() {

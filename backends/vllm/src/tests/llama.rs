@@ -2,9 +2,8 @@ use crate::{
     llm_service::LlmService,
     models::llama::LlamaModel,
     types::{GenerateParameters, GenerateRequest},
-    validation::Validation,
 };
-use futures::stream::FuturesUnordered;
+use futures::{stream::FuturesUnordered, StreamExt};
 use std::{path::PathBuf, time::Instant};
 use tracing::info;
 
@@ -72,18 +71,12 @@ async fn test_llama_model() {
 
     let mut received_responses = 0;
     while let Some(responses) = futures.next().await {
-        for inference_outputs in responses {
-            let finished_time = inference_outputs
-                .metrics
-                .read()
-                .unwrap()
-                .finished_time
-                .unwrap();
-            let elapsed_time = finished_time.duration_since(start);
-            for output in inference_outputs.inference_outputs {
-                let text = output.output_text;
-                info!("\n\nReceived response: {text:?}\n, within time: {elapsed_time:?}\n\n");
-            }
+        let responses = responses.unwrap();
+        let finished_time = responses.metrics.read().unwrap().finished_time.unwrap();
+        let elapsed_time = finished_time.duration_since(start);
+        for output in responses.inference_outputs {
+            let text = output.output_text;
+            info!("\n\nReceived response: {text:?}\n, within time: {elapsed_time:?}\n\n");
         }
 
         received_responses += 1;
