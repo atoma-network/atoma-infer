@@ -18,12 +18,6 @@ use serde_json::Value;
 // type. For now a naive version of this is OK, but may want to do this
 // before deploying v1 of the schema to avoid misuse.
 
-// ========================================================================================
-// ||                                                                                    ||
-// ||                                     Model                                          ||
-// ||                                                                                    ||
-// ========================================================================================
-
 /// ID of the model to use.
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename(serialize = "model", deserialize = "model"))]
@@ -39,12 +33,6 @@ impl std::fmt::Display for Model {
         }
     }
 }
-
-// ========================================================================================
-// ||                                                                                    ||
-// ||                                     Message                                        ||
-// ||                                                                                    ||
-// ========================================================================================
 
 /// A message that is part of a conversation which is based on the role
 /// of the author of the message.
@@ -274,12 +262,6 @@ impl std::fmt::Display for MessageContentPartImageUrl {
     }
 }
 
-// ========================================================================================
-// ||                                                                                    ||
-// ||                                     Tools                                       ||
-// ||                                                                                    ||
-// ========================================================================================
-
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename(serialize = "tool_call", deserialize = "tool_call"))]
 pub struct ToolCall {
@@ -336,12 +318,6 @@ pub enum StopCondition {
     Array(Vec<String>),
     String(String),
 }
-
-// ========================================================================================
-// ||                                                                                    ||
-// ||                                     Request Body                                   ||
-// ||                                                                                    ||
-// ========================================================================================
 
 #[derive(Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename(serialize = "requestBody", deserialize = "requestBody"))]
@@ -581,12 +557,6 @@ impl RequestBody {
         }
     }
 }
-
-// ========================================================================================
-// ||                                                                                    ||
-// ||                               Chat Completion Response                             ||
-// ||                                                                                    ||
-// ========================================================================================
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChatCompletionResponse {
