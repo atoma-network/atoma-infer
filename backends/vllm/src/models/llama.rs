@@ -10,11 +10,42 @@ use tracing::info;
 
 use crate::{
     model_executor::{
-        ModelExecutor, ModelExecutorError, ModelFilePaths, ModelLoader, ModelLoaderError,
-        ModelMetadata,
+        Config as ModelConfig, ModelExecutor, ModelExecutorError, ModelFilePaths, ModelLoader,
+        ModelLoaderError, ModelMetadata,
     },
     models::hub_load_safetensors,
 };
+
+impl ModelConfig for Config {
+    fn alibi_slopes(&self) -> Option<&Tensor> {
+        None
+    }
+    fn eos_token_ids(&self) -> Option<Vec<u32>> {
+        match self.eos_token_ids {
+            None => None,
+            Some(LlamaEosToks::Single(u)) => Some(vec![u]),
+            Some(LlamaEosToks::Multiple(us)) => Some(us.clone()),
+        }
+    }
+    fn hidden_dim(&self) -> usize {
+        self.hidden_size / self.num_attention_heads
+    }
+    fn num_attention_heads(&self) -> usize {
+        self.num_attention_heads
+    }
+    fn num_hidden_layers(&self) -> usize {
+        self.num_hidden_layers
+    }
+    fn num_kv_heads(&self) -> usize {
+        self.num_key_value_heads.unwrap()
+    }
+    fn sliding_window(&self) -> Option<usize> {
+        None
+    }
+    fn softmax_scale(&self) -> f32 {
+        1f32 / (self.hidden_dim() as f32).sqrt()
+    }
+}
 
 /// Represents a Llama language model.
 ///
@@ -27,6 +58,8 @@ pub struct LlamaModel {
 }
 
 impl ModelLoader for LlamaModel {
+    type C = LlamaConfig;
+
     fn fetch<T: AsRef<Path>>(
         api_key: String,
         cache_dir: T,
@@ -61,6 +94,7 @@ impl ModelLoader for LlamaModel {
     }
 
     fn load(
+        config: Self::C,
         device: Device,
         dtype: DType,
         file_paths: &ModelFilePaths,
@@ -71,11 +105,7 @@ impl ModelLoader for LlamaModel {
         info!("Loading Llama model ...");
         let start = Instant::now();
 
-        let (model, config) = {
-            let config: LlamaConfig =
-                serde_json::from_slice(&std::fs::read(&file_paths.config_path)?)?;
-            let config = config.into_config();
-
+        let model = {
             let vb = unsafe {
                 VarBuilder::from_mmaped_safetensors(
                     file_paths.weights_path.as_slice(),
@@ -83,7 +113,7 @@ impl ModelLoader for LlamaModel {
                     &device,
                 )?
             };
-            (Llama::load(vb, &config, dtype, &device)?, config)
+            Llama::load(vb, &config, dtype, &device)?
         };
         info!("Loaded Llama model in {:?}", start.elapsed());
 

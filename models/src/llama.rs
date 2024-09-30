@@ -1,6 +1,7 @@
 use candle_core::{DType, Device, Module, Result, Tensor};
 use candle_nn::{embedding, Embedding, VarBuilder};
 use candle_transformers::models::with_tracing::{linear_no_bias as linear, Linear, RmsNorm};
+use serde::{Deserialize, Serialize};
 use std::f32::consts::PI;
 
 use crate::flash_attention::{FlashAttention, FlashAttentionMetadata};
@@ -8,7 +9,7 @@ use crate::flash_attention::{FlashAttention, FlashAttentionMetadata};
 /// Maximum input sequence token length
 const DEFAULT_MAX_SEQ_LEN: usize = 4096;
 
-#[derive(Debug, Clone, serde::Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Default)]
 pub enum Llama3RopeType {
     #[serde(rename = "llama3")]
     Llama3,
@@ -17,7 +18,7 @@ pub enum Llama3RopeType {
     Default,
 }
 
-#[derive(Debug, Clone, serde::Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Default)]
 pub struct Llama3RopeConfig {
     pub factor: f32,
     pub low_freq_factor: f32,
@@ -25,14 +26,14 @@ pub struct Llama3RopeConfig {
     pub original_max_position_embeddings: usize,
     pub rope_type: Llama3RopeType,
 }
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
 pub enum LlamaEosToks {
     Single(u32),
     Multiple(Vec<u32>),
 }
 
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct LlamaConfig {
     pub hidden_size: usize,
     pub intermediate_size: usize,
@@ -78,7 +79,7 @@ impl LlamaConfig {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Config {
     pub hidden_size: usize,
     pub intermediate_size: usize,

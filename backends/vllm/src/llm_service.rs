@@ -6,7 +6,9 @@ use crate::{
         ValidationConfig,
     },
     llm_engine::{EngineError, GenerateRequestOutput, LlmEngine},
-    model_executor::{ModelExecutor, ModelLoaderError, ModelThreadDispatcher, ModelThreadError},
+    model_executor::{
+        Config, ModelExecutor, ModelLoaderError, ModelThreadDispatcher, ModelThreadError,
+    },
     scheduler::{Scheduler, SchedulerError},
     sequence::{Sequence, SequenceError, SequenceGroup},
     tokenizer::{TokenizerError, TokenizerWorker},
@@ -65,7 +67,7 @@ pub struct LlmService {
 impl LlmService {
     /// Starts the service
     #[instrument(skip_all)]
-    pub async fn start<M, P: AsRef<Path>>(
+    pub async fn start<C, M, P: AsRef<Path>>(
         service_request_receiver: UnboundedReceiver<(
             GenerateRequest,
             oneshot::Sender<GenerateRequestOutput>,
@@ -74,6 +76,7 @@ impl LlmService {
         shutdown_signal: mpsc::Receiver<()>,
     ) -> Result<Self, LlmServiceError>
     where
+        C: Config,
         M: ModelExecutor + Send + Sync + 'static,
     {
         let span = info_span!("llm-service");
@@ -91,20 +94,23 @@ impl LlmService {
             model_config.model_name.clone(),
             model_config.revision.clone(),
         )?;
+        let config = C::from_file_path(&file_paths.config_path)?;
         let tokenizer = Tokenizer::from_file(&file_paths.tokenizer_path)?;
         // NOTE: we load the model on GPU memory, as to properly compute the number of blocks
         // during the system profiling stage. See `compute_num_gpu_blocks` comments
         // in the file `config.rs` for more details.
         // TODO: support multi-GPUs
-        let device = Device::new_cuda(model_config.device_ids[0])?;
+        let devices_ids = model_config.device_ids.clone();
         let dtype = DType::from_str(&model_config.dtype)?;
-        let model = M::load(device.clone(), dtype, &file_paths)?;
+        let num_kv_heads = config.num_kv_heads();
+        let hidden_dim = config.hidden_dim();
+        let num_hidden_layers = config.num_hidden_layers();
 
         let cache_config = CacheConfig::from_file_path(
             config_path.as_ref(),
-            model.num_kv_heads(),
-            model.hidden_dim(),
-            model.num_hidden_layers(),
+            num_kv_heads,
+            hidden_dim,
+            num_hidden_layers,
         )?;
         let scheduler_config = SchedulerConfig::from_file_path(config_path.as_ref())?;
         let validation_config = ValidationConfig::from_file_path(config_path.as_ref());
@@ -136,9 +142,10 @@ impl LlmService {
 
         let model_thread_dispatcher = ModelThreadDispatcher::start::<M>(
             cache_config,
-            device,
+            config,
+            devices_ids,
             dtype,
-            model,
+            &file_paths,
             scheduler_config,
         )?;
 

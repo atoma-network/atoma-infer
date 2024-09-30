@@ -46,9 +46,9 @@ pub struct ModelWorker<M: ModelExecutor> {
     enable_chunked_prefill: bool,
     /// Model runner instance
     model: M,
-    /// Initial GPU available memory
-    #[allow(dead_code)]
-    initial_gpu_memory: usize,
+    #[cfg(feature = "nccl")]
+    /// The associated GPU device rank
+    rank: usize,
     /// Tracing Span
     span: Span,
 }
@@ -65,6 +65,7 @@ where
         dtype: DType,
         model: M,
         enable_chunked_prefill: bool,
+        #[cfg(feature = "nccl")] rank: usize,
     ) -> Result<Self, ModelWorkerError> {
         let span = info_span!("model-worker");
         let _span = span.clone();
@@ -86,13 +87,13 @@ where
 
         // TODO:
         // 1. Check cuda is available (error otherwise);
-        // 2. Access initial GPU memory (using cudarc)
         Ok(Self {
             cache_engine,
             device,
             enable_chunked_prefill,
             model,
-            initial_gpu_memory: 0, // TODO 2.
+            #[cfg(feature = "nccl")]
+            rank,
             span,
         })
     }
@@ -170,9 +171,18 @@ where
             attention_metadata,
         )?;
 
+        #[cfg(not(feature = "nccl"))]
         let sampled_outputs = self
             .model
             .sample(&logits.squeeze(0)?, &sequence_groups_metadata)?;
+
+        #[cfg(feature = "nccl")]
+        let sampled_outputs = if self.rank == 0 {
+            self.model
+                .sample(&logits.squeeze(0)?, &sequence_groups_metadata)?
+        } else {
+            vec![]
+        };
 
         Ok(sampled_outputs)
     }
@@ -480,6 +490,9 @@ pub struct CacheEngine {
     cpu_cache: Vec<Tensor>,
     /// The GPU cache
     gpu_cache: Vec<Tensor>,
+    #[cfg(feature = "nccl")]
+    /// The associated GPU device rank
+    rank: usize,
     /// Tracing span
     span: Span,
 }
@@ -520,6 +533,7 @@ impl CacheEngine {
             span: info_span!("cache-engine"),
         };
 
+        // NOTE: each GPU worker needs its own set of allocated CPU tensor blocks
         this.cpu_cache = this.allocate_blocks(this.get_num_cpu_blocks(), &Device::Cpu)?;
         this.gpu_cache = this.allocate_blocks(this.get_num_gpu_blocks(), &device)?;
 

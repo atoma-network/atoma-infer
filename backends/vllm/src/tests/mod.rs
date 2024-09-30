@@ -18,7 +18,7 @@ use crate::{
     llm_service::LlmService,
     model_executor::{
         ModelExecutor, ModelExecutorError, ModelFilePaths, ModelLoader, ModelLoaderError,
-        ModelMetadata,
+        ModelMetadata, Config,
     },
     sequence::ExecuteModelRequest,
     types::{GenerateParameters, GenerateRequest},
@@ -31,6 +31,8 @@ const VOCAB_SIZE: usize = 128;
 struct MockModel {}
 
 impl ModelLoader for MockModel {
+    type C = ();
+
     fn fetch<T: AsRef<Path>>(
         api_key: String,
         cache_dir: T,
@@ -56,7 +58,7 @@ impl ModelLoader for MockModel {
         })
     }
 
-    fn load(_: Device, _: DType, _: &ModelFilePaths) -> Result<Self, ModelLoaderError> {
+    fn load(_: Self::C, _: Device, _: DType, _: &ModelFilePaths) -> Result<Self, ModelLoaderError> {
         Ok(Self {})
     }
 }
