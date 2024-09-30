@@ -7,7 +7,7 @@ edition = "2021"
 anyhow.workspace = true
 axum.workspace = true
 atoma-backends.workspace = true
-clap.workspace = true
+clap = { workspace = true, features = ["derive"] }
 jsonschema = "0.20"
 schemars = "0.8"
 serde.workspace = true
