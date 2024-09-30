@@ -1,10 +1,10 @@
+#[cfg(feature = "nccl")]
+use std::rc::Rc;
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
     sync::Arc,
 };
-#[cfg(feature = "nccl")]
-use std::rc::Rc;
 
 use candle_core::{DType, Device, IndexOp, Tensor};
 #[cfg(feature = "nccl")]
@@ -85,8 +85,7 @@ pub trait ModelLoader {
         device: Device,
         dtype: DType,
         file_paths: &ModelFilePaths,
-        #[cfg(feature = "nccl")]
-        comm: Rc<Comm>,
+        #[cfg(feature = "nccl")] comm: Rc<Comm>,
     ) -> Result<Self, ModelLoaderError>
     where
         Self: Sized;

@@ -37,7 +37,7 @@ impl ModelConfig for Config {
         self.num_hidden_layers
     }
     fn num_kv_heads(&self) -> usize {
-        self.num_key_value_heads.unwrap()
+        self.num_key_value_heads
     }
     fn sliding_window(&self) -> Option<usize> {
         None

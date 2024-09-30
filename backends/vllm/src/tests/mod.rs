@@ -17,8 +17,8 @@ use tracing::info;
 use crate::{
     llm_service::LlmService,
     model_executor::{
-        ModelExecutor, ModelExecutorError, ModelFilePaths, ModelLoader, ModelLoaderError,
-        ModelMetadata, Config,
+        Config, ModelExecutor, ModelExecutorError, ModelFilePaths, ModelLoader, ModelLoaderError,
+        ModelMetadata,
     },
     sequence::ExecuteModelRequest,
     types::{GenerateParameters, GenerateRequest},

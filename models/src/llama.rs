@@ -6,7 +6,7 @@ use std::f32::consts::PI;
 
 use crate::flash_attention::{FlashAttention, FlashAttentionMetadata};
 
-/// Maximum input sequence token length
+/// Maximum sequence token length
 const DEFAULT_MAX_SEQ_LEN: usize = 4096;
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -195,7 +195,7 @@ impl Cache {
     }
 }
 
-struct CausalSelfAttention {
+pub struct CausalSelfAttention {
     q_proj: Linear,
     k_proj: Linear,
     v_proj: Linear,
@@ -435,7 +435,7 @@ pub struct Llama {
 impl Llama {
     /// Forward pass of Llama model, using
     /// flash attention kernels, with paged attention
-    /// batching optimizations.
+    /// memory batching optimizations.
     ///
     /// # Arguments
     ///
