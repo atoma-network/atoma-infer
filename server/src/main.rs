@@ -1,3 +1,4 @@
+use clap::Parser;
 use std::{
     env,
     sync::{
@@ -44,6 +45,12 @@ pub const DEFAULT_SERVER_ADDRESS: &str = "0.0.0.0";
 pub const DEFAULT_SERVER_PORT: &str = "8080";
 pub const AUTH_BEARER_PREFIX: &str = "Bearer ";
 
+#[derive(Parser)]
+pub struct Args {
+    #[arg(short, long)]
+    config_path: String,
+}
+
 #[derive(Clone)]
 pub struct AppState {
     request_counter: Arc<AtomicU64>,
@@ -55,10 +62,12 @@ pub struct AppState {
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
 
+    let cli = Args::parse();
+
     // TODO: Write a clap cli for passing arguments
     let address =
         env::var("ATOMA_NODE_INFERENCE_SERVER_ADDRESS").unwrap_or(DEFAULT_SERVER_ADDRESS.into());
-    let config_path = env::var("LLM_SERVICE_CONFIG_PATH").unwrap();
+    let config_path = cli.config_path;
     let port = env::var("ATOMA_NODE_INFERENCE_SERVER_PORT").unwrap_or(DEFAULT_SERVER_PORT.into());
     let listener = TcpListener::bind(format!("{address}:{port}")).await?;
 
