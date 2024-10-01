@@ -1157,11 +1157,20 @@ mod tests {
         let device = Device::new_cuda(0).unwrap();
         let model_id = "meta-llama/Llama-3.2-1B-Instruct".to_string();
         let revision = "main".to_string();
-        let api = Api::new().expect("Failed to create the HF API");
+        let api_key = std::env::var("HF_API_KEY").expect("HF_API_KEY not set, please set it to run this test, with `export HF_API_KEY=<your key>`");
 
         println!("loading the model weights from {model_id}");
-        let api = api.repo(Repo::with_revision(model_id, RepoType::Model, revision));
+        let api = ApiBuilder::new()
+            .with_progress(true)
+            .with_token(Some(api_key))
+            .build()
+            .expect("Failed to build the API");
 
+        let api = api.repo(Repo::with_revision(
+            model_id.clone(),
+            RepoType::Model,
+            revision,
+        ));
         let tokenizer_filename = api
             .get("tokenizer.json")
             .expect("Failed to get tokenizer.json");
