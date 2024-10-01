@@ -24,31 +24,31 @@ use serde_json::Value;
 pub enum Model {
     #[serde(rename(serialize = "meta-llama/Meta-Llama-3-8B", deserialize = "meta-llama/Meta-Llama-3-8B"))]
     Llama38b,
-    #[serde(rename(serialize = "meta-llama/Meta-Llama-3-8B-instruct", deserialize = "meta-llama/Meta-Llama-3-8B-instruct"))]
+    #[serde(rename(serialize = "meta-llama/Meta-Llama-3-8B-Instruct", deserialize = "meta-llama/Meta-Llama-3-8B-Instruct"))]
     Llama38bInstruct,
     #[serde(rename(serialize = "meta-llama/Meta-Llama-3-70B", deserialize = "meta-llama/Meta-Llama-3-70B"))]
     Llama370b,
-    #[serde(rename(serialize = "meta-llama/Meta-Llama-3-70B-instruct", deserialize = "meta-llama/Meta-Llama-3-70B-instruct"))]
+    #[serde(rename(serialize = "meta-llama/Meta-Llama-3-70B-Instruct", deserialize = "meta-llama/Meta-Llama-3-70B-Instruct"))]
     Llama370bInstruct,
     #[serde(rename(serialize = "meta-llama/Llama-3.1-8B", deserialize = "meta-llama/Llama-3.1-8B"))]
     Llama318b,
-    #[serde(rename(serialize = "meta-llama/Llama-3.1-8B-instruct", deserialize = "meta-llama/Llama-3.1-8B-instruct"))]
+    #[serde(rename(serialize = "meta-llama/Llama-3.1-8B-Instruct", deserialize = "meta-llama/Llama-3.1-8B-Instruct"))]
     Llama318bInstruct,
     #[serde(rename(serialize = "meta-llama/Llama-3.1-70B", deserialize = "meta-llama/Llama-3.1-70B"))]
     Llama3170b,
-    #[serde(rename(serialize = "meta-llama/Llama-3.1-70B-instruct", deserialize = "meta-llama/Llama-3.1-70B-instruct"))]
+    #[serde(rename(serialize = "meta-llama/Llama-3.1-70B-Instruct", deserialize = "meta-llama/Llama-3.1-70B-Instruct"))]
     Llama3170bInstruct,
     #[serde(rename(serialize = "meta-llama/Llama-3.1-405B", deserialize = "meta-llama/Llama-3.1-405B"))]
     Llama31405b,
-    #[serde(rename(serialize = "meta-llama/Llama-3.1-405B-instruct", deserialize = "meta-llama/Llama-3.1-405B-instruct"))]
+    #[serde(rename(serialize = "meta-llama/Llama-3.1-405B-Instruct", deserialize = "meta-llama/Llama-3.1-405B-Instruct"))]
     Llama31405bInstruct,
     #[serde(rename(serialize = "meta-llama/Llama-3.2-1B", deserialize = "meta-llama/Llama-3.2-1B"))]
     Llama321b,
-    #[serde(rename(serialize = "meta-llama/Llama-3.2-1B-instruct", deserialize = "meta-llama/Llama-3.2-1B-instruct"))]
+    #[serde(rename(serialize = "meta-llama/Llama-3.2-1B-Instruct", deserialize = "meta-llama/Llama-3.2-1B-Instruct"))]
     Llama321bInstruct,
     #[serde(rename(serialize = "meta-llama/Llama-3.2-3B", deserialize = "meta-llama/Llama-3.2-3B"))]
     Llama323b,
-    #[serde(rename(serialize = "meta-llama/Llama-3.2-3B-instruct", deserialize = "meta-llama/Llama-3.2-3B-instruct"))]
+    #[serde(rename(serialize = "meta-llama/Llama-3.2-3B-Instruct", deserialize = "meta-llama/Llama-3.2-3B-Instruct"))]
     Llama323bInstruct,
 }
 
