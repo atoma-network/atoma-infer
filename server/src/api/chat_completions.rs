@@ -768,7 +768,7 @@ pub mod json_schema_tests {
     fn deserialize_request_body_basic() {
         let json_request_body = r#"
             {
-                "model": "llama3",
+                "model": "meta-llama/Meta-Llama-3-8B-Instruct",
                 "messages": [
                     {
                         "role": "system",
