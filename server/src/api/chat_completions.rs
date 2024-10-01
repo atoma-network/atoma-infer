@@ -641,12 +641,14 @@ impl TryFrom<(String, GenerateRequestOutput)> for ChatCompletionResponse {
         let finished_time = value
             .metrics
             .read()
-            .unwrap()
+            .expect("Failed to read metrics from the inference output response")
             .finished_time
             .ok_or("Finished time not found")?;
         let duration = now.duration_since(finished_time);
         let system_now = SystemTime::now();
-        let system_duration = system_now.duration_since(SystemTime::UNIX_EPOCH).unwrap();
+        let system_duration = system_now
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .expect("Failed to get system duration");
         let created = system_duration.as_millis() as u64 - duration.as_millis() as u64;
 
         Ok(ChatCompletionResponse {
