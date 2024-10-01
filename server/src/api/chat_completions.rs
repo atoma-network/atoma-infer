@@ -1080,7 +1080,7 @@ pub mod json_schema_tests {
                     "role": "assistant",
                     "content": "Hello, how can I help you today?"
                 },
-                "finish_reason": "stop"
+                "finish_reason": "stopped"
             }],
             "usage": {
                 "prompt_tokens": 9,
@@ -1123,7 +1123,7 @@ pub mod json_schema_tests {
                 "role": "assistant",
                 "content": "Hello, how can I help you today?"
             },
-            "finish_reason": "stop"
+            "finish_reason": "stopped"
         });
 
         let choice: Choice = serde_json::from_value(json).unwrap();
@@ -1180,7 +1180,7 @@ pub mod json_schema_tests {
                     {"can": -0.3, "may": -0.5}
                 ]
             },
-            "finish_reason": "stop"
+            "finish_reason": "stopped"
         });
 
         let choice: Choice = serde_json::from_value(json).unwrap();
