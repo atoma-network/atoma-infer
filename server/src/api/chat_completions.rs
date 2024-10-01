@@ -22,8 +22,26 @@ use serde_json::Value;
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename(serialize = "model", deserialize = "model"))]
 pub enum Model {
-    #[serde(rename(serialize = "llama3", deserialize = "llama3"))]
-    Llama3,
+    #[serde(rename(serialize = "meta-llama/Llama-3.1-8B", deserialize = "meta-llama/Llama-3.1-8B"))]
+    Llama318b,
+    #[serde(rename(serialize = "meta-llama/Llama-3.1-8B-instruct", deserialize = "meta-llama/Llama-3.1-8B-instruct"))]
+    Llama318bInstruct,
+    #[serde(rename(serialize = "meta-llama/Llama-3.1-70B", deserialize = "meta-llama/Llama-3.1-70B"))]
+    Llama3170b,
+    #[serde(rename(serialize = "meta-llama/Llama-3.1-70B-instruct", deserialize = "meta-llama/Llama-3.1-70B-instruct"))]
+    Llama3170bInstruct,
+    #[serde(rename(serialize = "meta-llama/Llama-3.1-405B", deserialize = "meta-llama/Llama-3.1-405B"))]
+    Llama31405b,
+    #[serde(rename(serialize = "meta-llama/Llama-3.1-405B-instruct", deserialize = "meta-llama/Llama-3.1-405B-instruct"))]
+    Llama31405bInstruct,
+    #[serde(rename(serialize = "meta-llama/Llama-3.2-1B", deserialize = "meta-llama/Llama-3.2-1B"))]
+    Llama321b,
+    #[serde(rename(serialize = "meta-llama/Llama-3.2-1B-instruct", deserialize = "meta-llama/Llama-3.2-1B-instruct"))]
+    Llama321bInstruct,
+    #[serde(rename(serialize = "meta-llama/Llama-3.2-3B", deserialize = "meta-llama/Llama-3.2-3B"))]
+    Llama323b,
+    #[serde(rename(serialize = "meta-llama/Llama-3.2-3B-instruct", deserialize = "meta-llama/Llama-3.2-3B-instruct"))]
+    Llama323bInstruct,
 }
 
 impl std::fmt::Display for Model {
