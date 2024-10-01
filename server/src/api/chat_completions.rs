@@ -22,6 +22,14 @@ use serde_json::Value;
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename(serialize = "model", deserialize = "model"))]
 pub enum Model {
+    #[serde(rename(serialize = "meta-llama/Llama-3-8B", deserialize = "meta-llama/Llama-3-8B"))]
+    Llama38b,
+    #[serde(rename(serialize = "meta-llama/Llama-3-8B-instruct", deserialize = "meta-llama/Llama-3-8B-instruct"))]
+    Llama38bInstruct,
+    #[serde(rename(serialize = "meta-llama/Llama-3-70B", deserialize = "meta-llama/Llama-3-70B"))]
+    Llama370b,
+    #[serde(rename(serialize = "meta-llama/Llama-3-70B-instruct", deserialize = "meta-llama/Llama-3-70B-instruct"))]
+    Llama370bInstruct,
     #[serde(rename(serialize = "meta-llama/Llama-3.1-8B", deserialize = "meta-llama/Llama-3.1-8B"))]
     Llama318b,
     #[serde(rename(serialize = "meta-llama/Llama-3.1-8B-instruct", deserialize = "meta-llama/Llama-3.1-8B-instruct"))]
