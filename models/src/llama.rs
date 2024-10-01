@@ -508,7 +508,10 @@ mod tests {
     use crate::flash_attention::{FlashAttentionDecodingMetadata, FlashAttentionPrefillMetadata};
     use candle_core::IndexOp;
     use candle_transformers::generation::{LogitsProcessor, Sampling};
-    use hf_hub::{api::sync::Api, Repo, RepoType};
+    use hf_hub::{
+        api::sync::{Api, ApiBuilder},
+        Repo, RepoType,
+    };
     use rand::Rng;
     use serial_test::serial;
     use std::io::Write;
