@@ -18,33 +18,60 @@ use serde_json::Value;
 // type. For now a naive version of this is OK, but may want to do this
 // before deploying v1 of the schema to avoid misuse.
 
-// ========================================================================================
-// ||                                                                                    ||
-// ||                                     Model                                          ||
-// ||                                                                                    ||
-// ========================================================================================
-
 /// ID of the model to use.
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename(serialize = "model", deserialize = "model"))]
 pub enum Model {
-    #[serde(rename(serialize = "llama3", deserialize = "llama3"))]
-    Llama3,
+    #[serde(rename(serialize = "meta-llama/Meta-Llama-3-8B", deserialize = "meta-llama/Meta-Llama-3-8B"))]
+    Llama38b,
+    #[serde(rename(serialize = "meta-llama/Meta-Llama-3-8B-Instruct", deserialize = "meta-llama/Meta-Llama-3-8B-Instruct"))]
+    Llama38bInstruct,
+    #[serde(rename(serialize = "meta-llama/Meta-Llama-3-70B", deserialize = "meta-llama/Meta-Llama-3-70B"))]
+    Llama370b,
+    #[serde(rename(serialize = "meta-llama/Meta-Llama-3-70B-Instruct", deserialize = "meta-llama/Meta-Llama-3-70B-Instruct"))]
+    Llama370bInstruct,
+    #[serde(rename(serialize = "meta-llama/Llama-3.1-8B", deserialize = "meta-llama/Llama-3.1-8B"))]
+    Llama318b,
+    #[serde(rename(serialize = "meta-llama/Llama-3.1-8B-Instruct", deserialize = "meta-llama/Llama-3.1-8B-Instruct"))]
+    Llama318bInstruct,
+    #[serde(rename(serialize = "meta-llama/Llama-3.1-70B", deserialize = "meta-llama/Llama-3.1-70B"))]
+    Llama3170b,
+    #[serde(rename(serialize = "meta-llama/Llama-3.1-70B-Instruct", deserialize = "meta-llama/Llama-3.1-70B-Instruct"))]
+    Llama3170bInstruct,
+    #[serde(rename(serialize = "meta-llama/Llama-3.1-405B", deserialize = "meta-llama/Llama-3.1-405B"))]
+    Llama31405b,
+    #[serde(rename(serialize = "meta-llama/Llama-3.1-405B-Instruct", deserialize = "meta-llama/Llama-3.1-405B-Instruct"))]
+    Llama31405bInstruct,
+    #[serde(rename(serialize = "meta-llama/Llama-3.2-1B", deserialize = "meta-llama/Llama-3.2-1B"))]
+    Llama321b,
+    #[serde(rename(serialize = "meta-llama/Llama-3.2-1B-Instruct", deserialize = "meta-llama/Llama-3.2-1B-Instruct"))]
+    Llama321bInstruct,
+    #[serde(rename(serialize = "meta-llama/Llama-3.2-3B", deserialize = "meta-llama/Llama-3.2-3B"))]
+    Llama323b,
+    #[serde(rename(serialize = "meta-llama/Llama-3.2-3B-Instruct", deserialize = "meta-llama/Llama-3.2-3B-Instruct"))]
+    Llama323bInstruct,
 }
 
 impl std::fmt::Display for Model {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Model::Llama3 => write!(f, "llama3"),
+            Model::Llama38b => write!(f, "meta-llama/Llama-3-8B"),
+            Model::Llama38bInstruct => write!(f, "meta-llama/Llama-3-8B-instruct"),
+            Model::Llama370b => write!(f, "meta-llama/Llama-3-70B"),
+            Model::Llama370bInstruct => write!(f, "meta-llama/Llama-3-70B-instruct"),
+            Model::Llama318b => write!(f, "meta-llama/Llama-3.1-8B"),
+            Model::Llama318bInstruct => write!(f, "meta-llama/Llama-3.1-8B-instruct"),
+            Model::Llama3170b => write!(f, "meta-llama/Llama-3.1-70B"),
+            Model::Llama3170bInstruct => write!(f, "meta-llama/Llama-3.1-70B-instruct"),
+            Model::Llama31405b => write!(f, "meta-llama/Llama-3.1-405B"),
+            Model::Llama31405bInstruct => write!(f, "meta-llama/Llama-3.1-405B-instruct"),
+            Model::Llama321b => write!(f, "meta-llama/Llama-3.2-1B"),
+            Model::Llama321bInstruct => write!(f, "meta-llama/Llama-3.2-1B-instruct"),
+            Model::Llama323b => write!(f, "meta-llama/Llama-3.2-3B"),
+            Model::Llama323bInstruct => write!(f, "meta-llama/Llama-3.2-3B-instruct"),
         }
     }
 }
-
-// ========================================================================================
-// ||                                                                                    ||
-// ||                                     Message                                        ||
-// ||                                                                                    ||
-// ========================================================================================
 
 /// A message that is part of a conversation which is based on the role
 /// of the author of the message.
@@ -274,12 +301,6 @@ impl std::fmt::Display for MessageContentPartImageUrl {
     }
 }
 
-// ========================================================================================
-// ||                                                                                    ||
-// ||                                     Tools                                       ||
-// ||                                                                                    ||
-// ========================================================================================
-
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename(serialize = "tool_call", deserialize = "tool_call"))]
 pub struct ToolCall {
@@ -336,12 +357,6 @@ pub enum StopCondition {
     Array(Vec<String>),
     String(String),
 }
-
-// ========================================================================================
-// ||                                                                                    ||
-// ||                                     Request Body                                   ||
-// ||                                                                                    ||
-// ========================================================================================
 
 #[derive(Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename(serialize = "requestBody", deserialize = "requestBody"))]
@@ -582,12 +597,6 @@ impl RequestBody {
     }
 }
 
-// ========================================================================================
-// ||                                                                                    ||
-// ||                               Chat Completion Response                             ||
-// ||                                                                                    ||
-// ========================================================================================
-
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChatCompletionResponse {
     pub id: String,
@@ -610,8 +619,8 @@ pub struct Choice {
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FinishReason {
-    Stop,
-    Length,
+    Stopped,
+    LengthCapped,
     ContentFilter,
 }
 
@@ -620,10 +629,10 @@ impl TryFrom<Option<&str>> for FinishReason {
 
     fn try_from(value: Option<&str>) -> Result<Self, Self::Error> {
         match value {
-            Some("stop") => Ok(FinishReason::Stop),
-            Some("length") => Ok(FinishReason::Length),
+            Some("stopped") => Ok(FinishReason::Stopped),
+            Some("length_capped") => Ok(FinishReason::LengthCapped),
             Some("content_filter") => Ok(FinishReason::ContentFilter),
-            None => Ok(FinishReason::Stop),
+            None => Ok(FinishReason::Stopped),
             _ => Err(format!("Invalid finish reason: {}", value.unwrap())),
         }
     }
@@ -671,12 +680,14 @@ impl TryFrom<(String, GenerateRequestOutput)> for ChatCompletionResponse {
         let finished_time = value
             .metrics
             .read()
-            .unwrap()
+            .expect("Failed to read metrics from the inference output response")
             .finished_time
             .ok_or("Finished time not found")?;
         let duration = now.duration_since(finished_time);
         let system_now = SystemTime::now();
-        let system_duration = system_now.duration_since(SystemTime::UNIX_EPOCH).unwrap();
+        let system_duration = system_now
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .expect("Failed to get system duration");
         let created = system_duration.as_millis() as u64 - duration.as_millis() as u64;
 
         Ok(ChatCompletionResponse {
