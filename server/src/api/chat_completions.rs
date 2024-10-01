@@ -55,7 +55,20 @@ pub enum Model {
 impl std::fmt::Display for Model {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Model::Llama3 => write!(f, "llama3"),
+            Model::Llama38b => write!(f, "meta-llama/Llama-3-8B"),
+            Model::Llama38bInstruct => write!(f, "meta-llama/Llama-3-8B-instruct"),
+            Model::Llama370b => write!(f, "meta-llama/Llama-3-70B"),
+            Model::Llama370bInstruct => write!(f, "meta-llama/Llama-3-70B-instruct"),
+            Model::Llama318b => write!(f, "meta-llama/Llama-3.1-8B"),
+            Model::Llama318bInstruct => write!(f, "meta-llama/Llama-3.1-8B-instruct"),
+            Model::Llama3170b => write!(f, "meta-llama/Llama-3.1-70B"),
+            Model::Llama3170bInstruct => write!(f, "meta-llama/Llama-3.1-70B-instruct"),
+            Model::Llama31405b => write!(f, "meta-llama/Llama-3.1-405B"),
+            Model::Llama31405bInstruct => write!(f, "meta-llama/Llama-3.1-405B-instruct"),
+            Model::Llama321b => write!(f, "meta-llama/Llama-3.2-1B"),
+            Model::Llama321bInstruct => write!(f, "meta-llama/Llama-3.2-1B-instruct"),
+            Model::Llama323b => write!(f, "meta-llama/Llama-3.2-3B"),
+            Model::Llama323bInstruct => write!(f, "meta-llama/Llama-3.2-3B-instruct"),
         }
     }
 }
