@@ -1109,7 +1109,7 @@ pub mod json_schema_tests {
                 tool_calls: vec![],
             }
         );
-        assert_eq!(response.choices[0].finish_reason, FinishReason::Stop);
+        assert_eq!(response.choices[0].finish_reason, FinishReason::Stopped);
         assert_eq!(response.usage.prompt_tokens, 9);
         assert_eq!(response.usage.completion_tokens, 12);
         assert_eq!(response.usage.total_tokens, 21);
@@ -1130,18 +1130,18 @@ pub mod json_schema_tests {
 
         assert_eq!(choice.index, 0);
         assert!(matches!(choice.message, Message::Assistant { .. }));
-        assert!(matches!(choice.finish_reason, FinishReason::Stop));
+        assert!(matches!(choice.finish_reason, FinishReason::Stopped));
     }
 
     #[test]
     fn test_deserialize_finish_reason() {
         assert_eq!(
-            serde_json::from_str::<FinishReason>("\"stop\"").unwrap(),
-            FinishReason::Stop
+            serde_json::from_str::<FinishReason>("\"stopped\"").unwrap(),
+            FinishReason::Stopped
         );
         assert_eq!(
-            serde_json::from_str::<FinishReason>("\"length\"").unwrap(),
-            FinishReason::Length
+            serde_json::from_str::<FinishReason>("\"length_capped\"").unwrap(),
+            FinishReason::LengthCapped
         );
         assert_eq!(
             serde_json::from_str::<FinishReason>("\"content_filter\"").unwrap(),
@@ -1199,6 +1199,6 @@ pub mod json_schema_tests {
                 ]
             })
         );
-        assert!(matches!(choice.finish_reason, FinishReason::Stop));
+        assert!(matches!(choice.finish_reason, FinishReason::Stopped));
     }
 }

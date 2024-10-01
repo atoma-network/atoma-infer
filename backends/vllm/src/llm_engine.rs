@@ -167,7 +167,9 @@ impl LlmEngine {
                         let response_sender = self
                             .response_senders
                             .remove(&request_output.request_id)
-                            .unwrap();
+                            .ok_or(EngineError::SendResponseError(
+                                format!("Failed to get response sender for request with id = {}", request_output.request_id),
+                            ))?;
                         response_sender
                             .send(request_output)
                             .map_err(|out| EngineError::SendResponseError(out.request_id))?;
