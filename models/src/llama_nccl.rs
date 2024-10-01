@@ -1,16 +1,31 @@
 use crate::{
     flash_attention::{FlashAttention, FlashAttentionMetadata},
-    llama::{Config, Llama3RopeConfig, Llama3RopeType, LlamaConfig, LlamaEosToks},
+    llama::{Cache, Config, Llama3RopeConfig, Llama3RopeType, LlamaConfig, LlamaEosToks},
     multi_gpu::{shard, TensorParallelColumnLinear, TensorParallelRowLinear},
 };
 use candle_core::{DType, Device, IndexOp, Result, Tensor, D};
 use candle_nn::var_builder::ShardedVarBuilder as VarBuilder;
-use candle_nn::{embedding, Embedding, Linear, Module, RmsNorm};
+use candle_nn::{Embedding, Linear, Module, RmsNorm};
 use cudarc::nccl::safe::Comm;
 use std::rc::Rc;
 
 /// Maximum sequence token length
 const DEFAULT_MAX_SEQ_LEN: usize = 4096;
+
+fn embedding(cfg: &Config, vb: VarBuilder) -> Result<Embedding> {
+    let embeddings = vb.get((cfg.vocab_size, cfg.hidden_size), "weight")?;
+    Ok(Embedding::new(embeddings, cfg.hidden_size))
+}
+
+fn linear(size1: usize, size2: usize, vb: VarBuilder) -> Result<Linear> {
+    let weight = vb.get((size2, size1), "weight")?;
+    Ok(Linear::new(weight, None))
+}
+
+fn rms_norm(size: usize, eps: f64, vb: VarBuilder) -> Result<RmsNorm> {
+    let weight = vb.get_with_hints(size, "weight", shard(0, 0, 1))?;
+    Ok(RmsNorm::new(weight, eps))
+}
 
 struct CausalSelfAttention {
     q_proj: TensorParallelColumnLinear,
@@ -27,7 +42,7 @@ struct CausalSelfAttention {
 }
 
 impl CausalSelfAttention {
-    fn apply_rotary_emb(&self, x: &Tensor, input_positions: &Tensor) -> Result<Tensor> {
+    fn apply_rotary_embed(&self, x: &Tensor, input_positions: &Tensor) -> Result<Tensor> {
         let _enter = self.span_rot.enter();
         let (b_sz, _num_heads, num_total_tokens, _hidden_size) = x.dims4()?; // [1, num_heads, num_total_tokens, hidden_size]
 
@@ -133,8 +148,8 @@ impl CausalSelfAttention {
         device: &Device,
     ) -> Result<Self> {
         let rank = comm.rank();
-        let span = tracing::span!(tracing::Level::TRACE, format!("attn-{}", rank));
-        let span_rot = tracing::span!(tracing::Level::TRACE, format!("attn-rot-{}", rank));
+        let span = tracing::span!(tracing::Level::TRACE, "attn");
+        let span_rot = tracing::span!(tracing::Level::TRACE, "attn-rot");
         let q_proj = TensorParallelColumnLinear::load_multi(vb.clone(), &["q_proj"], comm.clone())?;
         let k_proj = TensorParallelColumnLinear::load_multi(vb.clone(), &["k_proj"], comm.clone())?;
         let v_proj = TensorParallelColumnLinear::load_multi(vb.clone(), &["v_proj"], comm.clone())?;
@@ -147,7 +162,7 @@ impl CausalSelfAttention {
             v_proj,
             o_proj,
             num_attention_heads: cfg.num_attention_heads / comm.world_size(),
-            num_key_value_heads: cfg.num_key_value_heads() / comm.world_size(),
+            num_key_value_heads: cfg.num_key_value_heads / comm.world_size(),
             head_dim,
             span,
             span_rot,
@@ -181,8 +196,7 @@ impl Mlp {
     }
 
     fn load(vb: VarBuilder, _cfg: &Config, comm: Rc<Comm>) -> Result<Self> {
-        let rank = comm.rank();
-        let span = tracing::span!(tracing::Level::TRACE, format!("mlp-{}"));
+        let span = tracing::span!(tracing::Level::TRACE, "mlp");
         let c_fc1 = TensorParallelColumnLinear::load(vb.pp("gate_proj"), comm.clone())?;
         let c_fc2 = TensorParallelColumnLinear::load(vb.pp("up_proj"), comm.clone())?;
         let c_proj = TensorParallelRowLinear::load(vb.pp("down_proj"), comm)?;
@@ -225,18 +239,16 @@ impl Block {
 
     fn load(
         vb: VarBuilder,
-        cache: &Cache,
         cfg: &Config,
         comm: Rc<Comm>,
         dtype: DType,
         device: &Device,
     ) -> Result<Self> {
-        let rank = comm.rank();
-        let span = tracing::span!(tracing::Level::TRACE, format!("block-{}", rank));
-        let attn = CausalSelfAttention::load(vb.pp("self_attn"), cache, cfg, comm.clone())?;
+        let span = tracing::span!(tracing::Level::TRACE, "block");
+        let attn = CausalSelfAttention::load(vb.pp("self_attn"), cfg, comm.clone(), dtype, device)?;
         let mlp = Mlp::load(vb.pp("mlp"), cfg, comm)?;
-        let rms_1 = RmsNorm::new(cfg.hidden_size, cfg.rms_norm_eps, vb.pp("input_layernorm"))?;
-        let rms_2 = RmsNorm::new(
+        let rms_1 = rms_norm(cfg.hidden_size, cfg.rms_norm_eps, vb.pp("input_layernorm"))?;
+        let rms_2 = rms_norm(
             cfg.hidden_size,
             cfg.rms_norm_eps,
             vb.pp("post_attention_layernorm"),
@@ -313,13 +325,14 @@ impl Llama {
             .map(|i| {
                 Block::load(
                     vb.pp(&format!("model.layers.{i}")),
-                    cache,
                     cfg,
                     comm.clone(),
+                    dtype,
+                    device,
                 )
             })
             .collect::<Result<Vec<_>>>()?;
-        Ok(Self { 
+        Ok(Self {
             wte,
             blocks,
             ln_f: norm,

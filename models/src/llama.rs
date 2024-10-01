@@ -1,7 +1,7 @@
 use candle_core::{DType, Device, Module, Result, Tensor};
 use candle_nn::{embedding, Embedding, VarBuilder};
 use candle_transformers::models::with_tracing::{linear_no_bias as linear, Linear, RmsNorm};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::f32::consts::PI;
 
 use crate::flash_attention::{FlashAttention, FlashAttentionMetadata};
@@ -79,7 +79,7 @@ impl LlamaConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct Config {
     pub hidden_size: usize,
     pub intermediate_size: usize,
@@ -134,8 +134,8 @@ impl Config {
 #[derive(Clone, Debug)]
 /// Cache for Llama model
 pub struct Cache {
-    cos: Tensor,
-    sin: Tensor,
+    pub(crate) cos: Tensor,
+    pub(crate) sin: Tensor,
 }
 
 fn calculate_default_inv_freq(cfg: &Config) -> Vec<f32> {

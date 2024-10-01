@@ -1,7 +1,9 @@
+use candle_core::cuda_backend::cudarc::driver::DeviceSlice;
 use candle_core::{CpuStorage, CustomOp1, DType, Layout, Result, Shape, Tensor};
 use candle_nn::var_builder::ShardedVarBuilder as VarBuilder;
 use candle_nn::{Linear, Module};
 use cudarc::nccl::Comm;
+use half::{bf16, f16};
 use std::rc::Rc;
 
 pub struct TensorParallelColumnLinear {
@@ -71,7 +73,6 @@ impl CustomOp1 for AllGather {
         candle_core::bail!("AllGather is never used on cpu")
     }
 
-    #[cfg(feature = "cuda")]
     fn cuda_fwd(
         &self,
         s: &candle_core::CudaStorage,
@@ -79,7 +80,6 @@ impl CustomOp1 for AllGather {
     ) -> Result<(candle_core::CudaStorage, Shape)> {
         use candle_core::{backend::BackendStorage, cuda_backend::WrapErr};
         use cudarc::driver::DeviceSlice;
-        use half::{bf16, f16};
 
         let elem_count = l.shape().elem_count();
         let num_devices = self.comm.world_size();
@@ -139,7 +139,6 @@ impl CustomOp1 for AllReduce {
         candle_core::bail!("AllReduce is never used on cpu")
     }
 
-    #[cfg(feature = "cuda")]
     fn cuda_fwd(
         &self,
         s: &candle_core::CudaStorage,
@@ -147,7 +146,6 @@ impl CustomOp1 for AllReduce {
     ) -> Result<(candle_core::CudaStorage, Shape)> {
         use candle_core::{backend::BackendStorage, cuda_backend::WrapErr};
         use cudarc::{driver::DeviceSlice, nccl::ReduceOp};
-        use half::{bf16, f16};
 
         let elem_count = l.shape().elem_count();
         let dev = s.device().clone();
