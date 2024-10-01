@@ -487,7 +487,7 @@ impl RequestBody {
         use serde_json::json;
 
         Self {
-            model: Model::Llama3,
+            model: Model::Llama38b,
             messages: vec![
                 Message::System {
                     content: Some(MessageContent::Text("test".into())),
