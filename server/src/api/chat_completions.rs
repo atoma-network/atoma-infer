@@ -580,8 +580,8 @@ pub struct Choice {
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FinishReason {
-    Stop,
-    Length,
+    Stopped,
+    LengthCapped,
     ContentFilter,
 }
 
@@ -590,10 +590,10 @@ impl TryFrom<Option<&str>> for FinishReason {
 
     fn try_from(value: Option<&str>) -> Result<Self, Self::Error> {
         match value {
-            Some("stop") => Ok(FinishReason::Stop),
-            Some("length") => Ok(FinishReason::Length),
+            Some("stopped") => Ok(FinishReason::Stopped),
+            Some("length_capped") => Ok(FinishReason::LengthCapped),
             Some("content_filter") => Ok(FinishReason::ContentFilter),
-            None => Ok(FinishReason::Stop),
+            None => Ok(FinishReason::Stopped),
             _ => Err(format!("Invalid finish reason: {}", value.unwrap())),
         }
     }

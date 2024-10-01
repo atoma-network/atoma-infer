@@ -45,7 +45,8 @@ pub const DEFAULT_SERVER_ADDRESS: &str = "0.0.0.0";
 pub const DEFAULT_SERVER_PORT: &str = "8080";
 pub const AUTH_BEARER_PREFIX: &str = "Bearer ";
 
-#[derive(Parser)]
+#[derive(Debug, Parser)]
+#[command(author, version, about, long_about = None)]
 pub struct Args {
     #[arg(short, long)]
     config_path: String,
