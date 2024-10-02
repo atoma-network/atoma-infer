@@ -6,6 +6,3 @@ pub use atoma_vllm_backend::{
     types::{GenerateParameters, GenerateRequest},
     validation::Validation,
 };
-
-#[cfg(not(feature = "vllm"))]
-compile_error!("vllm backend is not enabled. Please compile with --features vllm");
