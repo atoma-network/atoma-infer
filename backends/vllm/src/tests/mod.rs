@@ -18,7 +18,6 @@ use crate::{
     llm_service::LlmService,
     model_executor::{
         Config, ModelExecutor, ModelExecutorError, ModelFilePaths, ModelLoader, ModelLoaderError,
-        ModelMetadata,
     },
     sequence::ExecuteModelRequest,
     types::{GenerateParameters, GenerateRequest},
@@ -58,12 +57,17 @@ impl ModelLoader for MockModel {
         })
     }
 
-    fn load(_: Self::C, _: Device, _: DType, _: &ModelFilePaths) -> Result<Self, ModelLoaderError> {
+    fn load(
+        _: Self::C,
+        _: &Device,
+        _: DType,
+        _: &ModelFilePaths,
+    ) -> Result<Self, ModelLoaderError> {
         Ok(Self {})
     }
 }
 
-impl ModelMetadata for MockModel {
+impl Config for MockModel {
     fn alibi_slopes(&self) -> Option<&Tensor> {
         None
     }
@@ -94,6 +98,10 @@ impl ModelMetadata for MockModel {
 
     fn softmax_scale(&self) -> f32 {
         1.0
+    }
+
+    fn from_file_path(_: &PathBuf) -> Result<Self, ModelLoaderError> {
+        Ok(Self {})
     }
 }
 
@@ -131,6 +139,10 @@ impl ModelExecutor for MockModel {
             .collect::<Vec<_>>();
 
         Ok(Tensor::new(logits, &Device::Cpu)?.reshape((batch_size, VOCAB_SIZE))?)
+    }
+
+    fn config(&self) -> &Self::C {
+        &()
     }
 }
 

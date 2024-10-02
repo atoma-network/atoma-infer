@@ -1,4 +1,3 @@
-use candle_core::cuda_backend::cudarc::driver::DeviceSlice;
 use candle_core::{CpuStorage, CustomOp1, DType, Layout, Result, Shape, Tensor};
 use candle_nn::var_builder::ShardedVarBuilder as VarBuilder;
 use candle_nn::{Linear, Module};

@@ -2,7 +2,7 @@ use candle_core::{DType, Device, Tensor};
 use candle_nn::VarBuilder;
 use hf_hub::{api::sync::ApiBuilder, Repo, RepoType};
 use models::{
-    llama::{Config, LlamaConfig, LlamaEosToks},
+    llama::{Config, LlamaEosToks},
     FlashAttentionMetadata, Llama,
 };
 use std::{path::Path, time::Instant};
@@ -11,7 +11,7 @@ use tracing::info;
 use crate::{
     model_executor::{
         Config as ModelConfig, ModelExecutor, ModelExecutorError, ModelFilePaths, ModelLoader,
-        ModelLoaderError, ModelMetadata,
+        ModelLoaderError,
     },
     models::hub_load_safetensors,
 };
@@ -21,10 +21,10 @@ impl ModelConfig for Config {
         None
     }
     fn eos_token_ids(&self) -> Option<Vec<u32>> {
-        match self.eos_token_ids {
+        match self.eos_token_id.clone() {
             None => None,
             Some(LlamaEosToks::Single(u)) => Some(vec![u]),
-            Some(LlamaEosToks::Multiple(us)) => Some(us.clone()),
+            Some(LlamaEosToks::Multiple(us)) => Some(us),
         }
     }
     fn hidden_dim(&self) -> usize {
@@ -58,7 +58,7 @@ pub struct LlamaModel {
 }
 
 impl ModelLoader for LlamaModel {
-    type C = LlamaConfig;
+    type C = Config;
 
     fn fetch<T: AsRef<Path>>(
         api_key: String,
@@ -95,7 +95,7 @@ impl ModelLoader for LlamaModel {
 
     fn load(
         config: Self::C,
-        device: Device,
+        device: &Device,
         dtype: DType,
         file_paths: &ModelFilePaths,
     ) -> Result<Self, ModelLoaderError>
@@ -121,45 +121,6 @@ impl ModelLoader for LlamaModel {
     }
 }
 
-impl ModelMetadata for LlamaModel {
-    fn alibi_slopes(&self) -> Option<&Tensor> {
-        None
-    }
-
-    fn eos_token_ids(&self) -> Option<Vec<u32>> {
-        match self.config.eos_token_id.clone() {
-            Some(LlamaEosToks::Single(id)) => Some(vec![id]),
-            Some(LlamaEosToks::Multiple(ids)) => Some(ids),
-            None => None,
-        }
-    }
-
-    fn hidden_dim(&self) -> usize {
-        self.config.hidden_size / self.config.num_attention_heads
-    }
-
-    fn num_attention_heads(&self) -> usize {
-        self.config.num_attention_heads
-    }
-
-    fn num_hidden_layers(&self) -> usize {
-        self.config.num_hidden_layers
-    }
-
-    fn num_kv_heads(&self) -> usize {
-        self.config.num_key_value_heads
-    }
-
-    fn softmax_scale(&self) -> f32 {
-        let head_dim = self.hidden_dim();
-        1f32 / (head_dim as f32).sqrt()
-    }
-
-    fn sliding_window(&self) -> Option<usize> {
-        None
-    }
-}
-
 impl ModelExecutor for LlamaModel {
     fn forward(
         &mut self,
@@ -176,5 +137,9 @@ impl ModelExecutor for LlamaModel {
             &kv_cache,
             attention_metadata,
         )?)
+    }
+
+    fn config(&self) -> &Self::C {
+        &self.config
     }
 }

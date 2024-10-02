@@ -17,7 +17,7 @@ use cudarc::{
 };
 use futures::stream::FuturesUnordered;
 use models::flash_attention::FlashAttentionMetadata;
-use serde::DeserializeOwned;
+use serde::{de::DeserializeOwned, Deserialize};
 use thiserror::Error;
 #[cfg(feature = "nccl")]
 use tokio::sync::broadcast;
@@ -53,7 +53,8 @@ pub struct ModelFilePaths {
 /// `ModelLoader` trait - interface for fetching and loading a LLM model weights.
 pub trait ModelLoader {
     /// The model's configuration type
-    type C: Config;
+    type C: Config + Send;
+
     /// Fetches model files from a remote source.
     ///
     /// # Arguments
@@ -81,21 +82,24 @@ pub trait ModelLoader {
     /// # Returns
     /// `Result<Self, ModelLoaderError>` containing the loaded model.
     fn load(
-        config: Self::Config,
-        device: Device,
+        config: Self::C,
+        device: &Device,
         dtype: DType,
         file_paths: &ModelFilePaths,
-        #[cfg(feature = "nccl")] comm: Rc<Comm>,
+        #[cfg(feature = "nccl")] comm: &Rc<Comm>,
     ) -> Result<Self, ModelLoaderError>
     where
         Self: Sized;
 }
 
-/// `ModelMetadata` - Metadata for a LLM model
+/// `Config` - trait for a LLM model's configuration type
 pub trait Config: Clone + DeserializeOwned {
     /// Creates a new instance of self, from a file path
-    fn from_file_path(path: &PathBuf) -> Result<Self, ModelLoaderError> {
-        serde_json::from_slice(&std::fs::read(&path)?)?
+    fn from_file_path(path: &PathBuf) -> Result<Self, ConfigError> {
+        serde_json::from_slice(
+            &std::fs::read(&path).map_err(|e| ConfigError::FailedToLoadConfig(e.to_string()))?,
+        )
+        .map_err(|e| ConfigError::FailedToLoadConfig(e.to_string()))?
     }
     /// Returns the ALiBi (Attention with Linear Biases) slopes, if applicable
     fn alibi_slopes(&self) -> Option<&Tensor>;
@@ -117,7 +121,7 @@ pub trait Config: Clone + DeserializeOwned {
 
 /// `ModelExecutor` trait - interface for running AI inference
 /// from a LLM
-pub trait ModelExecutor: ModelLoader + ModelMetadata {
+pub trait ModelExecutor: ModelLoader {
     /// Performs a forward pass through the model
     ///
     /// # Arguments
@@ -211,6 +215,7 @@ pub trait ModelExecutor: ModelLoader + ModelMetadata {
                     .sample(&sequence_logits)?;
 
                 let is_stop_token = self
+                    .config()
                     .eos_token_ids()
                     .map(|eid| eid.contains(&next_token))
                     .unwrap_or_default();
@@ -251,6 +256,9 @@ pub trait ModelExecutor: ModelLoader + ModelMetadata {
 
         Ok(sequence_group_outputs)
     }
+
+    /// Returns the model's configuration
+    fn config(&self) -> &Self::C;
 }
 
 /// `ModelThreadCommand` - Encapsulates an AI inference request and a channel for sending the result
@@ -398,17 +406,16 @@ impl ModelThreadDispatcher {
     /// * `C` - A type that implements `Config`
     /// * `M` - A type that implements `ModelExecutor + Send + Sync + 'static`
     #[instrument(skip_all)]
-    pub(crate) fn start<C, M>(
+    pub(crate) fn start<M>(
         cache_config: CacheConfig,
-        config: C,
+        config: M::C,
         devices_ids: Vec<usize>,
         dtype: DType,
-        file_paths: &ModelFilePaths,
+        file_paths: Arc<ModelFilePaths>,
         scheduler_config: SchedulerConfig,
     ) -> Result<Self, ModelThreadError>
     where
-        C: Config,
-        M: ModelExecutor + Send + Sync + 'static,
+        M: ModelLoader + ModelExecutor + Send + Sync + 'static,
     {
         #[cfg(not(feature = "nccl"))]
         let (sender, receiver) = mpsc::unbounded_channel();
@@ -418,7 +425,7 @@ impl ModelThreadDispatcher {
         #[cfg(not(feature = "nccl"))]
         let join_handle = tokio::task::spawn_blocking(move || {
             let device = Device::new_cuda(devices_ids[0])?;
-            let model = M::load(config, device, dtype, file_paths)?;
+            let model = M::load(config, &device, dtype, file_paths.as_ref())?;
             let model_worker = ModelWorker::<M>::new(
                 cache_config,
                 device,
@@ -445,7 +452,7 @@ impl ModelThreadDispatcher {
         #[cfg(feature = "nccl")]
         for device_id in devices_ids.iter() {
             let join_handle = tokio::task::spawn_blocking(move || {
-                let device = CudaDevice::new(rank)?;
+                let device = CudaDevice::new(device_id)?;
                 let id = Id::new().unwrap();
                 // Initialize the Communicator from Nvidia Collective Communication Library. This is for the inter gpu communication.
                 // For more information visit https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/overview.html
@@ -454,7 +461,7 @@ impl ModelThreadDispatcher {
                 );
                 info!("Rank {rank:?} spawned");
                 let device = Device::new_cuda(device_id)?;
-                let model = M::load(config.clone(), device, dtype, file_paths, comm);
+                let model = M::load(config.clone(), &device, dtype, file_paths.as_ref(), comm);
                 let model_worker = ModelWorker::<M>::new(
                     cache_config,
                     device,
@@ -535,6 +542,8 @@ impl ModelThreadDispatcher {
 
 #[derive(Debug, Error)]
 pub enum ModelThreadError {
+    #[error("Candle error: `{0}`")]
+    CandleError(#[from] candle_core::Error),
     #[error("Core thread shutdown: `{0}`")]
     Shutdown(RecvError),
     #[error("Send error")]
@@ -572,4 +581,10 @@ pub enum ModelExecutorError {
     InvalidLogits(usize, usize),
     #[error("Invalid next token parameters or stopping parameters (next token params dims: {0}, stopping params dims: {1})")]
     InvalidNextTokenParams(usize, usize),
+}
+
+#[derive(Debug, Error, Deserialize)]
+pub enum ConfigError {
+    #[error("Failed to load config file: `{0}`")]
+    FailedToLoadConfig(String),
 }

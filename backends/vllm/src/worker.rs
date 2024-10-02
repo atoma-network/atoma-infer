@@ -2,7 +2,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use crate::{
     config::CacheConfig,
-    model_executor::{ModelExecutor, ModelExecutorError, ModelLoaderError},
+    model_executor::{Config as ModelConfig, ModelExecutor, ModelExecutorError, ModelLoaderError},
     sequence::{ExecuteModelRequest, SequenceGroupMetadata, SequenceGroupOutput},
 };
 use candle_core::{DType, DTypeParseError, Device, Error as CandleError, Tensor};
@@ -76,13 +76,13 @@ where
             cache_config,
             device.clone(),
             dtype,
-            model.alibi_slopes(),
-            model.hidden_dim(),
-            model.num_attention_heads(),
-            model.num_hidden_layers(),
-            model.num_kv_heads(),
-            model.softmax_scale(),
-            model.sliding_window(),
+            model.config().alibi_slopes(),
+            model.config().hidden_dim(),
+            model.config().num_attention_heads(),
+            model.config().num_hidden_layers(),
+            model.config().num_kv_heads(),
+            model.config().softmax_scale(),
+            model.config().sliding_window(),
         )?;
 
         // TODO:
@@ -294,10 +294,14 @@ where
                 // This is a hack to make sliding window work with
                 // Paged Attention. We can remove it if we make paged attn kernel
                 // to properly handle sliding window attention.
-                if self.model.sliding_window().is_some() && !is_prompt {
+                if self.model.config().sliding_window().is_some() && !is_prompt {
                     // DON'T PANIC: by the branch check
-                    sliding_sequence_length =
-                        self.model.sliding_window().unwrap().min(sequence_length);
+                    sliding_sequence_length = self
+                        .model
+                        .config()
+                        .sliding_window()
+                        .unwrap()
+                        .min(sequence_length);
                 }
 
                 // 6. Get block table for the current sequence
@@ -311,7 +315,7 @@ where
                         .clone();
 
                     // 7. If sliding window is used, we need to trim the block table
-                    if let Some(sliding_window) = self.model.sliding_window() {
+                    if let Some(sliding_window) = self.model.config().sliding_window() {
                         let sw_block_num = (sliding_window + self.cache_engine.get_block_size()
                             - 1)
                             / self.cache_engine.get_block_size();
@@ -378,6 +382,7 @@ where
                 // [-1, -1, 2, 3, 4, 5, 6, 7, 0, 1].
                 let start_index = self
                     .model
+                    .config()
                     .sliding_window()
                     .map(|sw| query_length.saturating_sub(sw))
                     .unwrap_or(0);

@@ -1,4 +1,4 @@
-use std::{path::Path, str::FromStr, time::Instant};
+use std::{path::Path, str::FromStr, sync::Arc, time::Instant};
 
 use crate::{
     config::{
@@ -7,7 +7,8 @@ use crate::{
     },
     llm_engine::{EngineError, GenerateRequestOutput, LlmEngine},
     model_executor::{
-        Config, ModelExecutor, ModelLoaderError, ModelThreadDispatcher, ModelThreadError,
+        Config, ConfigError, ModelExecutor, ModelLoaderError, ModelThreadDispatcher,
+        ModelThreadError,
     },
     scheduler::{Scheduler, SchedulerError},
     sequence::{Sequence, SequenceError, SequenceGroup},
@@ -15,7 +16,7 @@ use crate::{
     types::GenerateRequest,
     validation::{ValidGenerateRequest, Validation, ValidationError},
 };
-use candle_core::{DType, DTypeParseError, Device, Error as CandleError};
+use candle_core::{DType, DTypeParseError, Error as CandleError};
 use candle_transformers::generation::{LogitsProcessor, Sampling};
 use metrics::{counter, gauge};
 use thiserror::Error;
@@ -67,7 +68,7 @@ pub struct LlmService {
 impl LlmService {
     /// Starts the service
     #[instrument(skip_all)]
-    pub async fn start<C, M, P: AsRef<Path>>(
+    pub async fn start<M, P: AsRef<Path>>(
         service_request_receiver: UnboundedReceiver<(
             GenerateRequest,
             oneshot::Sender<GenerateRequestOutput>,
@@ -76,7 +77,6 @@ impl LlmService {
         shutdown_signal: mpsc::Receiver<()>,
     ) -> Result<Self, LlmServiceError>
     where
-        C: Config,
         M: ModelExecutor + Send + Sync + 'static,
     {
         let span = info_span!("llm-service");
@@ -94,7 +94,7 @@ impl LlmService {
             model_config.model_name.clone(),
             model_config.revision.clone(),
         )?;
-        let config = C::from_file_path(&file_paths.config_path)?;
+        let config = M::C::from_file_path(&file_paths.config_path)?;
         let tokenizer = Tokenizer::from_file(&file_paths.tokenizer_path)?;
         // NOTE: we load the model on GPU memory, as to properly compute the number of blocks
         // during the system profiling stage. See `compute_num_gpu_blocks` comments
@@ -145,7 +145,7 @@ impl LlmService {
             config,
             devices_ids,
             dtype,
-            &file_paths,
+            Arc::new(file_paths),
             scheduler_config,
         )?;
 
@@ -345,6 +345,8 @@ pub enum LlmServiceError {
     CacheConfigError(#[from] CacheConfigError),
     #[error("Candle error: `{0}`")]
     CandleError(#[from] CandleError),
+    #[error("Config error: `{0}`")]
+    ConfigError(#[from] ConfigError),
     #[error("DType parse error: `{0}`")]
     DTypeParseError(#[from] DTypeParseError),
     #[error("Model loader error: `{0}`")]

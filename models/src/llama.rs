@@ -535,10 +535,11 @@ mod tests {
         let filenames = vec![api
             .get("model.safetensors")
             .expect("Failed to get model.safetensors")];
-        let mut llama_model = {
-            let vb = unsafe { VarBuilder::from_mmaped_safetensors(&filenames, dtype, &device)? };
-            Llama::load(vb, &config, dtype, &device).expect("Failed to load the model")
+        let vb = unsafe {
+            candle_nn::var_builder::ShardedSafeTensors::var_builder(&filenames, dtype, &device)?
         };
+        let mut llama_model =
+            Llama::load(vb, &config, dtype, &device).expect("Failed to load the model");
         let tokenizer =
             Tokenizer::from_file(tokenizer_filename).expect("Failed to load the tokenizer");
         let eos_token_id = config
