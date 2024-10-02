@@ -1,4 +1,5 @@
 pub mod llama;
+pub mod llama_nccl;
 
 use std::path::PathBuf;
 
