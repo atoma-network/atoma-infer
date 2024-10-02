@@ -2174,7 +2174,7 @@ impl<P: Debug> Scheduler<P> {
     /// This method should be called periodically to clean up the running queue,
     /// typically after each generation step or when checking for completed sequences.
     #[instrument(skip_all)]
-    pub fn free_finished_sequence(&mut self) {
+    pub fn remove_finished_sequences(&mut self) {
         trace!("Freeing finished sequence");
         self.running = self
             .running

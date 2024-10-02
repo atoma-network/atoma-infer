@@ -453,6 +453,36 @@ pub enum SchedulerConfigError {
     FailedVerifySchedulerConfig(String),
 }
 
+/// Validation's configuration.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct ValidationConfig {
+    /// Maximum number of sequences to generate for ranking (currently unused)
+    pub best_of: usize,
+    /// Maximum number of stop sequences allowed in a request
+    pub max_stop_sequences: usize,
+    /// Maximum number of top tokens to return in the response
+    pub max_top_n_tokens: u32,
+    /// Maximum allowed length of the input text in tokens
+    pub max_input_length: usize,
+    /// Maximum total number of tokens (input + generated) allowed
+    pub max_total_tokens: u32,
+}
+
+impl ValidationConfig {
+    /// Creates a new instance of `ValidationConfig` from a `.toml` file.
+    pub fn from_file_path<P: AsRef<Path>>(config_file_path: P) -> Self {
+        let builder = Config::builder().add_source(config::File::with_name(
+            config_file_path.as_ref().to_str().unwrap(),
+        ));
+        let config = builder
+            .build()
+            .expect("Failed to generate inference configuration file");
+        config
+            .get::<Self>("validation")
+            .expect("Failed to generated config file")
+    }
+}
+
 pub(crate) mod utils {
     use super::*;
     use cuda_runtime_sys::*;
