@@ -1,11 +1,19 @@
 use candle_core::{DType, Device, Tensor};
+#[cfg(not(feature = "nccl"))]
 use candle_nn::VarBuilder;
+#[cfg(feature = "nccl")]
+use cudarc::nccl::Comm;
 use hf_hub::{api::sync::ApiBuilder, Repo, RepoType};
 use models::{
     llama::{Config, LlamaEosToks},
     FlashAttentionMetadata, Llama,
 };
-use std::{path::Path, time::Instant};
+use std::path::Path;
+#[cfg(feature = "nccl")]
+use std::rc::Rc;
+#[cfg(not(feature = "nccl"))]
+use std::time::Instant;
+#[cfg(not(feature = "nccl"))]
 use tracing::info;
 
 use crate::{
@@ -93,6 +101,7 @@ impl ModelLoader for LlamaModel {
         })
     }
 
+    #[cfg(not(feature = "nccl"))]
     fn load(
         config: Self::C,
         device: &Device,
@@ -118,6 +127,20 @@ impl ModelLoader for LlamaModel {
         info!("Loaded Llama model in {:?}", start.elapsed());
 
         Ok(Self { model, config })
+    }
+
+    #[cfg(feature = "nccl")]
+    fn load(
+        _: Self::C,
+        _: &Device,
+        _: DType,
+        _: &ModelFilePaths,
+        _: &Rc<Comm>,
+    ) -> Result<Self, ModelLoaderError>
+    where
+        Self: Sized,
+    {
+        unimplemented!()
     }
 }
 

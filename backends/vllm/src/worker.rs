@@ -495,9 +495,6 @@ pub struct CacheEngine {
     cpu_cache: Vec<Tensor>,
     /// The GPU cache
     gpu_cache: Vec<Tensor>,
-    #[cfg(feature = "nccl")]
-    /// The associated GPU device rank
-    rank: usize,
     /// Tracing span
     span: Span,
 }

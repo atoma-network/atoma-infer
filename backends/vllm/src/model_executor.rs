@@ -9,7 +9,7 @@ use std::{
 use candle_core::{DType, Device, IndexOp, Tensor};
 #[cfg(feature = "nccl")]
 use cudarc::{
-    driver::safe::CudaDevice,
+    driver::{safe::CudaDevice, DriverError},
     nccl::{
         result::NcclError,
         safe::{Comm, Id},
@@ -19,8 +19,6 @@ use futures::stream::FuturesUnordered;
 use models::flash_attention::FlashAttentionMetadata;
 use serde::{de::DeserializeOwned, Deserialize};
 use thiserror::Error;
-#[cfg(feature = "nccl")]
-use tokio::sync::broadcast;
 use tokio::{
     sync::{
         mpsc,
@@ -72,6 +70,27 @@ pub trait ModelLoader {
         revision: String,
     ) -> Result<ModelFilePaths, ModelLoaderError>;
 
+    /// Loads the model into memory, with NCCL support.
+    ///
+    /// # Arguments
+    /// * `device` - The device to load the model onto (e.g., CPU, GPU).
+    /// * `dtype` - The data type for the model's parameters.
+    /// * `file_paths` - Paths to the model files.
+    /// * `comm` - The communicator for NCCL-enabled GPUs
+    ///
+    /// # Returns
+    /// `Result<Self, ModelLoaderError>` containing the loaded model.
+    #[cfg(feature = "nccl")]
+    fn load(
+        config: Self::C,
+        device: &Device,
+        dtype: DType,
+        file_paths: &ModelFilePaths,
+        comm: &Rc<Comm>,
+    ) -> Result<Self, ModelLoaderError>
+    where
+        Self: Sized;
+
     /// Loads the model into memory.
     ///
     /// # Arguments
@@ -81,12 +100,12 @@ pub trait ModelLoader {
     ///
     /// # Returns
     /// `Result<Self, ModelLoaderError>` containing the loaded model.
+    #[cfg(not(feature = "nccl"))]
     fn load(
         config: Self::C,
         device: &Device,
         dtype: DType,
         file_paths: &ModelFilePaths,
-        #[cfg(feature = "nccl")] comm: &Rc<Comm>,
     ) -> Result<Self, ModelLoaderError>
     where
         Self: Sized;
@@ -266,7 +285,10 @@ pub struct ModelThreadCommand {
     /// The AI inference request to be executed
     request: ExecuteModelRequest,
     /// A one-shot channel sender for communicating the generated output back to the main task
+    #[cfg(not(feature = "nccl"))]
     sender: oneshot::Sender<Vec<SequenceGroupOutput>>,
+    #[cfg(feature = "nccl")]
+    sender: Option<oneshot::Sender<Vec<SequenceGroupOutput>>>,
 }
 
 /// `ModelThread` - Encapsulates the logic for running a model thread/task in the background.
@@ -274,15 +296,11 @@ pub struct ModelThreadCommand {
 pub struct ModelThread<M: ModelExecutor> {
     /// The worker responsible for executing the model
     worker: ModelWorker<M>,
-    #[cfg(not(feature = "nccl"))]
     /// Receiver for incoming model execution requests
     receiver: mpsc::UnboundedReceiver<ModelThreadCommand>,
     #[cfg(feature = "nccl")]
     /// The associated GPU device rank
     rank: usize,
-    #[cfg(feature = "nccl")]
-    /// Receiver for incoming model execution requests
-    worker_receiver: broadcast::UnboundedReceiver<ModelThreadCommand>,
     /// Tracing span for logging and diagnostics
     span: Span,
 }
@@ -334,7 +352,7 @@ where
         }
 
         #[cfg(feature = "nccl")]
-        while let Some(command) = self.worker_receiver.blocking_recv() {
+        while let Some(command) = self.receiver.blocking_recv() {
             let ModelThreadCommand { request, sender } = command;
 
             let execution_start_time = std::time::Instant::now();
@@ -355,7 +373,10 @@ where
                 }
 
                 // Send responses back to the engine
-                sender.send(output).ok();
+                sender
+                    .expect("Failed to send output to engine from rank 0 model thread")
+                    .send(output)
+                    .ok();
             }
         }
 
@@ -369,11 +390,7 @@ pub struct ModelThreadDispatcher {
     /// Sender for `ModelThreadCommand`s to the model execution thread
     pub sender: mpsc::UnboundedSender<ModelThreadCommand>,
     #[cfg(feature = "nccl")]
-    pub to_workers_sender: broadcast::UnboundedSender<ModelThreadCommand>,
-    #[cfg(feature = "nccl")]
-    /// The number of associated workers involved, each corresponding
-    /// to a physical GPU device
-    num_workers: usize,
+    pub to_workers_senders: Vec<mpsc::UnboundedSender<ModelThreadCommand>>,
     /// Collection of receivers for AI inference outputs
     /// Yields when a new output is generated
     pub responses: FuturesUnordered<oneshot::Receiver<Vec<SequenceGroupOutput>>>,
@@ -417,64 +434,26 @@ impl ModelThreadDispatcher {
     where
         M: ModelLoader + ModelExecutor + Send + Sync + 'static,
     {
-        #[cfg(not(feature = "nccl"))]
-        let (sender, receiver) = mpsc::unbounded_channel();
-        #[cfg(feature = "nccl")]
-        let (to_workers_sender, _) = broadcast::unbounded_channel();
+        let enable_chunked_prefill = scheduler_config.enable_chunked_prefill();
 
         #[cfg(not(feature = "nccl"))]
-        let join_handle = tokio::task::spawn_blocking(move || {
-            let device = Device::new_cuda(devices_ids[0])?;
-            let model = M::load(config, &device, dtype, file_paths.as_ref())?;
-            let model_worker = ModelWorker::<M>::new(
-                cache_config,
-                device,
-                dtype,
-                model,
-                scheduler_config.enable_chunked_prefill(),
-            )?;
-            let model_thread = ModelThread {
-                worker: model_worker,
-                receiver,
-                span: info_span!("model-thread"),
-            };
-            if let Err(e) = model_thread.run() {
-                error!("Model thread error: {e}");
-                if !matches!(e, ModelThreadError::Shutdown(_)) {
-                    panic!("Fatal error occurred: {e}");
-                }
-            }
-
-            Ok(())
-        });
-        #[cfg(feature = "nccl")]
-        let mut join_handles = Vec::with_capacity(devices_ids.len());
-        #[cfg(feature = "nccl")]
-        for device_id in devices_ids.iter() {
+        let (join_handle, sender) = {
+            let (sender, receiver) = mpsc::unbounded_channel();
+            let device_id = devices_ids[0];
             let join_handle = tokio::task::spawn_blocking(move || {
-                let device = CudaDevice::new(device_id)?;
-                let id = Id::new().unwrap();
-                // Initialize the Communicator from Nvidia Collective Communication Library. This is for the inter gpu communication.
-                // For more information visit https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/overview.html
-                let comm = Rc::new(
-                    Comm::from_rank(device, rank, num_shards, id).map_err(ModelError::NcclError)?,
-                );
-                info!("Rank {rank:?} spawned");
                 let device = Device::new_cuda(device_id)?;
-                let model = M::load(config.clone(), &device, dtype, file_paths.as_ref(), comm);
+                let model = M::load(config, &device, dtype, file_paths.as_ref())?;
                 let model_worker = ModelWorker::<M>::new(
                     cache_config,
                     device,
                     dtype,
                     model,
-                    scheduler_config.enable_chunked_prefill(),
-                    device_id,
+                    enable_chunked_prefill,
                 )?;
-                let mut workers_receiver = to_workers_sender.subscribe();
                 let model_thread = ModelThread {
                     worker: model_worker,
-                    workers_receiver,
-                    span: info_span!("model-thread-worker-{rank}"),
+                    receiver,
+                    span: info_span!("model-thread"),
                 };
                 if let Err(e) = model_thread.run() {
                     error!("Model thread error: {e}");
@@ -485,16 +464,71 @@ impl ModelThreadDispatcher {
 
                 Ok(())
             });
-            join_handles.push(join_handle);
-        }
+            (join_handle, sender)
+        };
+
+        #[cfg(feature = "nccl")]
+        let (join_handles, to_workers_senders) = {
+            let num_shards = devices_ids.len();
+            let mut join_handles = Vec::with_capacity(num_shards);
+            let mut to_workers_senders = Vec::with_capacity(num_shards);
+            for (rank, device_id) in devices_ids.into_iter().enumerate() {
+                let config_clone = config.clone();
+                let file_paths_clone = file_paths.clone();
+                let cache_config_clone = cache_config.clone();
+                let (to_workers_sender, worker_receiver) = mpsc::unbounded_channel();
+                let join_handle = tokio::task::spawn_blocking(move || {
+                    let device = CudaDevice::new(device_id)?;
+                    let id = Id::new().unwrap();
+                    // Initialize the Communicator from Nvidia Collective Communication Library. This is for the inter gpu communication.
+                    // For more information visit https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/overview.html
+                    let comm = Rc::new(
+                        Comm::from_rank(device, rank, num_shards, id)
+                            .map_err(ModelThreadError::NcclError)?,
+                    );
+                    info!("Rank {rank:?} spawned");
+                    let device = Device::new_cuda(device_id)?;
+                    let model = M::load(
+                        config_clone,
+                        &device,
+                        dtype,
+                        file_paths_clone.as_ref(),
+                        &comm,
+                    )?;
+                    let model_worker = ModelWorker::<M>::new(
+                        cache_config_clone,
+                        device,
+                        dtype,
+                        model,
+                        enable_chunked_prefill,
+                        rank,
+                    )?;
+                    let model_thread = ModelThread {
+                        worker: model_worker,
+                        receiver: worker_receiver,
+                        rank,
+                        span: info_span!("model-thread-worker-{rank}"),
+                    };
+                    if let Err(e) = model_thread.run() {
+                        error!("Model thread error: {e}");
+                        if !matches!(e, ModelThreadError::Shutdown(_)) {
+                            panic!("Fatal error occurred: {e}");
+                        }
+                    }
+
+                    Ok(())
+                });
+                join_handles.push(join_handle);
+                to_workers_senders.push(to_workers_sender);
+            }
+            (join_handles, to_workers_senders)
+        };
 
         let model_dispatcher = ModelThreadDispatcher {
             #[cfg(not(feature = "nccl"))]
             sender,
             #[cfg(feature = "nccl")]
-            to_workers_sender,
-            #[cfg(feature = "nccl")]
-            num_workers: devices_ids.len(),
+            to_workers_senders,
             responses: FuturesUnordered::new(),
             #[cfg(not(feature = "nccl"))]
             join_handle,
@@ -525,15 +559,32 @@ impl ModelThreadDispatcher {
         trace!("Sending new `ExecuteModelRequest` to model executor task");
 
         let (sender, receiver) = oneshot::channel();
-        let command = ModelThreadCommand { request, sender };
 
         #[cfg(not(feature = "nccl"))]
-        if let Err(e) = self.sender.send(command) {
-            error!("Could not send command to model core, it might be shutting down: {e}");
+        {
+            let command = ModelThreadCommand { request, sender };
+            if let Err(e) = self.sender.send(command) {
+                error!("Could not send command to model core, it might be shutting down: {e}");
+            }
         }
         #[cfg(feature = "nccl")]
-        if let Err(e) = self.to_workers_sender.send(command) {
-            error!("Could not send command to model core, it might be shutting down: {e}");
+        {
+            let command = ModelThreadCommand {
+                request: request.clone(),
+                sender: Some(sender),
+            };
+            if let Err(e) = self.to_workers_senders[0].send(command) {
+                error!("Could not send command to model core, it might be shutting down: {e}");
+            }
+            for worker_sender in self.to_workers_senders.iter() {
+                let command = ModelThreadCommand {
+                    request: request.clone(),
+                    sender: None,
+                };
+                if let Err(e) = worker_sender.send(command) {
+                    error!("Could not send command to model core, it might be shutting down: {e}");
+                }
+            }
         }
 
         self.responses.push(receiver);
@@ -544,6 +595,9 @@ impl ModelThreadDispatcher {
 pub enum ModelThreadError {
     #[error("Candle error: `{0}`")]
     CandleError(#[from] candle_core::Error),
+    #[cfg(feature = "nccl")]
+    #[error("DriverError error: `{0}`")]
+    DriverError(#[from] DriverError),
     #[error("Core thread shutdown: `{0}`")]
     Shutdown(RecvError),
     #[error("Send error")]
@@ -555,8 +609,8 @@ pub enum ModelThreadError {
     #[error("Model worker error: `{0}`")]
     ModelWorkerError(#[from] ModelWorkerError),
     #[cfg(feature = "nccl")]
-    #[error("Nccl error: `{0}`")]
-    NcclError(#[from] NcclError),
+    #[error("Nccl error: `{}`", 0.0)]
+    NcclError(NcclError),
 }
 
 #[derive(Debug, Error)]
