@@ -5,6 +5,8 @@ use std::{
 
 #[cfg(test)]
 mod llama;
+#[cfg(all(test, feature = "nccl"))]
+mod llama_nccl;
 
 use candle_core::{DType, Device, Tensor};
 use futures::{stream::FuturesUnordered, StreamExt};

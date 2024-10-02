@@ -146,9 +146,9 @@ impl CausalSelfAttention {
     ) -> Result<Self> {
         let span = tracing::span!(tracing::Level::TRACE, "attn");
         let span_rot = tracing::span!(tracing::Level::TRACE, "attn-rot");
-        let q_proj = TensorParallelColumnLinear::load_multi(vb.clone(), &["q_proj"], comm.clone())?;
-        let k_proj = TensorParallelColumnLinear::load_multi(vb.clone(), &["k_proj"], comm.clone())?;
-        let v_proj = TensorParallelColumnLinear::load_multi(vb.clone(), &["v_proj"], comm.clone())?;
+        let q_proj = TensorParallelColumnLinear::load(vb.pp("q_proj"), comm.clone())?;
+        let k_proj = TensorParallelColumnLinear::load(vb.pp("k_proj"), comm.clone())?;
+        let v_proj = TensorParallelColumnLinear::load(vb.pp("v_proj"), comm.clone())?;
         let o_proj = TensorParallelRowLinear::load(vb.pp("o_proj"), comm.clone())?;
         let head_dim = cfg.hidden_size / cfg.num_attention_heads;
 
@@ -315,7 +315,7 @@ impl Llama {
     ) -> Result<Self> {
         let wte = embedding(cfg, vb.pp("model.embed_tokens"))?;
         let lm_head = linear(cfg.hidden_size, cfg.vocab_size, vb.pp("lm_head"))?;
-        let norm = rms_norm(cfg.hidden_size, 1e-5, vb.pp("model.norm"))?;
+        let ln_f = rms_norm(cfg.hidden_size, 1e-5, vb.pp("model.norm"))?;
         let blocks: Vec<_> = (0..cfg.num_hidden_layers)
             .map(|i| {
                 Block::load(
@@ -330,7 +330,7 @@ impl Llama {
         Ok(Self {
             wte,
             blocks,
-            ln_f: norm,
+            ln_f,
             lm_head,
         })
     }
