@@ -346,7 +346,10 @@ mod tests {
         driver::safe::CudaDevice,
         nccl::safe::{Comm, Id},
     };
-    use hf_hub::{api::sync::Api, Repo, RepoType};
+    use hf_hub::{
+        api::sync::ApiBuilder,
+        Repo, RepoType,
+    };
     use rand::Rng;
     use serial_test::serial;
     use std::io::Write;
@@ -362,12 +365,22 @@ mod tests {
 
         let dtype = DType::BF16;
         let device = Device::new_cuda(DEVICE_ID).unwrap();
-        let model_id = "TinyLlama/TinyLlama-1.1B-Chat-v1.0".to_string();
+        let model_id = "meta-llama/Llama-3.1-8B-Instruct".to_string();
         let revision = "main".to_string();
-        let api = Api::new().expect("Failed to create the HF API");
+        let api_key = std::env::var("HF_API_KEY").expect("HF_API_KEY not set, please set it to run this test, with `export HF_API_KEY=<your key>`");
 
         println!("loading the model weights from {model_id}");
-        let api = api.repo(Repo::with_revision(model_id, RepoType::Model, revision));
+        let api = ApiBuilder::new()
+            .with_progress(true)
+            .with_token(Some(api_key))
+            .build()
+            .expect("Failed to build the API");
+
+        let api = api.repo(Repo::with_revision(
+            model_id.clone(),
+            RepoType::Model,
+            revision,
+        ));
 
         let tokenizer_filename = api
             .get("tokenizer.json")
@@ -379,9 +392,9 @@ mod tests {
         .expect("Failed to deserialize config.json");
         let config = config.into_config();
 
-        let filenames = vec![api
-            .get("model.safetensors")
-            .expect("Failed to get model.safetensors")];
+        let filenames =
+            candle_examples::hub_load_safetensors(&api, "model.safetensors.index.json")?;
+
         let id = Id::new().unwrap();
         let cuda_device = CudaDevice::new(DEVICE_ID).expect("Failed to create the CUDA device");
         let comm = std::rc::Rc::new(

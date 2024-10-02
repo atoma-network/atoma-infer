@@ -535,9 +535,7 @@ mod tests {
         let filenames = vec![api
             .get("model.safetensors")
             .expect("Failed to get model.safetensors")];
-        let vb = unsafe {
-            candle_nn::var_builder::ShardedSafeTensors::var_builder(&filenames, dtype, &device)?
-        };
+        let vb = unsafe { VarBuilder::from_mmaped_safetensors(&filenames, dtype, &device)? };
         let mut llama_model =
             Llama::load(vb, &config, dtype, &device).expect("Failed to load the model");
         let tokenizer =

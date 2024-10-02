@@ -31,4 +31,4 @@ tracing-subscriber.workspace = true
 tokenizers = { workspace = true, features = ["http"] }
 
 [features]
-nccl = ["dep:cudarc", "cudarc/nccl"]
+nccl = ["dep:cudarc", "cudarc/nccl", "models/nccl"]

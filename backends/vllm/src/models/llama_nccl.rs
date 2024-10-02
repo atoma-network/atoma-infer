@@ -1,18 +1,14 @@
 use candle_core::{DType, Device, Tensor};
-use candle_nn::VarBuilder;
+use candle_nn::var_builder::ShardedSafeTensors as VarBuilder;
+use cudarc::nccl::Comm;
 use hf_hub::{api::sync::ApiBuilder, Repo, RepoType};
-use models::{
-    llama_nccl::Llama,
-    llama::Config,
-    FlashAttentionMetadata,
-};
-use std::{path::Path, time::Instant};
+use models::{llama::Config, llama_nccl::Llama, FlashAttentionMetadata};
+use std::{path::Path, rc::Rc, time::Instant};
 use tracing::info;
 
 use crate::{
     model_executor::{
         ModelExecutor, ModelExecutorError, ModelFilePaths, ModelLoader, ModelLoaderError,
-        ModelMetadata,
     },
     models::hub_load_safetensors,
 };
@@ -28,6 +24,7 @@ pub struct LlamaModel {
 }
 
 impl ModelLoader for LlamaModel {
+    type C = Config;
     fn fetch<T: AsRef<Path>>(
         api_key: String,
         cache_dir: T,
@@ -48,12 +45,7 @@ impl ModelLoader for LlamaModel {
         let config_file_path = repo.get("config.json")?;
         let tokenizer_file_path = repo.get("tokenizer.json")?;
 
-        let model_weights_file_paths =
-            if LLAMA_VERSIONS_SINGLE_SAFETENSORS.contains(&model_id.as_str()) {
-                vec![repo.get("model.safetensors")?]
-            } else {
-                hub_load_safetensors(&repo, "model.safetensors.index.json")?
-            };
+        let model_weights_file_paths = hub_load_safetensors(&repo, "model.safetensors.index.json")?;
 
         Ok(ModelFilePaths {
             config_path: config_file_path,
@@ -62,10 +54,26 @@ impl ModelLoader for LlamaModel {
         })
     }
 
+    #[cfg(not(feature = "nccl"))]
     fn load(
-        device: Device,
+        config: Self::C,
+        device: &Device,
         dtype: DType,
         file_paths: &ModelFilePaths,
+    ) -> Result<Self, ModelLoaderError>
+    where
+        Self: Sized,
+    {
+        unimplemented!()
+    }
+
+    #[cfg(feature = "nccl")]
+    fn load(
+        config: Self::C,
+        device: &Device,
+        dtype: DType,
+        file_paths: &ModelFilePaths,
+        comm: &Rc<Comm>,
     ) -> Result<Self, ModelLoaderError>
     where
         Self: Sized,
@@ -73,62 +81,15 @@ impl ModelLoader for LlamaModel {
         info!("Loading Llama model ...");
         let start = Instant::now();
 
-        let (model, config) = {
-            let config: LlamaConfig =
-                serde_json::from_slice(&std::fs::read(&file_paths.config_path)?)?;
-            let config = config.into_config();
-
+        let model = {
             let vb = unsafe {
-                VarBuilder::from_mmaped_safetensors(
-                    file_paths.weights_path.as_slice(),
-                    dtype,
-                    &device,
-                )?
+                VarBuilder::var_builder(file_paths.weights_path.as_slice(), dtype, device)?
             };
-            (Llama::load(vb, &config, dtype, &device)?, config)
+            Llama::load(vb, &config, comm, dtype, device)?
         };
         info!("Loaded Llama model in {:?}", start.elapsed());
 
         Ok(Self { model, config })
-    }
-}
-
-impl ModelMetadata for LlamaModel {
-    fn alibi_slopes(&self) -> Option<&Tensor> {
-        None
-    }
-
-    fn eos_token_ids(&self) -> Option<Vec<u32>> {
-        match self.config.eos_token_id.clone() {
-            Some(LlamaEosToks::Single(id)) => Some(vec![id]),
-            Some(LlamaEosToks::Multiple(ids)) => Some(ids),
-            None => None,
-        }
-    }
-
-    fn hidden_dim(&self) -> usize {
-        self.config.hidden_size / self.config.num_attention_heads
-    }
-
-    fn num_attention_heads(&self) -> usize {
-        self.config.num_attention_heads
-    }
-
-    fn num_hidden_layers(&self) -> usize {
-        self.config.num_hidden_layers
-    }
-
-    fn num_kv_heads(&self) -> usize {
-        self.config.num_key_value_heads
-    }
-
-    fn softmax_scale(&self) -> f32 {
-        let head_dim = self.hidden_dim();
-        1f32 / (head_dim as f32).sqrt()
-    }
-
-    fn sliding_window(&self) -> Option<usize> {
-        None
     }
 }
 
@@ -148,5 +109,9 @@ impl ModelExecutor for LlamaModel {
             &kv_cache,
             attention_metadata,
         )?)
+    }
+
+    fn config(&self) -> &Self::C {
+        &self.config
     }
 }
