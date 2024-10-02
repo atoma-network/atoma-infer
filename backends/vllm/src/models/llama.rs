@@ -110,10 +110,10 @@ impl ModelLoader for LlamaModel {
                 VarBuilder::from_mmaped_safetensors(
                     file_paths.weights_path.as_slice(),
                     dtype,
-                    &device,
+                    device,
                 )?
             };
-            Llama::load(vb, &config, dtype, &device)?
+            Llama::load(vb, &config, dtype, device)?
         };
         info!("Loaded Llama model in {:?}", start.elapsed());
 

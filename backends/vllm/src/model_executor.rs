@@ -97,7 +97,7 @@ pub trait Config: Clone + DeserializeOwned {
     /// Creates a new instance of self, from a file path
     fn from_file_path(path: &PathBuf) -> Result<Self, ConfigError> {
         serde_json::from_slice(
-            &std::fs::read(&path).map_err(|e| ConfigError::FailedToLoadConfig(e.to_string()))?,
+            &std::fs::read(path).map_err(|e| ConfigError::FailedToLoadConfig(e.to_string()))?,
         )
         .map_err(|e| ConfigError::FailedToLoadConfig(e.to_string()))?
     }
@@ -435,7 +435,7 @@ impl ModelThreadDispatcher {
             )?;
             let model_thread = ModelThread {
                 worker: model_worker,
-                receiver: receiver,
+                receiver,
                 span: info_span!("model-thread"),
             };
             if let Err(e) = model_thread.run() {
