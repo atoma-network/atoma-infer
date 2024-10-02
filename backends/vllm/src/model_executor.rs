@@ -118,7 +118,7 @@ pub trait Config: Clone + DeserializeOwned {
         serde_json::from_slice(
             &std::fs::read(path).map_err(|e| ConfigError::FailedToLoadConfig(e.to_string()))?,
         )
-        .map_err(|e| ConfigError::FailedToLoadConfig(e.to_string()))?
+        .map_err(|e| ConfigError::FailedToLoadConfig(e.to_string()))
     }
     /// Returns the ALiBi (Attention with Linear Biases) slopes, if applicable
     fn alibi_slopes(&self) -> Option<&Tensor>;
