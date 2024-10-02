@@ -2,7 +2,10 @@ use std::{
     path::{Path, PathBuf},
     time::{Duration, Instant},
 };
-
+#[cfg(feature = "nccl")]
+use std::rc::Rc;
+#[cfg(feature = "nccl")]
+use cudarc::nccl::Comm;
 #[cfg(test)]
 mod llama;
 #[cfg(all(test, feature = "nccl"))]
@@ -19,17 +22,55 @@ use tracing::info;
 use crate::{
     llm_service::LlmService,
     model_executor::{
-        Config, ModelExecutor, ModelExecutorError, ModelFilePaths, ModelLoader, ModelLoaderError,
+        Config, ConfigError, ModelExecutor, ModelExecutorError, ModelFilePaths, ModelLoader,
+        ModelLoaderError,
     },
     sequence::ExecuteModelRequest,
     types::{GenerateParameters, GenerateRequest},
 };
 
 const MAX_ELAPSED_INTERNAL: u64 = 50;
-const EOS_TOKEN_ID: u32 = 2048;
 const VOCAB_SIZE: usize = 128;
 
 struct MockModel {}
+
+impl Config for () {
+    fn alibi_slopes(&self) -> Option<&Tensor> {
+        unimplemented!()
+    }
+
+    fn eos_token_ids(&self) -> Option<Vec<u32>> {
+        unimplemented!()
+    }
+
+    fn hidden_dim(&self) -> usize {
+        unimplemented!()
+    }
+
+    fn num_attention_heads(&self) -> usize {
+        unimplemented!()
+    }
+
+    fn num_hidden_layers(&self) -> usize {
+        unimplemented!()
+    }
+
+    fn num_kv_heads(&self) -> usize {
+        unimplemented!()
+    }
+
+    fn sliding_window(&self) -> Option<usize> {
+        unimplemented!()
+    }
+
+    fn softmax_scale(&self) -> f32 {
+        unimplemented!()
+    }
+
+    fn from_file_path(_: &PathBuf) -> Result<Self, ConfigError> {
+        unimplemented!()
+    }
+}
 
 impl ModelLoader for MockModel {
     type C = ();
@@ -59,6 +100,7 @@ impl ModelLoader for MockModel {
         })
     }
 
+    #[cfg(not(feature = "nccl"))]
     fn load(
         _: Self::C,
         _: &Device,
@@ -67,43 +109,16 @@ impl ModelLoader for MockModel {
     ) -> Result<Self, ModelLoaderError> {
         Ok(Self {})
     }
-}
 
-impl Config for MockModel {
-    fn alibi_slopes(&self) -> Option<&Tensor> {
-        None
-    }
-
-    fn eos_token_ids(&self) -> Option<Vec<u32>> {
-        Some(vec![EOS_TOKEN_ID])
-    }
-
-    fn hidden_dim(&self) -> usize {
-        512
-    }
-
-    fn num_attention_heads(&self) -> usize {
-        8
-    }
-
-    fn num_hidden_layers(&self) -> usize {
-        8
-    }
-
-    fn num_kv_heads(&self) -> usize {
-        8
-    }
-
-    fn sliding_window(&self) -> Option<usize> {
-        None
-    }
-
-    fn softmax_scale(&self) -> f32 {
-        1.0
-    }
-
-    fn from_file_path(_: &PathBuf) -> Result<Self, ModelLoaderError> {
-        Ok(Self {})
+    #[cfg(feature = "nccl")]
+    fn load(
+        _: Self::C,
+        _: &Device,
+        _: DType,
+        _: &ModelFilePaths,
+        _: &Rc<Comm>,
+    ) -> Result<Self, ModelLoaderError> {
+        unimplemented!()
     }
 }
 
