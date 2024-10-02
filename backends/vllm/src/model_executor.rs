@@ -287,6 +287,8 @@ pub struct ModelThreadCommand {
     /// A one-shot channel sender for communicating the generated output back to the main task
     #[cfg(not(feature = "nccl"))]
     sender: oneshot::Sender<Vec<SequenceGroupOutput>>,
+    /// A one-shot channel sender for communicating the generated output,
+    /// from the main worker thread, back to the main task
     #[cfg(feature = "nccl")]
     sender: Option<oneshot::Sender<Vec<SequenceGroupOutput>>>,
 }
