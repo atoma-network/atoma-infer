@@ -474,6 +474,7 @@ impl ModelThreadDispatcher {
             let num_shards = devices_ids.len();
             let mut join_handles = Vec::with_capacity(num_shards);
             let mut to_workers_senders = Vec::with_capacity(num_shards);
+            let id = Id::new().unwrap();
             for (rank, device_id) in devices_ids.into_iter().enumerate() {
                 let config_clone = config.clone();
                 let file_paths_clone = file_paths.clone();
@@ -481,7 +482,6 @@ impl ModelThreadDispatcher {
                 let (to_workers_sender, worker_receiver) = mpsc::unbounded_channel();
                 let join_handle = tokio::task::spawn_blocking(move || {
                     let device = CudaDevice::new(device_id)?;
-                    let id = Id::new().unwrap();
                     // Initialize the Communicator from Nvidia Collective Communication Library. This is for the inter gpu communication.
                     // For more information visit https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/overview.html
                     let comm = Rc::new(
@@ -504,6 +504,7 @@ impl ModelThreadDispatcher {
                         model,
                         enable_chunked_prefill,
                         rank,
+                        num_shards
                     )?;
                     let model_thread = ModelThread {
                         worker: model_worker,

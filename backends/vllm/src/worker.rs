@@ -66,6 +66,7 @@ where
         model: M,
         enable_chunked_prefill: bool,
         #[cfg(feature = "nccl")] rank: usize,
+        #[cfg(feature = "nccl")] world_size: usize,
     ) -> Result<Self, ModelWorkerError> {
         let span = info_span!("model-worker");
         let _span = span.clone();
@@ -83,6 +84,7 @@ where
             model.config().num_kv_heads(),
             model.config().softmax_scale(),
             model.config().sliding_window(),
+            #[cfg(feature = "nccl")] world_size,
         )?;
 
         // TODO:
@@ -514,6 +516,8 @@ impl CacheEngine {
         num_kv_heads: usize,
         softmax_scale: f32,
         sliding_window: Option<usize>,
+        #[cfg(feature = "nccl")]
+        world_size: usize,
     ) -> Result<Self, CacheEngineError> {
         info!("Starting a new `CacheEngine` instance");
         let mut this = Self {
@@ -536,8 +540,8 @@ impl CacheEngine {
         };
 
         // NOTE: each GPU worker needs its own set of allocated CPU tensor blocks
-        this.cpu_cache = this.allocate_blocks(this.get_num_cpu_blocks(), &Device::Cpu)?;
-        this.gpu_cache = this.allocate_blocks(this.get_num_gpu_blocks(), &device)?;
+        this.cpu_cache = this.allocate_blocks(this.get_num_cpu_blocks(), &Device::Cpu, #[cfg(feature = "nccl")] world_size)?;
+        this.gpu_cache = this.allocate_blocks(this.get_num_gpu_blocks(), &device, #[cfg(feature = "nccl")] world_size)?;
 
         Ok(this)
     }
@@ -548,12 +552,14 @@ impl CacheEngine {
         &mut self,
         num_blocks: usize,
         device: &Device,
+        #[cfg(feature = "nccl")]
+        world_size: usize,
     ) -> Result<Vec<Tensor>, CacheEngineError> {
         let _enter = self.span.enter();
         let kv_cache_shape = FlashAttention::get_kv_cache_shape(
             num_blocks,
             self.get_block_size(),
-            self.attention.num_kv_heads,
+            self.attention.num_kv_heads / world_size, // tensor parallelism across kv heads dimension
             self.attention.head_dim,
         );
         let mut kv_caches = Vec::with_capacity(self.num_hidden_layers);
