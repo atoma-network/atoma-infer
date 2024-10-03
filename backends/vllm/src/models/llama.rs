@@ -16,6 +16,12 @@ use crate::{
     models::hub_load_safetensors,
 };
 
+const LLAMA_VERSIONS_SINGLE_SAFETENSORS: &[&str] = &[
+    "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+    "meta-llama/Llama-3.2-1B",
+    "meta-llama/Llama-3.2-1B-Instruct",
+];
+
 /// Represents a Llama language model.
 ///
 /// This struct encapsulates the configuration, device, data type, and the actual Llama model.
@@ -47,11 +53,12 @@ impl ModelLoader for LlamaModel {
         let config_file_path = repo.get("config.json")?;
         let tokenizer_file_path = repo.get("tokenizer.json")?;
 
-        let model_weights_file_paths = if &model_id == "TinyLlama/TinyLlama-1.1B-Chat-v1.0" {
-            vec![repo.get("model.safetensors")?]
-        } else {
-            hub_load_safetensors(&repo, "model.safetensors.index.json")?
-        };
+        let model_weights_file_paths =
+            if LLAMA_VERSIONS_SINGLE_SAFETENSORS.contains(&model_id.as_str()) {
+                vec![repo.get("model.safetensors")?]
+            } else {
+                hub_load_safetensors(&repo, "model.safetensors.index.json")?
+            };
 
         Ok(ModelFilePaths {
             config_path: config_file_path,

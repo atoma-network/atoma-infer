@@ -17,12 +17,13 @@ edition = "2021"
 anyhow = "1.0.89"
 async-openai = "0.24.1"
 axum = "0.7"
-backends = { path = "backends" }
+atoma-backends = { path = "./backends/" }
 bindgen_cuda = "0.1.5"
-candle-core = "0.6.0"
-candle-nn = "0.6.0"
-candle-transformers = "0.6.0"
-candle-examples = "0.6.0"
+candle-core = "0.7.2"
+candle-nn = "0.7.2"
+candle-transformers = "0.7.2"
+candle-examples = "0.7.2"
+clap = "4.5.18"
 config = "0.14.0"
 csrc = { path = "csrc" }
 cuda-runtime-sys = "0.3.0-alpha.1"

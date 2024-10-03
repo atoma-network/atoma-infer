@@ -1,6 +1,11 @@
 //! Responsible for creating the json schema associated with the AtomaAPI, which is modeled after OpenAI's own API.
 
-use std::collections::HashMap;
+#[cfg(feature = "vllm")]
+use atoma_backends::{GenerateParameters, GenerateRequest, GenerateRequestOutput};
+use std::{
+    collections::HashMap,
+    time::{Instant, SystemTime},
+};
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize};
@@ -17,8 +22,55 @@ use serde_json::Value;
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename(serialize = "model", deserialize = "model"))]
 pub enum Model {
-    #[serde(rename(serialize = "llama3", deserialize = "llama3"))]
-    Llama3,
+    #[serde(rename(serialize = "meta-llama/Meta-Llama-3-8B", deserialize = "meta-llama/Meta-Llama-3-8B"))]
+    Llama38b,
+    #[serde(rename(serialize = "meta-llama/Meta-Llama-3-8B-Instruct", deserialize = "meta-llama/Meta-Llama-3-8B-Instruct"))]
+    Llama38bInstruct,
+    #[serde(rename(serialize = "meta-llama/Meta-Llama-3-70B", deserialize = "meta-llama/Meta-Llama-3-70B"))]
+    Llama370b,
+    #[serde(rename(serialize = "meta-llama/Meta-Llama-3-70B-Instruct", deserialize = "meta-llama/Meta-Llama-3-70B-Instruct"))]
+    Llama370bInstruct,
+    #[serde(rename(serialize = "meta-llama/Llama-3.1-8B", deserialize = "meta-llama/Llama-3.1-8B"))]
+    Llama318b,
+    #[serde(rename(serialize = "meta-llama/Llama-3.1-8B-Instruct", deserialize = "meta-llama/Llama-3.1-8B-Instruct"))]
+    Llama318bInstruct,
+    #[serde(rename(serialize = "meta-llama/Llama-3.1-70B", deserialize = "meta-llama/Llama-3.1-70B"))]
+    Llama3170b,
+    #[serde(rename(serialize = "meta-llama/Llama-3.1-70B-Instruct", deserialize = "meta-llama/Llama-3.1-70B-Instruct"))]
+    Llama3170bInstruct,
+    #[serde(rename(serialize = "meta-llama/Llama-3.1-405B", deserialize = "meta-llama/Llama-3.1-405B"))]
+    Llama31405b,
+    #[serde(rename(serialize = "meta-llama/Llama-3.1-405B-Instruct", deserialize = "meta-llama/Llama-3.1-405B-Instruct"))]
+    Llama31405bInstruct,
+    #[serde(rename(serialize = "meta-llama/Llama-3.2-1B", deserialize = "meta-llama/Llama-3.2-1B"))]
+    Llama321b,
+    #[serde(rename(serialize = "meta-llama/Llama-3.2-1B-Instruct", deserialize = "meta-llama/Llama-3.2-1B-Instruct"))]
+    Llama321bInstruct,
+    #[serde(rename(serialize = "meta-llama/Llama-3.2-3B", deserialize = "meta-llama/Llama-3.2-3B"))]
+    Llama323b,
+    #[serde(rename(serialize = "meta-llama/Llama-3.2-3B-Instruct", deserialize = "meta-llama/Llama-3.2-3B-Instruct"))]
+    Llama323bInstruct,
+}
+
+impl std::fmt::Display for Model {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Model::Llama38b => write!(f, "meta-llama/Meta-Llama-3-8B"),
+            Model::Llama38bInstruct => write!(f, "meta-llama/Meta-Llama-3-8B-Instruct"),
+            Model::Llama370b => write!(f, "meta-llama/Meta-Llama-3-70B"),
+            Model::Llama370bInstruct => write!(f, "meta-llama/Meta-Llama-3-70B-Instruct"),
+            Model::Llama318b => write!(f, "meta-llama/Llama-3.1-8B"),
+            Model::Llama318bInstruct => write!(f, "meta-llama/Llama-3.1-8B-Instruct"),
+            Model::Llama3170b => write!(f, "meta-llama/Llama-3.1-70B"),
+            Model::Llama3170bInstruct => write!(f, "meta-llama/Llama-3.1-70B-Instruct"),
+            Model::Llama31405b => write!(f, "meta-llama/Llama-3.1-405B"),
+            Model::Llama31405bInstruct => write!(f, "meta-llama/Llama-3.1-405B-Instruct"),
+            Model::Llama321b => write!(f, "meta-llama/Llama-3.2-1B"),
+            Model::Llama321bInstruct => write!(f, "meta-llama/Llama-3.2-1B-Instruct"),
+            Model::Llama323b => write!(f, "meta-llama/Llama-3.2-3B"),
+            Model::Llama323bInstruct => write!(f, "meta-llama/Llama-3.2-3B-Instruct"),
+        }
+    }
 }
 
 /// A message that is part of a conversation which is based on the role
@@ -70,6 +122,80 @@ pub enum Message {
     },
 }
 
+impl Message {
+    pub fn to_prompt_string(&self) -> String {
+        match self {
+            Message::System { content, name } => {
+                let role = "System";
+                messages::format_message(role, content, name)
+            }
+            Message::User { content, name } => {
+                let role = "User";
+                messages::format_message(role, content, name)
+            }
+            Message::Assistant {
+                content,
+                name,
+                refusal,
+                tool_calls,
+            } => {
+                let role = "Assistant";
+                let mut prompt = messages::format_message(role, content, name);
+                if let Some(refusal_message) = refusal {
+                    prompt.push_str(&format!("\nRefusal: {}", refusal_message));
+                }
+                if !tool_calls.is_empty() {
+                    prompt.push_str(&format!("\nTool Calls: {:?}", tool_calls));
+                }
+                prompt
+            }
+            Message::Tool {
+                content,
+                tool_call_id,
+            } => {
+                let role = "Tool";
+                let mut prompt = messages::format_message(role, content, &None);
+                prompt.push_str(&format!("\nTool Call ID: {}", tool_call_id));
+                prompt
+            }
+        }
+    }
+}
+
+pub(crate) mod messages {
+    use super::{Message, MessageContent};
+
+    /// Helper function to format a message
+    pub(crate) fn format_message(
+        role: &str,
+        content: &Option<MessageContent>,
+        name: &Option<String>,
+    ) -> String {
+        let name_str = if let Some(name) = name {
+            format!(" ({})", name)
+        } else {
+            String::new()
+        };
+
+        let content_str = if let Some(content) = content {
+            format!("{}", content)
+        } else {
+            String::new()
+        };
+
+        format!("{}{}: {}", role, name_str, content_str)
+    }
+
+    /// Function to convert a list of messages to a prompt string
+    pub(crate) fn messages_to_prompt(messages: &[Message]) -> String {
+        messages
+            .iter()
+            .map(|message| message.to_prompt_string())
+            .collect::<Vec<_>>()
+            .join("\n\n") // Separate each message by two newlines
+    }
+}
+
 #[derive(Debug, PartialEq, Eq, Serialize, JsonSchema)]
 #[serde(untagged)]
 pub enum MessageContent {
@@ -81,6 +207,22 @@ pub enum MessageContent {
     #[serde(rename(serialize = "array", deserialize = "array"))]
     Array(Vec<MessageContentPart>),
 }
+
+impl std::fmt::Display for MessageContent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MessageContent::Text(text) => write!(f, "{}", text),
+            MessageContent::Array(parts) => {
+                let mut content = String::new();
+                for part in parts {
+                    content.push_str(&format!("{}\n", part))
+                }
+                write!(f, "{}", content)
+            }
+        }
+    }
+}
+
 // We manually implement Deserialize here for more control.
 impl<'de> Deserialize<'de> for MessageContent {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
@@ -127,6 +269,19 @@ pub enum MessageContentPart {
     },
 }
 
+impl std::fmt::Display for MessageContentPart {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MessageContentPart::Text { r#type, text } => {
+                write!(f, "{}: {}", r#type, text)
+            }
+            MessageContentPart::Image { r#type, image_url } => {
+                write!(f, "{}: [Image URL: {}]", r#type, image_url)
+            }
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename(serialize = "image_url", deserialize = "image_url"))]
 pub struct MessageContentPartImageUrl {
@@ -134,6 +289,16 @@ pub struct MessageContentPartImageUrl {
     url: String,
     /// Specifies the detail level of the image.
     detail: Option<String>,
+}
+
+/// Implementing Display for MessageContentPartImageUrl
+impl std::fmt::Display for MessageContentPartImageUrl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.detail {
+            Some(detail) => write!(f, "Image URL: {}, Detail: {}", self.url, detail),
+            None => write!(f, "Image URL: {}", self.url),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -217,7 +382,7 @@ pub struct RequestBody {
     top_logprobs: Option<i32>,
     /// An upper bound for the number of tokens that can be generated for a completion,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    max_completion_tokens: Option<i32>,
+    max_completion_tokens: Option<u32>,
     /// How many chat completion choices to generate for each input message.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     n: Option<usize>,
@@ -255,6 +420,66 @@ impl RequestBody {
         &self.model
     }
 
+    pub fn messages(&self) -> &Vec<Message> {
+        &self.messages
+    }
+
+    pub fn frequency_penalty(&self) -> Option<f32> {
+        self.frequency_penalty
+    }
+
+    pub fn logit_bias(&self) -> Option<HashMap<String, f32>> {
+        self.logit_bias.clone()
+    }
+
+    pub fn logprobs(&self) -> Option<bool> {
+        self.logprobs
+    }
+
+    pub fn top_logprobs(&self) -> Option<i32> {
+        self.top_logprobs
+    }
+
+    pub fn max_completion_tokens(&self) -> Option<u32> {
+        self.max_completion_tokens
+    }
+
+    pub fn n(&self) -> Option<usize> {
+        self.n
+    }
+
+    pub fn presence_penalty(&self) -> Option<f32> {
+        self.presence_penalty
+    }
+
+    pub fn seed(&self) -> Option<u64> {
+        self.seed
+    }
+
+    pub fn stop(&self) -> Option<&StopCondition> {
+        self.stop.as_ref()
+    }
+
+    pub fn stream(&self) -> Option<bool> {
+        self.stream
+    }
+
+    pub fn temperature(&self) -> Option<f32> {
+        self.temperature
+    }
+
+    pub fn top_p(&self) -> Option<f32> {
+        self.top_p
+    }
+
+    pub fn tools(&self) -> Option<&Vec<Tool>> {
+        self.tools.as_ref()
+    }
+
+    pub fn user(&self) -> Option<&String> {
+        self.user.as_ref()
+    }
+
     /// The control structure for testing the rust to json api, and schema.
     /// Represents all possible values for serialization.
     #[cfg(test)]
@@ -262,7 +487,7 @@ impl RequestBody {
         use serde_json::json;
 
         Self {
-            model: Model::Llama3,
+            model: Model::Llama38b,
             messages: vec![
                 Message::System {
                     content: Some(MessageContent::Text("test".into())),
@@ -328,20 +553,173 @@ impl RequestBody {
     }
 }
 
+impl RequestBody {
+    pub fn to_generate_request(self, request_id: String) -> GenerateRequest {
+        let inputs = messages::messages_to_prompt(self.messages());
+        let frequency_penalty = self.frequency_penalty();
+        let max_new_tokens = self.max_completion_tokens();
+        let decoder_input_details = self.logprobs().unwrap_or_default();
+        let repetition_penalty = self.presence_penalty();
+        let stop = match self.stop() {
+            Some(StopCondition::Array(stop_tokens)) => stop_tokens.clone(),
+            Some(StopCondition::String(stop_token)) => vec![stop_token.clone()],
+            None => Vec::new(),
+        };
+        let seed = self.seed();
+        let temperature = self.temperature();
+        let top_p = self.top_p();
+        let _user = self.user();
+        let n = self.n.unwrap_or(1);
+        let parameters = GenerateParameters {
+            best_of: None,
+            temperature,
+            repetition_penalty,
+            frequency_penalty,
+            max_new_tokens,
+            repeat_last_n: None,
+            top_k: None,
+            top_p,
+            typical_p: None,
+            do_sample: true,
+            return_full_text: Some(false),
+            stop,
+            truncate: None,
+            decoder_input_details,
+            random_seed: seed,
+            top_n_tokens: None,
+            n,
+        };
+        GenerateRequest {
+            request_id,
+            inputs,
+            parameters,
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChatCompletionResponse {
+    pub id: String,
+    pub object: String,
+    pub created: u64,
+    pub model: String,
+    pub system_fingerprint: String,
+    pub choices: Vec<Choice>,
+    pub usage: Usage,
+}
+
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Choice {
+    pub index: u32,
+    pub message: Message,
+    pub logprobs: Option<Value>,
+    pub finish_reason: FinishReason,
+}
+
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FinishReason {
+    Stopped,
+    LengthCapped,
+    ContentFilter,
+}
+
+impl TryFrom<Option<&str>> for FinishReason {
+    type Error = String;
+
+    fn try_from(value: Option<&str>) -> Result<Self, Self::Error> {
+        match value {
+            Some("stopped") => Ok(FinishReason::Stopped),
+            Some("length_capped") => Ok(FinishReason::LengthCapped),
+            Some("content_filter") => Ok(FinishReason::ContentFilter),
+            None => Ok(FinishReason::Stopped),
+            _ => Err(format!("Invalid finish reason: {}", value.unwrap())),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Usage {
+    pub prompt_tokens: u32,
+    pub completion_tokens: u32,
+    pub total_tokens: u32,
+}
+
+impl TryFrom<(String, GenerateRequestOutput)> for ChatCompletionResponse {
+    type Error = String;
+
+    fn try_from((model, value): (String, GenerateRequestOutput)) -> Result<Self, Self::Error> {
+        let inference_outputs = value.inference_outputs;
+        let choices = inference_outputs
+            .iter()
+            .map(|output| {
+                Ok(Choice {
+                    index: output.index as u32,
+                    message: Message::Assistant {
+                        content: Some(MessageContent::Text(output.output_text.clone())),
+                        name: None,
+                        refusal: None,
+                        tool_calls: vec![],
+                    },
+                    logprobs: Some(
+                        serde_json::to_value(&output.logprobs)
+                            .map_err(|e| format!("Failed to convert logprobs to JSON: {}", e))?,
+                    ),
+                    finish_reason: FinishReason::try_from(output.finish_reason.as_deref())?,
+                })
+            })
+            .collect::<Result<Vec<Choice>, Self::Error>>()?;
+        let prompt_tokens = value.prompt_token_ids.len() as u32;
+        let completion_tokens = inference_outputs
+            .iter()
+            .map(|o| o.token_ids.len())
+            .sum::<usize>() as u32;
+        let total_tokens = prompt_tokens + completion_tokens;
+
+        let now = Instant::now();
+        let finished_time = value
+            .metrics
+            .read()
+            .expect("Failed to read metrics from the inference output response")
+            .finished_time
+            .ok_or("Finished time not found")?;
+        let duration = now.duration_since(finished_time);
+        let system_now = SystemTime::now();
+        let system_duration = system_now
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .expect("Failed to get system duration");
+        let created = system_duration.as_millis() as u64 - duration.as_millis() as u64;
+
+        Ok(ChatCompletionResponse {
+            id: value.request_id,
+            object: "chat.completions".into(),
+            created,
+            model,
+            system_fingerprint: "vllm".into(),
+            choices,
+            usage: Usage {
+                prompt_tokens,
+                completion_tokens,
+                total_tokens,
+            },
+        })
+    }
+}
+
 #[cfg(test)]
 pub mod json_schema_tests {
     // TODO: Move check functions to a test utils module.
     //! Note: These tests make use of the `expect_test` crate, and can be updated by
     //! setting `UPDATE_EXPECT=1`.
-    use std::{collections::HashMap, fs::File, io::BufReader};
+    use std::{fs::File, io::BufReader};
 
     use expect_test::{expect_file, ExpectFile};
     use schemars::schema_for;
     use serde_json::json;
 
     use super::{
-        Message, MessageContent, MessageContentPart, MessageContentPartImageUrl, Model,
-        StopCondition, ToolCall, ToolCallFunction,
+        messages, ChatCompletionResponse, Choice, FinishReason, Message, MessageContent,
+        MessageContentPart, MessageContentPartImageUrl, ToolCall, ToolCallFunction, Usage,
     };
     use crate::{validate_with_schema, RequestBody};
 
@@ -390,7 +768,7 @@ pub mod json_schema_tests {
     fn deserialize_request_body_basic() {
         let json_request_body = r#"
             {
-                "model": "llama3",
+                "model": "meta-llama/Meta-Llama-3-8B-Instruct",
                 "messages": [
                     {
                         "role": "system",
@@ -544,201 +922,283 @@ pub mod json_schema_tests {
     }
 
     #[test]
-    fn test_full_request_body_deserialization() {
-        let json_request_body = json!({
-            "model": "llama3",
-            "messages": [
+    fn deserialize_message_content_array() {
+        let json_message_content_array = r#"
+            [
                 {
-                    "role": "system",
-                    "content": "You are a helpful assistant",
-                    "name": "System"
+                    "type": "text",
+                    "text": "Hello, World!"
                 },
                 {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": "Hello, can you analyze this image?"
-                        },
-                        {
-                            "type": "image",
-                            "image_url": {
-                                "url": "http://example.com/image.png",
-                                "detail": "high"
-                            }
-                        }
-                    ],
-                    "name": "User"
-                },
-                {
-                    "role": "assistant",
-                    "content": "Certainly! I'd be happy to analyze the image for you.",
-                    "name": "Assistant",
-                    "tool_calls": [
-                        {
-                            "id": "call_abc123",
-                            "type": "function",
-                            "function": {
-                                "name": "analyze_image",
-                                "arguments": "{\"url\": \"http://example.com/image.png\"}"
-                            }
-                        }
-                    ]
-                },
-                {
-                    "role": "tool",
-                    "content": "Image analysis result: The image shows a beautiful landscape.",
-                    "tool_call_id": "call_abc123"
-                }
-            ],
-            "frequency_penalty": 0.5,
-            "logit_bias": {
-                "50256": -100
-            },
-            "logprobs": true,
-            "top_logprobs": 5,
-            "max_completion_tokens": 150,
-            "n": 1,
-            "presence_penalty": 0.6,
-            "seed": 12345,
-            "stop": ["END"],
-            "stream": true,
-            "temperature": 0.7,
-            "top_p": 0.9,
-            "user": "user123",
-            "tools": [
-                {
-                    "type": "function",
-                    "function": {
-                        "name": "analyze_image",
-                        "description": "Analyzes the content of an image",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "url": {
-                                    "type": "string",
-                                    "description": "URL of the image to analyze"
-                                }
-                            },
-                            "required": ["url"]
-                        },
-                        "strict": true
+                    "type": "image",
+                    "image_url": {
+                        "url": "http://example.com/image.png",
+                        "detail": "high"
                     }
                 }
             ]
+        "#;
+
+        let message_content: Result<MessageContent, serde_json::Error> =
+            serde_json::from_str(json_message_content_array);
+        assert!(message_content.is_ok());
+    }
+
+    #[test]
+    fn test_messages_to_prompt() {
+        // Create some sample messages
+        let messages = vec![
+            Message::System {
+                content: Some(MessageContent::Text(
+                    "You are a helpful assistant.".to_string(),
+                )),
+                name: None,
+            },
+            Message::User {
+                content: Some(MessageContent::Text(
+                    "What is the capital of France?".to_string(),
+                )),
+                name: Some("User1".to_string()),
+            },
+            Message::Assistant {
+                content: Some(MessageContent::Text(
+                    "The capital of France is Paris.".to_string(),
+                )),
+                name: None,
+                refusal: None,
+                tool_calls: vec![],
+            },
+        ];
+
+        let expected_prompt = "\
+            System: You are a helpful assistant.\n\n\
+            User (User1): What is the capital of France?\n\n\
+            Assistant: The capital of France is Paris.";
+
+        let prompt = messages::messages_to_prompt(&messages);
+        assert_eq!(prompt, expected_prompt);
+    }
+
+    #[test]
+    fn test_empty_messages() {
+        let messages: Vec<Message> = vec![];
+        let expected_prompt = "";
+
+        let prompt = messages::messages_to_prompt(&messages);
+        assert_eq!(prompt, expected_prompt);
+    }
+
+    #[test]
+    fn test_message_with_no_content() {
+        let messages = vec![
+            Message::System {
+                content: None,
+                name: None,
+            },
+            Message::User {
+                content: Some(MessageContent::Text("What is 2 + 2?".to_string())),
+                name: None,
+            },
+            Message::Assistant {
+                content: Some(MessageContent::Text("2 + 2 is 4.".to_string())),
+                name: None,
+                refusal: None,
+                tool_calls: vec![],
+            },
+        ];
+
+        let expected_prompt = "\
+            System: \n\n\
+            User: What is 2 + 2?\n\n\
+            Assistant: 2 + 2 is 4.";
+
+        let prompt = messages::messages_to_prompt(&messages);
+        assert_eq!(prompt, expected_prompt);
+    }
+
+    #[test]
+    fn test_message_to_prompt_without_sytem() {
+        let messages = vec![
+            Message::User {
+                content: Some(MessageContent::Text("What is 2 + 2?".to_string())),
+                name: None,
+            },
+            Message::Assistant {
+                content: Some(MessageContent::Text("2 + 2 is 4.".to_string())),
+                name: None,
+                refusal: None,
+                tool_calls: vec![],
+            },
+        ];
+
+        let expected_prompt = "\
+            User: What is 2 + 2?\n\n\
+            Assistant: 2 + 2 is 4.";
+
+        let prompt = messages::messages_to_prompt(&messages);
+        assert_eq!(prompt, expected_prompt);
+    }
+
+    #[test]
+    fn test_message_to_prompt_without_user() {
+        let messages = vec![
+            Message::System {
+                content: Some(MessageContent::Text(
+                    "You are a helpful assistant.".to_string(),
+                )),
+                name: Some("Me".to_string()),
+            },
+            Message::Assistant {
+                content: Some(MessageContent::Text(
+                    "The capital of France is Paris.".to_string(),
+                )),
+                name: None,
+                refusal: None,
+                tool_calls: vec![],
+            },
+        ];
+
+        let expected_prompt = "\
+            System (Me): You are a helpful assistant.\n\n\
+            Assistant: The capital of France is Paris.";
+
+        let prompt = messages::messages_to_prompt(&messages);
+        assert_eq!(prompt, expected_prompt);
+    }
+
+    #[test]
+    fn test_deserialize_chat_completion_response() {
+        let json = json!({
+            "id": "chatcmpl-123",
+            "object": "chat.completion",
+            "created": 1677652288,
+            "model": "llama",
+            "system_fingerprint": "fp_44709d6fcb",
+            "choices": [{
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": "Hello, how can I help you today?"
+                },
+                "finish_reason": "stopped"
+            }],
+            "usage": {
+                "prompt_tokens": 9,
+                "completion_tokens": 12,
+                "total_tokens": 21
+            }
         });
 
-        let request_body: Result<RequestBody, serde_json::Error> =
-            serde_json::from_value(json_request_body);
+        let response: ChatCompletionResponse = serde_json::from_value(json).unwrap();
 
-        assert!(request_body.is_ok());
-        let request_body = request_body.unwrap();
-
-        // Check model
-        assert_eq!(request_body.model, Model::Llama3);
-
-        // Check messages
-        assert_eq!(request_body.messages.len(), 4);
-
-        // Check system message
-        if let Message::System { content, name } = &request_body.messages[0] {
-            assert_eq!(
-                content,
-                &Some(MessageContent::Text(
-                    "You are a helpful assistant".to_string()
-                ))
-            );
-            assert_eq!(name, &Some("System".to_string()));
-        } else {
-            panic!("Expected System message");
-        }
-
-        // Check user message
-        if let Message::User { content, name } = &request_body.messages[1] {
-            assert_eq!(name, &Some("User".to_string()));
-            if let Some(MessageContent::Array(parts)) = content {
-                assert_eq!(parts.len(), 2);
-                assert!(matches!(&parts[0], MessageContentPart::Text { .. }));
-                assert!(matches!(&parts[1], MessageContentPart::Image { .. }));
-            } else {
-                panic!("Expected Array content for User message");
+        assert_eq!(response.id, "chatcmpl-123");
+        assert_eq!(response.object, "chat.completion");
+        assert_eq!(response.created, 1677652288);
+        assert_eq!(response.model, "llama");
+        assert_eq!(response.system_fingerprint, "fp_44709d6fcb");
+        assert_eq!(response.choices.len(), 1);
+        assert_eq!(response.choices[0].index, 0);
+        assert_eq!(
+            response.choices[0].message,
+            Message::Assistant {
+                content: Some(MessageContent::Text(
+                    "Hello, how can I help you today?".to_string()
+                )),
+                name: None,
+                refusal: None,
+                tool_calls: vec![],
             }
-        } else {
-            panic!("Expected User message");
-        }
-
-        // Check assistant message
-        if let Message::Assistant {
-            content,
-            name,
-            tool_calls,
-            ..
-        } = &request_body.messages[2]
-        {
-            assert_eq!(
-                content,
-                &Some(MessageContent::Text(
-                    "Certainly! I'd be happy to analyze the image for you.".to_string()
-                ))
-            );
-            assert_eq!(name, &Some("Assistant".to_string()));
-            assert_eq!(tool_calls.len(), 1);
-            assert_eq!(tool_calls[0].id, "call_abc123");
-            assert_eq!(tool_calls[0].r#type, "function");
-            assert_eq!(tool_calls[0].function.name, "analyze_image");
-        } else {
-            panic!("Expected Assistant message");
-        }
-
-        // Check tool message
-        if let Message::Tool {
-            content,
-            tool_call_id,
-        } = &request_body.messages[3]
-        {
-            assert_eq!(
-                content,
-                &Some(MessageContent::Text(
-                    "Image analysis result: The image shows a beautiful landscape.".to_string()
-                ))
-            );
-            assert_eq!(tool_call_id, "call_abc123");
-        } else {
-            panic!("Expected Tool message");
-        }
-
-        // Check all other fields
-        assert_eq!(request_body.frequency_penalty, Some(0.5));
-        assert_eq!(
-            request_body.logit_bias,
-            Some(HashMap::from([(String::from("50256"), -100.0)]))
         );
-        assert_eq!(request_body.logprobs, Some(true));
-        assert_eq!(request_body.top_logprobs, Some(5));
-        assert_eq!(request_body.max_completion_tokens, Some(150));
-        assert_eq!(request_body.n, Some(1));
-        assert_eq!(request_body.presence_penalty, Some(0.6));
-        assert_eq!(request_body.seed, Some(12345));
-        assert_eq!(
-            request_body.stop,
-            Some(StopCondition::Array(vec!["END".to_string()]))
-        );
-        assert_eq!(request_body.stream, Some(true));
-        assert_eq!(request_body.temperature, Some(0.7));
-        assert_eq!(request_body.top_p, Some(0.9));
-        assert_eq!(request_body.user, Some("user123".to_string()));
+        assert_eq!(response.choices[0].finish_reason, FinishReason::Stopped);
+        assert_eq!(response.usage.prompt_tokens, 9);
+        assert_eq!(response.usage.completion_tokens, 12);
+        assert_eq!(response.usage.total_tokens, 21);
+    }
 
-        // Check tools
-        assert!(request_body.tools.is_some());
-        let tools = request_body.tools.unwrap();
-        assert_eq!(tools.len(), 1);
-        assert_eq!(tools[0].r#type, "function");
-        assert_eq!(tools[0].function.name, "analyze_image");
+    #[test]
+    fn test_deserialize_choice() {
+        let json = json!({
+            "index": 0,
+            "message": {
+                "role": "assistant",
+                "content": "Hello, how can I help you today?"
+            },
+            "finish_reason": "stopped"
+        });
+
+        let choice: Choice = serde_json::from_value(json).unwrap();
+
+        assert_eq!(choice.index, 0);
+        assert!(matches!(choice.message, Message::Assistant { .. }));
+        assert!(matches!(choice.finish_reason, FinishReason::Stopped));
+    }
+
+    #[test]
+    fn test_deserialize_finish_reason() {
         assert_eq!(
-            tools[0].function.description,
-            Some("Analyzes the content of an image".to_string())
+            serde_json::from_str::<FinishReason>("\"stopped\"").unwrap(),
+            FinishReason::Stopped
         );
-        assert!(tools[0].function.parameters.is_some());
-        assert_eq!(tools[0].function.strict, Some(true));
+        assert_eq!(
+            serde_json::from_str::<FinishReason>("\"length_capped\"").unwrap(),
+            FinishReason::LengthCapped
+        );
+        assert_eq!(
+            serde_json::from_str::<FinishReason>("\"content_filter\"").unwrap(),
+            FinishReason::ContentFilter
+        );
+    }
+
+    #[test]
+    fn test_deserialize_usage() {
+        let json = json!({
+            "prompt_tokens": 9,
+            "completion_tokens": 12,
+            "total_tokens": 21
+        });
+
+        let usage: Usage = serde_json::from_value(json).unwrap();
+
+        assert_eq!(usage.prompt_tokens, 9);
+        assert_eq!(usage.completion_tokens, 12);
+        assert_eq!(usage.total_tokens, 21);
+    }
+
+    #[test]
+    fn test_deserialize_choice_with_logprobs() {
+        let json = json!({
+            "index": 0,
+            "message": {
+                "role": "assistant",
+                "content": "Hello, how can I help you today?"
+            },
+            "logprobs": {
+                "token_logprobs": [-0.5, -0.2, -0.3],
+                "top_logprobs": [
+                    {"Hello": -0.5, "Hi": -0.7},
+                    {"how": -0.2, "what": -0.4},
+                    {"can": -0.3, "may": -0.5}
+                ]
+            },
+            "finish_reason": "stopped"
+        });
+
+        let choice: Choice = serde_json::from_value(json).unwrap();
+
+        assert_eq!(choice.index, 0);
+        assert!(matches!(choice.message, Message::Assistant { .. }));
+        assert!(choice.logprobs.is_some());
+        assert_eq!(
+            choice.logprobs.unwrap(),
+            json!({
+                "token_logprobs": [-0.5, -0.2, -0.3],
+                "top_logprobs": [
+                    {"Hello": -0.5, "Hi": -0.7},
+                    {"how": -0.2, "what": -0.4},
+                    {"can": -0.3, "may": -0.5}
+                ]
+            })
+        );
+        assert!(matches!(choice.finish_reason, FinishReason::Stopped));
     }
 }

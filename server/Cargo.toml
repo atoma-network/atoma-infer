@@ -6,14 +6,21 @@ edition = "2021"
 [dependencies]
 anyhow.workspace = true
 axum.workspace = true
+atoma-backends.workspace = true
+clap = { workspace = true, features = ["derive"] }
 jsonschema = "0.20"
 schemars = "0.8"
 serde.workspace = true
 serde_json.workspace = true
-tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal"] }
+tracing.workspace = true
+tracing-subscriber.workspace = true
 dotenvy = "0"
 lazy_static = "1"
 
 [dev-dependencies]
 expect-test.workspace = true
 async-openai.workspace = true
+
+[features]
+vllm = ["atoma-backends/vllm"]

@@ -21,3 +21,10 @@ max_model_len = 1024
 delay_factor = 0.8
 enable_chunked_prefill = false
 block_size = 16
+
+[validation]
+best_of = 1
+max_stop_sequences = 1
+max_top_n_tokens = 1
+max_input_length = 4096
+max_total_tokens = 8192

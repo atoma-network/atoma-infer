@@ -7,10 +7,11 @@ use std::{
 mod llama;
 
 use candle_core::{DType, Device, Tensor};
+use futures::{stream::FuturesUnordered, StreamExt};
 use hf_hub::{api::sync::ApiBuilder, Repo, RepoType};
 use models::FlashAttentionMetadata;
 use rand::Rng;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 use tracing::info;
 
 use crate::{
@@ -21,14 +22,9 @@ use crate::{
     },
     sequence::ExecuteModelRequest,
     types::{GenerateParameters, GenerateRequest},
-    validation::Validation,
 };
 
 const MAX_ELAPSED_INTERNAL: u64 = 50;
-const MAX_STOP_SEQUENCES: usize = 1;
-const MAX_TOP_N_TOKENS: u32 = 0;
-const MAX_INPUT_LENGTH: usize = 16;
-const MAX_TOTAL_TOKENS: u32 = 32;
 const EOS_TOKEN_ID: u32 = 2048;
 const VOCAB_SIZE: usize = 128;
 
@@ -144,33 +140,18 @@ async fn test_llm_engine() {
     const MAX_NUM_SEQUENCES: usize = 32;
     const NUM_RUNS: usize = NUM_REQUESTS / MAX_NUM_SEQUENCES;
 
-    let (atoma_client_sender, mut atoma_client_receiver) = mpsc::unbounded_channel();
-    let (atoma_event_subscriber_sender, atoma_event_subscriber_receiver) =
-        mpsc::unbounded_channel();
-
-    let (tokenizer_sender, tokenizer_receiver) = mpsc::unbounded_channel();
-    let validation = Validation::new(
-        1,
-        MAX_STOP_SEQUENCES,
-        MAX_TOP_N_TOKENS,
-        MAX_INPUT_LENGTH,
-        MAX_TOTAL_TOKENS,
-        tokenizer_sender,
-    );
-    let (_, shutdown_signal) = mpsc::channel(1);
+    let (shutdown_signal_sender, shutdown_signal_receiver) = mpsc::channel(1);
 
     let config_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("src")
         .join("tests")
         .join("test_config_enable_chunked_prefill.toml");
 
+    let (service_request_sender, service_request_receiver) = mpsc::unbounded_channel();
     let service = LlmService::start::<MockModel, PathBuf>(
-        atoma_event_subscriber_receiver,
-        atoma_client_sender,
+        service_request_receiver,
         config_path,
-        tokenizer_receiver,
-        validation,
-        shutdown_signal,
+        shutdown_signal_receiver,
     )
     .await
     .expect("Failed to start LLM service");
@@ -205,10 +186,13 @@ async fn test_llm_engine() {
         },
     });
 
+    let mut futures = FuturesUnordered::new();
     for request in requests {
-        atoma_event_subscriber_sender
-            .send(request)
+        let (sender, receiver) = oneshot::channel();
+        service_request_sender
+            .send((request, sender))
             .expect("Failed to send request");
+        futures.push(receiver);
     }
 
     let mut number_of_responses = 0;
@@ -216,10 +200,10 @@ async fn test_llm_engine() {
     let start = Instant::now();
     let mut elapsed_times = Vec::with_capacity(100);
 
-    for _ in 0..(NUM_RUNS) {
-        let responses = atoma_client_receiver.recv().await.unwrap();
+    while let Some(responses) = futures.next().await {
+        let responses = responses.unwrap();
         elapsed_times.push(start.elapsed());
-        for response in responses.iter() {
+        for response in responses.inference_outputs.iter() {
             number_of_responses += 1;
             info!("Got new response: {response:?}");
         }
@@ -238,6 +222,8 @@ async fn test_llm_engine() {
         let right_run_time = elapsed_times[i + 1];
         assert!(right_run_time - left_run_time <= max_elapsed_interval);
     }
+
+    shutdown_signal_sender.send(()).await.unwrap();
 }
 
 #[tokio::test]
@@ -248,20 +234,8 @@ async fn test_llm_engine_with_enable_chunking() {
     const MAX_NUM_SEQUENCES: usize = 32;
     const NUM_RUNS: usize = NUM_REQUESTS / MAX_NUM_SEQUENCES;
 
-    let (atoma_client_sender, mut atoma_client_receiver) = mpsc::unbounded_channel();
-    let (atoma_event_subscriber_sender, atoma_event_subscriber_receiver) =
-        mpsc::unbounded_channel();
-
-    let (tokenizer_sender, tokenizer_receiver) = mpsc::unbounded_channel();
-    let validation = Validation::new(
-        1,
-        MAX_STOP_SEQUENCES,
-        MAX_TOP_N_TOKENS,
-        MAX_INPUT_LENGTH,
-        MAX_TOTAL_TOKENS,
-        tokenizer_sender,
-    );
-    let (_, shutdown_signal) = mpsc::channel(1);
+    let (service_request_sender, service_request_receiver) = mpsc::unbounded_channel();
+    let (shutdown_signal_sender, shutdown_signal_receiver) = mpsc::channel(1);
 
     let config_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("src")
@@ -269,12 +243,9 @@ async fn test_llm_engine_with_enable_chunking() {
         .join("test_config_enable_chunked_prefill.toml");
 
     let service = LlmService::start::<MockModel, PathBuf>(
-        atoma_event_subscriber_receiver,
-        atoma_client_sender,
+        service_request_receiver,
         config_path,
-        tokenizer_receiver,
-        validation,
-        shutdown_signal,
+        shutdown_signal_receiver,
     )
     .await
     .expect("Failed to start LLM service");
@@ -309,10 +280,13 @@ async fn test_llm_engine_with_enable_chunking() {
         },
     });
 
+    let mut futures = FuturesUnordered::new();
     for request in requests {
-        atoma_event_subscriber_sender
-            .send(request)
+        let (sender, receiver) = oneshot::channel();
+        service_request_sender
+            .send((request, sender))
             .expect("Failed to send request");
+        futures.push(receiver);
     }
 
     let mut number_of_responses = 0;
@@ -320,17 +294,15 @@ async fn test_llm_engine_with_enable_chunking() {
     let start = Instant::now();
     let mut elapsed_times = Vec::with_capacity(100);
 
-    for _ in 0..(2 * NUM_RUNS) {
-        let responses: Vec<crate::llm_engine::GenerateRequestOutput> =
-            atoma_client_receiver.recv().await.unwrap();
+    while let Some(responses) = futures.next().await {
+        let responses = responses.unwrap();
         elapsed_times.push(start.elapsed());
-        for response in responses.iter() {
+        for response in responses.inference_outputs.iter() {
             number_of_responses += 1;
             info!("Got new response: {response:?}");
         }
         info!("Number of responses {number_of_responses}")
     }
-
     info!("Elapsed times: {elapsed_times:?}");
 
     assert_eq!(number_of_responses, NUM_REQUESTS);
@@ -344,6 +316,8 @@ async fn test_llm_engine_with_enable_chunking() {
         // Give enough variability time for different machines
         assert!(right_run_time - left_run_time <= max_elapsed_interval);
     }
+
+    shutdown_signal_sender.send(()).await.unwrap();
 }
 
 pub fn init_tracing() {

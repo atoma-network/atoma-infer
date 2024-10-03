@@ -8,8 +8,8 @@ use futures::StreamExt;
 use thiserror::Error;
 use tokenizers::Tokenizer;
 use tokio::sync::{
-    mpsc::{error::SendError, UnboundedReceiver, UnboundedSender},
-    oneshot::error::RecvError,
+    mpsc::{error::SendError, UnboundedReceiver},
+    oneshot::{self, error::RecvError},
 };
 use tracing::{debug, error, info, info_span, instrument, trace, Span};
 
@@ -33,13 +33,13 @@ const SCHEDULE_WAIT_PERIOD: u64 = 100;
 /// and communicating with the `ModelExecutor` service to send new requests
 /// for continuously batched AI inference.
 pub struct LlmEngine {
-    /// Channel for sending newly generated AI outputs to Atoma's client.
-    atoma_client_sender: UnboundedSender<Vec<GenerateRequestOutput>>,
     /// Dispatcher for communicating with the model executor's running thread,
     /// responsible for running prefill and decoding inference to produce AI-generated outputs.
     model_thread_dispatcher: ModelThreadDispatcher,
     /// Channel for receiving new requests from the running main `LlmService` instance.
-    request_receiver: UnboundedReceiver<SequenceGroup>,
+    request_receiver: UnboundedReceiver<(SequenceGroup, oneshot::Sender<GenerateRequestOutput>)>,
+    /// Hashmap for sending finished `SequenceGroup`'s outputs back to the OpenAI API service.
+    response_senders: HashMap<String, oneshot::Sender<GenerateRequestOutput>>,
     /// Metadata of currently scheduled `SequenceGroup`s.
     sequence_groups_metadata: Vec<Arc<SequenceGroupMetadata>>,
     /// Current outputs from the scheduler.
@@ -55,20 +55,22 @@ pub struct LlmEngine {
 impl LlmEngine {
     /// Constructor
     pub fn new(
-        atoma_client_sender: UnboundedSender<Vec<GenerateRequestOutput>>,
         model_thread_dispatcher: ModelThreadDispatcher,
-        request_receiver: UnboundedReceiver<SequenceGroup>,
+        request_receiver: UnboundedReceiver<(
+            SequenceGroup,
+            oneshot::Sender<GenerateRequestOutput>,
+        )>,
         scheduler: Scheduler<FcfsPolicy>,
         tokenizer: Tokenizer,
     ) -> Self {
         Self {
-            atoma_client_sender,
             model_thread_dispatcher,
             sequence_groups_metadata: vec![],
             scheduler_outputs: SchedulerOutputs::create_empty(),
             scheduler,
             tokenizer,
             request_receiver,
+            response_senders: HashMap::new(),
             span: info_span!("llm-engine"),
         }
     }
@@ -91,12 +93,15 @@ impl LlmEngine {
 
         loop {
             tokio::select! {
-                Some(sequence_group) = self.request_receiver.recv() => {
-                    trace!("Received new sequence group, with id = {}", sequence_group.request_id);
+                Some((sequence_group, response_sender)) = self.request_receiver.recv() => {
+                    info!("Received new sequence group, with id = {}", sequence_group.request_id);
+                    let sequence_group_request_id = sequence_group.request_id.clone();
                     // 1. Adds the received `SequenceGroup` to the `Scheduler` instance.
                     self.scheduler.add_sequence_group(sequence_group);
+                    // 2. Add the response sender to the `response_senders` map.
+                    self.response_senders.insert(sequence_group_request_id, response_sender);
 
-                    // 2. If the current `LlmInstance` doesn't have any on-going
+                    // 3. If the current `LlmInstance` doesn't have any on-going
                     //    scheduled sequence groups, we wait some time and then
                     //    schedule all the received requests so far.
                     //    This includes the request added in 1.
@@ -152,13 +157,23 @@ impl LlmEngine {
                 self.step()?;
 
                 // 3. After scheduling new requests to the `ModelExecutor`
-                //    we can send the finished outputs to the atoma client
-                //    service.
+                //    we can send the finished outputs back to the OpenAI API service.
                 // NOTE: This is after scheduling new sequences above,
                 //    we do so to optimize GPU utilization. This is
                 //    supposed to be safe
                 if !request_outputs.is_empty() {
-                    self.atoma_client_sender.send(request_outputs)?;
+                    // 4. Extract the response sender from the `response_senders` hashmap
+                    for request_output in request_outputs {
+                        let response_sender = self
+                            .response_senders
+                            .remove(&request_output.request_id)
+                            .ok_or(EngineError::SendResponseError(
+                                format!("Failed to get response sender for request with id = {}", request_output.request_id),
+                            ))?;
+                        response_sender
+                            .send(request_output)
+                            .map_err(|out| EngineError::SendResponseError(out.request_id))?;
+                    }
                 }
             }
             Err(e) => {
@@ -288,8 +303,8 @@ impl LlmEngine {
             last_token_time_histogram.record(metrics_guard.last_token_time.elapsed().as_secs_f32());
         }
 
-        // 5. Free all finished sequence groups
-        self.scheduler.free_finished_sequence();
+        // 5. Removes all finished sequence groups from the `Scheduler`
+        self.scheduler.remove_finished_sequences();
 
         // 6. Keep track of all the finished `SequenceGroup`s
         let mut request_outputs = Vec::new();
@@ -380,10 +395,12 @@ impl LlmEngine {
             };
 
             sequence_guard_lock.output_text.push_str(&generated_token);
+            // TODO: send generated token to the client, if streaming is enabled
 
             // 7. Check if the last generated token is a stop token.
             //    If so, update the `Sequence`'s `SequenceState` and
             //    the `stop_reason`, as well.
+
             if stopping_criteria_params
                 .stop_sequences
                 .contains(&generated_token)
@@ -549,4 +566,6 @@ pub enum EngineError {
     SendError(#[from] SendError<Vec<GenerateRequestOutput>>),
     #[error("Recv error: `{0}`")]
     RecvError(#[from] RecvError),
+    #[error("Failed to send response to the OpenAI API service: {0}")]
+    SendResponseError(String),
 }
