@@ -556,6 +556,14 @@ impl CacheEngine {
         world_size: usize,
     ) -> Result<Vec<Tensor>, CacheEngineError> {
         let _enter = self.span.enter();
+        #[cfg(not(feature = "nccl"))]
+        let kv_cache_shape = FlashAttention::get_kv_cache_shape(
+            num_blocks,
+            self.get_block_size(),
+            self.attention.num_kv_heads, // tensor parallelism across kv heads dimension
+            self.attention.head_dim,
+        );
+        #[cfg(feature = "nccl")]
         let kv_cache_shape = FlashAttention::get_kv_cache_shape(
             num_blocks,
             self.get_block_size(),

@@ -24,6 +24,10 @@ fn rms_norm(size: usize, eps: f64, vb: VarBuilder) -> Result<RmsNorm> {
     Ok(RmsNorm::new(weight, eps))
 }
 
+fn silu(xs: &Tensor) -> Result<Tensor> {
+    xs / (xs.neg()?.exp()? + 1.0)?
+}
+
 struct CausalSelfAttention {
     q_proj: TensorParallelColumnLinear,
     k_proj: TensorParallelColumnLinear,
@@ -187,7 +191,7 @@ struct Mlp {
 impl Mlp {
     fn forward(&self, x: &Tensor) -> Result<Tensor> {
         let _enter = self.span.enter();
-        let x = (candle_nn::ops::silu(&self.c_fc1.forward(x)?)? * self.c_fc2.forward(x)?)?;
+        let x = (silu(&self.c_fc1.forward(x)?)? * self.c_fc2.forward(x)?)?;
         self.c_proj.forward(&x)
     }
 
