@@ -6,9 +6,9 @@ use std::{
     path::{Path, PathBuf},
     time::{Duration, Instant},
 };
-#[cfg(all(test, not(feature = "nccl")))]
+#[cfg(not(feature = "nccl"))]
 mod llama;
-#[cfg(all(test, feature = "nccl"))]
+#[cfg(feature = "nccl")]
 mod llama_nccl;
 
 use candle_core::{DType, Device, Tensor};

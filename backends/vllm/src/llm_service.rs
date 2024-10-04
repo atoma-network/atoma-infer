@@ -111,6 +111,7 @@ impl LlmService {
             num_kv_heads,
             hidden_dim,
             num_hidden_layers,
+            &devices_ids,
         )?;
         let scheduler_config = SchedulerConfig::from_file_path(config_path.as_ref())?;
         let validation_config = ValidationConfig::from_file_path(config_path.as_ref());
