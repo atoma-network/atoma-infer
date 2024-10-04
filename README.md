@@ -74,21 +74,21 @@ max_total_tokens = 8192 # Maximum total tokens to use for the vLLM scheduler
 
 - In development:
 
-`$ cargo run --release --features vllm -- --config_path CONFIGURATION_FILE_PATH` (development) or `cargo run --release --features vllm -- --config_path CONFIGURATION_FILE_PATH` (production)
+`$ RUST_LOG=info cargo run --features vllm -- --config_path CONFIGURATION_FILE_PATH` 
 
 - In production:
 
-`$ cargo run --release --features vllm -- --config_path CONFIGURATION_FILE_PATH`.
+`$ RUST_LOG=info cargo run --release --features vllm -- --config_path CONFIGURATION_FILE_PATH`.
 
 11. If multi-GPU inference support is enabled, you can start the server with NCCL support: 
 
 - In development:
 
-`$ cargo run --release --features nccl -- --config_path CONFIGURATION_FILE_PATH`.
+`$ RUST_LOG=info cargo run --features nccl -- --config_path CONFIGURATION_FILE_PATH`.
 
 - In production:
 
-`$ cargo run --release --features nccl -- --config_path CONFIGURATION_FILE_PATH`.
+`$ RUST_LOG=info cargo run --release --features nccl -- --config_path CONFIGURATION_FILE_PATH`.
 
 ## Build considerations
 
