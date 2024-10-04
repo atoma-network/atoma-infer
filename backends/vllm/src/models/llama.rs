@@ -121,7 +121,6 @@ impl ModelExecutor for LlamaModel {
     }
 }
 
-
 impl ModelConfig for Config {
     fn alibi_slopes(&self) -> Option<&Tensor> {
         None

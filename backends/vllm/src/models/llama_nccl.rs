@@ -2,13 +2,18 @@ use candle_core::{DType, Device, Tensor};
 use candle_nn::var_builder::ShardedSafeTensors as VarBuilder;
 use cudarc::nccl::Comm;
 use hf_hub::{api::sync::ApiBuilder, Repo, RepoType};
-use models::{llama::{Config, LlamaEosToks}, llama_nccl::Llama, FlashAttentionMetadata};
+use models::{
+    llama::{Config, LlamaEosToks},
+    llama_nccl::Llama,
+    FlashAttentionMetadata,
+};
 use std::{path::Path, rc::Rc, time::Instant};
 use tracing::info;
 
 use crate::{
     model_executor::{
-        ModelExecutor, ModelExecutorError, ModelFilePaths, ModelLoader, ModelLoaderError,
+        ModelConfig, ModelExecutor, ModelExecutorError, ModelFilePaths, ModelLoader,
+        ModelLoaderError,
     },
     models::hub_load_safetensors,
 };
