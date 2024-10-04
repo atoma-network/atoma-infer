@@ -6,7 +6,7 @@ use std::{
     sync::Arc,
 };
 
-use candle_core::{DType, Device, IndexOp, Tensor};
+use candle_core::{DType, Device, IndexOp, Tensor, CudaDevice};
 #[cfg(feature = "nccl")]
 use cudarc::{
     driver::{safe::CudaDevice, DriverError},
@@ -406,6 +406,7 @@ impl ModelThreadDispatcher {
             let num_shards = devices_ids.len();
             let mut join_handles = Vec::with_capacity(num_shards);
             let mut to_workers_senders = Vec::with_capacity(num_shards);
+            #[cfg(feature = "nccl")]
             let id = Id::new().unwrap();
             for (rank, device_id) in devices_ids.into_iter().enumerate() {
                 let config_clone = config.clone();
