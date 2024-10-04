@@ -1,4 +1,4 @@
-use std::{path::Path, str::FromStr, time::Instant};
+use std::{path::Path, str::FromStr, sync::Arc, time::Instant};
 
 use crate::{
     config::{
@@ -6,14 +6,17 @@ use crate::{
         ValidationConfig,
     },
     llm_engine::{EngineError, GenerateRequestOutput, LlmEngine},
-    model_executor::{ModelExecutor, ModelLoaderError, ModelThreadDispatcher, ModelThreadError},
+    model_executor::{
+        Config, ConfigError, ModelExecutor, ModelLoaderError, ModelThreadDispatcher,
+        ModelThreadError,
+    },
     scheduler::{Scheduler, SchedulerError},
     sequence::{Sequence, SequenceError, SequenceGroup},
     tokenizer::{TokenizerError, TokenizerWorker},
     types::GenerateRequest,
     validation::{ValidGenerateRequest, Validation, ValidationError},
 };
-use candle_core::{DType, DTypeParseError, Device, Error as CandleError};
+use candle_core::{DType, DTypeParseError, Error as CandleError};
 use candle_transformers::generation::{LogitsProcessor, Sampling};
 use metrics::{counter, gauge};
 use thiserror::Error;
@@ -91,20 +94,24 @@ impl LlmService {
             model_config.model_name.clone(),
             model_config.revision.clone(),
         )?;
+        let config = M::C::from_file_path(&file_paths.config_path)?;
         let tokenizer = Tokenizer::from_file(&file_paths.tokenizer_path)?;
         // NOTE: we load the model on GPU memory, as to properly compute the number of blocks
         // during the system profiling stage. See `compute_num_gpu_blocks` comments
         // in the file `config.rs` for more details.
         // TODO: support multi-GPUs
-        let device = Device::new_cuda(model_config.device_ids[0])?;
+        let devices_ids = model_config.device_ids.clone();
         let dtype = DType::from_str(&model_config.dtype)?;
-        let model = M::load(device.clone(), dtype, &file_paths)?;
+        let num_kv_heads = config.num_kv_heads();
+        let hidden_dim = config.hidden_dim();
+        let num_hidden_layers = config.num_hidden_layers();
 
         let cache_config = CacheConfig::from_file_path(
             config_path.as_ref(),
-            model.num_kv_heads(),
-            model.hidden_dim(),
-            model.num_hidden_layers(),
+            num_kv_heads,
+            hidden_dim,
+            num_hidden_layers,
+            &devices_ids,
         )?;
         let scheduler_config = SchedulerConfig::from_file_path(config_path.as_ref())?;
         let validation_config = ValidationConfig::from_file_path(config_path.as_ref());
@@ -136,9 +143,10 @@ impl LlmService {
 
         let model_thread_dispatcher = ModelThreadDispatcher::start::<M>(
             cache_config,
-            device,
+            config,
+            devices_ids,
             dtype,
-            model,
+            Arc::new(file_paths),
             scheduler_config,
         )?;
 
@@ -338,6 +346,8 @@ pub enum LlmServiceError {
     CacheConfigError(#[from] CacheConfigError),
     #[error("Candle error: `{0}`")]
     CandleError(#[from] CandleError),
+    #[error("Config error: `{0}`")]
+    ConfigError(#[from] ConfigError),
     #[error("DType parse error: `{0}`")]
     DTypeParseError(#[from] DTypeParseError),
     #[error("Model loader error: `{0}`")]

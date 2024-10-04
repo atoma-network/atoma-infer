@@ -1,14 +1,15 @@
 use candle_core::{DType, Device, Module, Result, Tensor};
 use candle_nn::{embedding, Embedding, VarBuilder};
 use candle_transformers::models::with_tracing::{linear_no_bias as linear, Linear, RmsNorm};
+use serde::Deserialize;
 use std::f32::consts::PI;
 
 use crate::flash_attention::{FlashAttention, FlashAttentionMetadata};
 
-/// Maximum input sequence token length
+/// Maximum sequence token length
 const DEFAULT_MAX_SEQ_LEN: usize = 4096;
 
-#[derive(Debug, Clone, serde::Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Default)]
 pub enum Llama3RopeType {
     #[serde(rename = "llama3")]
     Llama3,
@@ -17,7 +18,7 @@ pub enum Llama3RopeType {
     Default,
 }
 
-#[derive(Debug, Clone, serde::Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Default)]
 pub struct Llama3RopeConfig {
     pub factor: f32,
     pub low_freq_factor: f32,
@@ -25,14 +26,14 @@ pub struct Llama3RopeConfig {
     pub original_max_position_embeddings: usize,
     pub rope_type: Llama3RopeType,
 }
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
 pub enum LlamaEosToks {
     Single(u32),
     Multiple(Vec<u32>),
 }
 
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct LlamaConfig {
     pub hidden_size: usize,
     pub intermediate_size: usize,
@@ -80,7 +81,7 @@ impl LlamaConfig {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct Config {
     pub hidden_size: usize,
     pub intermediate_size: usize,
@@ -138,8 +139,8 @@ impl Config {
 #[derive(Clone, Debug)]
 /// Cache for Llama model
 pub struct Cache {
-    cos: Tensor,
-    sin: Tensor,
+    pub(crate) cos: Tensor,
+    pub(crate) sin: Tensor,
 }
 
 fn calculate_default_inv_freq(cfg: &Config) -> Vec<f32> {
@@ -199,7 +200,7 @@ impl Cache {
     }
 }
 
-struct CausalSelfAttention {
+pub struct CausalSelfAttention {
     q_proj: Linear,
     k_proj: Linear,
     v_proj: Linear,
@@ -439,7 +440,7 @@ pub struct Llama {
 impl Llama {
     /// Forward pass of Llama model, using
     /// flash attention kernels, with paged attention
-    /// batching optimizations.
+    /// memory batching optimizations.
     ///
     /// # Arguments
     ///
@@ -546,10 +547,9 @@ mod tests {
         let filenames = vec![api
             .get("model.safetensors")
             .expect("Failed to get model.safetensors")];
-        let mut llama_model = {
-            let vb = unsafe { VarBuilder::from_mmaped_safetensors(&filenames, dtype, &device)? };
-            Llama::load(vb, &config, dtype, &device).expect("Failed to load the model")
-        };
+        let vb = unsafe { VarBuilder::from_mmaped_safetensors(&filenames, dtype, &device)? };
+        let mut llama_model =
+            Llama::load(vb, &config, dtype, &device).expect("Failed to load the model");
         let tokenizer =
             Tokenizer::from_file(tokenizer_filename).expect("Failed to load the tokenizer");
         let eos_token_id = config

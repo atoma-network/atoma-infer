@@ -9,3 +9,4 @@ serde = { workspace = true, features = ["derive"] }
 
 [features]
 vllm = ["dep:atoma-vllm-backend"]
+nccl = ["vllm", "atoma-vllm-backend/nccl"]
