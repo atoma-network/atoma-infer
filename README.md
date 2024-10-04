@@ -86,6 +86,11 @@ In development:
 In production:
 `$ cargo run --release --features nccl -- --config_path CONFIGURATION_FILE_PATH`.
 
+## Build considerations
+
+1. When building the project with NCCL support, ensure that the CUDA toolkit version is compatible with the NVIDIA driver version. You can check your CUDA version by running `nvcc --version`.
+2. Current flash-attention2 version is only compatible with sm_8x/sm_90 GPUs or newer.
+
 ## Paged Attention
 
 Paged Attention is an innovative technique for managing KV cache memory in LLMs. It significantly improves inference efficiency, especially for long-context scenarios. For more details, see the [original paper](https://arxiv.org/pdf/2309.06180).
