@@ -363,7 +363,6 @@ pub struct ModelThreadDispatcher {
     /// Collection of receivers for AI inference outputs
     /// Yields when a new output is generated
     pub responses: FuturesUnordered<oneshot::Receiver<Vec<SequenceGroupOutput>>>,
-    #[cfg(not(feature = "nccl"))]
     /// Join handles for each GPU device model execution thread
     pub join_handles: Vec<JoinHandle<Result<(), ModelThreadError>>>,
 }
