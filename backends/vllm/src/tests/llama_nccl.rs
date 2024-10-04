@@ -17,7 +17,7 @@ async fn test_llama_nccl_model() {
     let config_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("src")
         .join("tests")
-        .join("test_config.toml");
+        .join("test_config_nccl.toml");
 
     let llm_service = LlmService::start::<LlamaModel, _>(
         service_request_receiver,
