@@ -6,7 +6,7 @@ use std::{
     path::{Path, PathBuf},
     time::{Duration, Instant},
 };
-#[cfg(test)]
+#[cfg(all(test, not(feature = "nccl")))]
 mod llama;
 #[cfg(all(test, feature = "nccl"))]
 mod llama_nccl;

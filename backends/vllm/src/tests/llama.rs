@@ -1,8 +1,8 @@
 use crate::{
     llm_service::LlmService,
-    models::llama::LlamaModel,
     types::{GenerateParameters, GenerateRequest},
 };
+use crate::models::llama::LlamaModel;
 use futures::{stream::FuturesUnordered, StreamExt};
 use std::{path::PathBuf, time::Instant};
 use tracing::info;
