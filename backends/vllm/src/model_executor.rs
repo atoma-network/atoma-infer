@@ -8,13 +8,7 @@ use std::{
 
 use candle_core::{DType, Device, IndexOp, Tensor};
 #[cfg(feature = "nccl")]
-use cudarc::{
-    driver::{safe::CudaDevice, DriverError},
-    nccl::{
-        result::NcclError,
-        safe::{Comm, Id},
-    },
-};
+use cudarc::nccl::{result::NcclError, safe::Comm};
 use futures::stream::FuturesUnordered;
 use models::flash_attention::FlashAttentionMetadata;
 use serde::{de::DeserializeOwned, Deserialize};
@@ -390,10 +384,9 @@ impl ModelThreadDispatcher {
     #[instrument(skip_all)]
     pub(crate) fn start<M>(
         cache_config: CacheConfig,
-        config: M::C,
         devices_ids: Vec<usize>,
         dtype: DType,
-        file_paths: Arc<ModelFilePaths>,
+        models: Vec<M>,
         scheduler_config: SchedulerConfig,
     ) -> Result<Self, ModelThreadError>
     where
@@ -405,33 +398,14 @@ impl ModelThreadDispatcher {
             let num_shards = devices_ids.len();
             let mut join_handles = Vec::with_capacity(num_shards);
             let mut to_workers_senders = Vec::with_capacity(num_shards);
-            #[cfg(feature = "nccl")]
-            let id = Id::new().unwrap();
-            for (rank, device_id) in devices_ids.into_iter().enumerate() {
-                let config_clone = config.clone();
-                let file_paths_clone = file_paths.clone();
+            for ((rank, device_id), model) in
+                devices_ids.into_iter().enumerate().zip(models.into_iter())
+            {
                 let cache_config_clone = cache_config.clone();
                 let (to_workers_sender, worker_receiver) = mpsc::unbounded_channel();
+                let device = Device::new_cuda(device_id)?;
                 let join_handle = tokio::task::spawn_blocking(move || {
-                    #[cfg(feature = "nccl")]
-                    let cuda_device = CudaDevice::new(device_id)?;
-                    // Initialize the Communicator from Nvidia Collective Communication Library. This is for the inter gpu communication.
-                    // For more information visit https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/overview.html
-                    #[cfg(feature = "nccl")]
-                    let comm = Rc::new(
-                        Comm::from_rank(cuda_device, rank, num_shards, id)
-                            .map_err(ModelThreadError::NcclError)?,
-                    );
                     info!("Rank {rank:?} spawned");
-                    let device = Device::new_cuda(device_id)?;
-                    let model = M::load(
-                        config_clone,
-                        &device,
-                        dtype,
-                        file_paths_clone.as_ref(),
-                        #[cfg(feature = "nccl")]
-                        &comm,
-                    )?;
                     let model_worker = ModelWorker::<M>::new(
                         cache_config_clone,
                         device,
@@ -519,9 +493,6 @@ impl ModelThreadDispatcher {
 pub enum ModelThreadError {
     #[error("Candle error: `{0}`")]
     CandleError(#[from] candle_core::Error),
-    #[cfg(feature = "nccl")]
-    #[error("DriverError error: `{0}`")]
-    DriverError(#[from] DriverError),
     #[error("Core thread shutdown: `{0}`")]
     Shutdown(RecvError),
     #[error("Send error")]

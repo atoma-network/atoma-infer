@@ -1,4 +1,4 @@
-use std::{path::Path, str::FromStr, sync::Arc, time::Instant};
+use std::{path::Path, rc::Rc, str::FromStr, time::Instant};
 
 use crate::{
     config::{
@@ -7,8 +7,8 @@ use crate::{
     },
     llm_engine::{EngineError, GenerateRequestOutput, LlmEngine},
     model_executor::{
-        Config, ConfigError, ModelExecutor, ModelLoaderError, ModelThreadDispatcher,
-        ModelThreadError,
+        Config, ConfigError, ModelExecutor, ModelFilePaths, ModelLoaderError,
+        ModelThreadDispatcher, ModelThreadError,
     },
     scheduler::{Scheduler, SchedulerError},
     sequence::{Sequence, SequenceError, SequenceGroup},
@@ -16,8 +16,13 @@ use crate::{
     types::GenerateRequest,
     validation::{ValidGenerateRequest, Validation, ValidationError},
 };
-use candle_core::{DType, DTypeParseError, Error as CandleError};
+use candle_core::{DType, DTypeParseError, Device, Error as CandleError};
 use candle_transformers::generation::{LogitsProcessor, Sampling};
+#[cfg(feature = "nccl")]
+use cudarc::{
+    driver::{safe::CudaDevice, DriverError},
+    nccl::safe::{Comm, Id},
+};
 use metrics::{counter, gauge};
 use thiserror::Error;
 use tokenizers::Tokenizer;
@@ -102,6 +107,7 @@ impl LlmService {
         // TODO: support multi-GPUs
         let devices_ids = model_config.device_ids.clone();
         let dtype = DType::from_str(&model_config.dtype)?;
+        let models = load_model::<M>(config.clone(), &devices_ids, dtype, &file_paths)?;
         let num_kv_heads = config.num_kv_heads();
         let hidden_dim = config.hidden_dim();
         let num_hidden_layers = config.num_hidden_layers();
@@ -143,10 +149,9 @@ impl LlmService {
 
         let model_thread_dispatcher = ModelThreadDispatcher::start::<M>(
             cache_config,
-            config,
             devices_ids,
             dtype,
-            Arc::new(file_paths),
+            models,
             scheduler_config,
         )?;
 
@@ -348,6 +353,9 @@ pub enum LlmServiceError {
     CandleError(#[from] CandleError),
     #[error("Config error: `{0}`")]
     ConfigError(#[from] ConfigError),
+    #[cfg(feature = "nccl")]
+    #[error("DriverError error: `{0}`")]
+    DriverError(#[from] DriverError),
     #[error("DType parse error: `{0}`")]
     DTypeParseError(#[from] DTypeParseError),
     #[error("Model loader error: `{0}`")]
@@ -368,4 +376,40 @@ pub enum LlmServiceError {
     SendError(#[from] Box<SendError<(SequenceGroup, oneshot::Sender<GenerateRequestOutput>)>>),
     #[error("Tokenizer error: `{0}`")]
     TokenizerError(#[from] TokenizerError),
+}
+
+fn load_model<M: ModelExecutor>(
+    config: M::C,
+    devices_ids: &[usize],
+    dtype: DType,
+    file_paths: &ModelFilePaths,
+) -> Result<Vec<M>, LlmServiceError> {
+    let mut models = Vec::with_capacity(devices_ids.len());
+    #[cfg(feature = "nccl")]
+    let id = Id::new().unwrap();
+    #[cfg(feature = "nccl")]
+    let num_shards = devices_ids.len();
+    for (rank, device_id) in devices_ids.iter().enumerate() {
+        #[cfg(feature = "nccl")]
+        let comm = {
+            let cuda_device = CudaDevice::new(*device_id)?;
+            // Initialize the Communicator from Nvidia Collective Communication Library. This is for the inter gpu communication.
+            // For more information visit https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/overview.html
+            Rc::new(
+                Comm::from_rank(cuda_device, rank, num_shards, id)
+                    .map_err(ModelThreadError::NcclError)?,
+            )
+        };
+        let device = Device::new_cuda(*device_id)?;
+        let model = M::load(
+            config.clone(),
+            &device,
+            dtype,
+            file_paths,
+            #[cfg(feature = "nccl")]
+            &comm,
+        )?;
+        models.push(model);
+    }
+    Ok(models)
 }
