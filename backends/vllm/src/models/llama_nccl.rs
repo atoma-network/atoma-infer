@@ -12,7 +12,7 @@ use tracing::info;
 
 use crate::{
     model_executor::{
-        ModelConfig, ModelExecutor, ModelExecutorError, ModelFilePaths, ModelLoader,
+        Config as ModelConfig, ModelExecutor, ModelExecutorError, ModelFilePaths, ModelLoader,
         ModelLoaderError,
     },
     models::hub_load_safetensors,
