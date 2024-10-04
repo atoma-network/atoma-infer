@@ -6,22 +6,17 @@ use async_openai::{
     },
     Client,
 };
-use axum::http::StatusCode;
 
-use crate::{config::CONFIG, main};
+use crate::tests::common;
 
 #[tokio::test]
 async fn test_chat_completions() {
-    tokio::spawn(async move {
-        main().unwrap();
-    });
-
-    let server_url = format!("http://{}:{}", CONFIG.server_address, CONFIG.server_port);
+    let server_api_base = common::spawn_server().await;
 
     // Create a custom client for async-openai that points to our server
     let config = OpenAIConfig::new()
         .with_api_key("sk-anything")
-        .with_api_base(server_url.as_str());
+        .with_api_base(server_api_base);
 
     let client = Client::with_config(config);
     // Create request using builder pattern

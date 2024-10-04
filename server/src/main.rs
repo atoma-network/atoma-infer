@@ -1,6 +1,5 @@
 use clap::Parser;
 use std::{
-    env,
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
@@ -64,11 +63,15 @@ async fn main() -> anyhow::Result<()> {
     let cli = Args::parse();
 
     // TODO: Write a clap cli for passing arguments
-    let address = CONFIG.server_address.clone();
-    let port = CONFIG.server_port.clone();
+    let address = &CONFIG.server_address;
+    let port = &CONFIG.server_port;
     let config_path = cli.config_path;
     let listener = TcpListener::bind(format!("{address}:{port}")).await?;
+    app_start(listener, config_path).await
+}
 
+/// Starts the server and LLM service. Used also in integration tests.
+pub async fn app_start(listener: TcpListener, config_path: String) -> anyhow::Result<()> {
     let (llm_service_sender, llm_service_receiver) = mpsc::unbounded_channel();
     let (shutdown_signal_sender, shutdown_signal_receiver) = mpsc::channel(1);
     // TODO: Add model dispatcher
@@ -104,7 +107,7 @@ pub async fn run_server(
     let http_router = Router::new()
         .route(&CONFIG.chat_completions_path, post(completion_handler))
         .route(
-            &format!("{}/validate", CONFIG.chat_completions_path.clone()),
+            &format!("{}/validate", &CONFIG.chat_completions_path),
             post(validate_completion_handler),
         )
         .with_state(app_state);
