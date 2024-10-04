@@ -579,7 +579,7 @@ impl ModelThreadDispatcher {
             if let Err(e) = self.to_workers_senders[0].send(command) {
                 error!("Could not send command to model core, it might be shutting down: {e}");
             }
-            for worker_sender in self.to_workers_senders.iter() {
+            for worker_sender in self.to_workers_senders.iter().skip(1) {
                 let command = ModelThreadCommand {
                     request: request.clone(),
                     sender: None,

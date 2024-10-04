@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::Arc, time::Instant};
 
 use crate::{
     config::CacheConfig,
@@ -540,8 +540,12 @@ impl CacheEngine {
         };
 
         // NOTE: each GPU worker needs its own set of allocated CPU tensor blocks
+        let start = Instant::now();
         this.cpu_cache = this.allocate_blocks(this.get_num_cpu_blocks(), &Device::Cpu, #[cfg(feature = "nccl")] world_size)?;
+        info!("Time taken to allocate CPU blocks: {:?}s", start.elapsed().as_secs_f32());
+        let start = Instant::now();
         this.gpu_cache = this.allocate_blocks(this.get_num_gpu_blocks(), &device, #[cfg(feature = "nccl")] world_size)?;
+        info!("Time taken to allocate GPU blocks: {:?}s", start.elapsed().as_secs_f32());
 
         Ok(this)
     }
