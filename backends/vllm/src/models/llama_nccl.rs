@@ -52,12 +52,12 @@ impl ModelLoader for LlamaModel {
         let tokenizer_file_path = repo.get("tokenizer.json")?;
 
         let model_weights_file_paths =
-        if LLAMA_VERSIONS_SINGLE_SAFETENSORS.contains(&model_id.as_str()) {
-            vec![repo.get("model.safetensors")?]
-        } else {
-            hub_load_safetensors(&repo, "model.safetensors.index.json")?
-        };
-        
+            if LLAMA_VERSIONS_SINGLE_SAFETENSORS.contains(&model_id.as_str()) {
+                vec![repo.get("model.safetensors")?]
+            } else {
+                hub_load_safetensors(&repo, "model.safetensors.index.json")?
+            };
+
         Ok(ModelFilePaths {
             config_path: config_file_path,
             tokenizer_path: tokenizer_file_path,
@@ -65,20 +65,6 @@ impl ModelLoader for LlamaModel {
         })
     }
 
-    #[cfg(not(feature = "nccl"))]
-    fn load(
-        config: Self::C,
-        device: &Device,
-        dtype: DType,
-        file_paths: &ModelFilePaths,
-    ) -> Result<Self, ModelLoaderError>
-    where
-        Self: Sized,
-    {
-        unimplemented!()
-    }
-
-    #[cfg(feature = "nccl")]
     fn load(
         config: Self::C,
         device: &Device,
