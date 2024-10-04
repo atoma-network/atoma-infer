@@ -46,7 +46,6 @@ impl BlockAllocator {
 }
 
 impl BlockAllocator {
-    #[instrument(skip(self))]
     /// Allocates a new physical block from the pool of free blocks.
     ///
     /// # Returns
