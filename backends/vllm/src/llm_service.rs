@@ -1,4 +1,4 @@
-use std::{path::Path, rc::Rc, str::FromStr, time::Instant};
+use std::{path::Path, str::FromStr, time::Instant};
 
 use crate::{
     config::{
@@ -387,12 +387,13 @@ fn load_model<M: ModelExecutor>(
     let mut models = Vec::with_capacity(devices_ids.len());
     #[cfg(feature = "nccl")]
     let id = Id::new().unwrap();
-    #[cfg(feature = "nccl")]
     let num_shards = devices_ids.len();
-    for (rank, device_id) in devices_ids.iter().enumerate() {
+    for rank in 0..num_shards {
+        let device_id = devices_ids[rank];
         #[cfg(feature = "nccl")]
         let comm = {
-            let cuda_device = CudaDevice::new(*device_id)?;
+            use std::rc::Rc;
+            let cuda_device = CudaDevice::new(device_id)?;
             // Initialize the Communicator from Nvidia Collective Communication Library. This is for the inter gpu communication.
             // For more information visit https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/overview.html
             Rc::new(
@@ -400,7 +401,7 @@ fn load_model<M: ModelExecutor>(
                     .map_err(ModelThreadError::NcclError)?,
             )
         };
-        let device = Device::new_cuda(*device_id)?;
+        let device = Device::new_cuda(device_id)?;
         let model = M::load(
             config.clone(),
             &device,
