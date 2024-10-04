@@ -289,7 +289,7 @@ impl BlockSpaceManager {
     /// - Returns `BlockSpaceManagerError::EmptySequence` if the sequence has no blocks.
     /// - Returns `BlockSpaceManagerError::AppendSlotError` if trying to allocate more than one block at a time.
     /// - Propagates errors from block allocation, freeing, or lock operations.
-    #[instrument(skip(self))]
+    #[instrument(skip_all)]
     pub fn append_slots(
         &mut self,
         sequence: RwLockReadGuard<Sequence>,
