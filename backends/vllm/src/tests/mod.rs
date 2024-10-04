@@ -1,11 +1,11 @@
+#[cfg(feature = "nccl")]
+use cudarc::nccl::Comm;
+#[cfg(feature = "nccl")]
+use std::rc::Rc;
 use std::{
     path::{Path, PathBuf},
     time::{Duration, Instant},
 };
-#[cfg(feature = "nccl")]
-use std::rc::Rc;
-#[cfg(feature = "nccl")]
-use cudarc::nccl::Comm;
 #[cfg(test)]
 mod llama;
 #[cfg(all(test, feature = "nccl"))]

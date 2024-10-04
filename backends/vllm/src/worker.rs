@@ -84,7 +84,8 @@ where
             model.config().num_kv_heads(),
             model.config().softmax_scale(),
             model.config().sliding_window(),
-            #[cfg(feature = "nccl")] world_size,
+            #[cfg(feature = "nccl")]
+            world_size,
         )?;
 
         // TODO:
@@ -516,8 +517,7 @@ impl CacheEngine {
         num_kv_heads: usize,
         softmax_scale: f32,
         sliding_window: Option<usize>,
-        #[cfg(feature = "nccl")]
-        world_size: usize,
+        #[cfg(feature = "nccl")] world_size: usize,
     ) -> Result<Self, CacheEngineError> {
         info!("Starting a new `CacheEngine` instance");
         let mut this = Self {
@@ -541,11 +541,27 @@ impl CacheEngine {
 
         // NOTE: each GPU worker needs its own set of allocated CPU tensor blocks
         let start = Instant::now();
-        this.cpu_cache = this.allocate_blocks(this.get_num_cpu_blocks(), &Device::Cpu, #[cfg(feature = "nccl")] world_size)?;
-        info!("Time taken to allocate CPU blocks: {:?}s", start.elapsed().as_secs_f32());
+        this.cpu_cache = this.allocate_blocks(
+            this.get_num_cpu_blocks(),
+            &Device::Cpu,
+            #[cfg(feature = "nccl")]
+            world_size,
+        )?;
+        info!(
+            "Time taken to allocate CPU blocks: {:?}s",
+            start.elapsed().as_secs_f32()
+        );
         let start = Instant::now();
-        this.gpu_cache = this.allocate_blocks(this.get_num_gpu_blocks(), &device, #[cfg(feature = "nccl")] world_size)?;
-        info!("Time taken to allocate GPU blocks: {:?}s", start.elapsed().as_secs_f32());
+        this.gpu_cache = this.allocate_blocks(
+            this.get_num_gpu_blocks(),
+            &device,
+            #[cfg(feature = "nccl")]
+            world_size,
+        )?;
+        info!(
+            "Time taken to allocate GPU blocks: {:?}s",
+            start.elapsed().as_secs_f32()
+        );
 
         Ok(this)
     }
@@ -556,8 +572,7 @@ impl CacheEngine {
         &mut self,
         num_blocks: usize,
         device: &Device,
-        #[cfg(feature = "nccl")]
-        world_size: usize,
+        #[cfg(feature = "nccl")] world_size: usize,
     ) -> Result<Vec<Tensor>, CacheEngineError> {
         let _enter = self.span.enter();
         #[cfg(not(feature = "nccl"))]

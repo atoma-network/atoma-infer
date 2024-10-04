@@ -97,20 +97,20 @@ pub enum Model {
 impl std::fmt::Display for Model {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Model::Llama38b => write!(f, "meta-llama/Llama-3-8B"),
-            Model::Llama38bInstruct => write!(f, "meta-llama/Llama-3-8B-instruct"),
-            Model::Llama370b => write!(f, "meta-llama/Llama-3-70B"),
-            Model::Llama370bInstruct => write!(f, "meta-llama/Llama-3-70B-instruct"),
+            Model::Llama38b => write!(f, "meta-llama/Meta-Llama-3-8B"),
+            Model::Llama38bInstruct => write!(f, "meta-llama/Meta-Llama-3-8B-Instruct"),
+            Model::Llama370b => write!(f, "meta-llama/Meta-Llama-3-70B"),
+            Model::Llama370bInstruct => write!(f, "meta-llama/Meta-Llama-3-70B-Instruct"),
             Model::Llama318b => write!(f, "meta-llama/Llama-3.1-8B"),
-            Model::Llama318bInstruct => write!(f, "meta-llama/Llama-3.1-8B-instruct"),
+            Model::Llama318bInstruct => write!(f, "meta-llama/Llama-3.1-8B-Instruct"),
             Model::Llama3170b => write!(f, "meta-llama/Llama-3.1-70B"),
-            Model::Llama3170bInstruct => write!(f, "meta-llama/Llama-3.1-70B-instruct"),
+            Model::Llama3170bInstruct => write!(f, "meta-llama/Llama-3.1-70B-Instruct"),
             Model::Llama31405b => write!(f, "meta-llama/Llama-3.1-405B"),
-            Model::Llama31405bInstruct => write!(f, "meta-llama/Llama-3.1-405B-instruct"),
+            Model::Llama31405bInstruct => write!(f, "meta-llama/Llama-3.1-405B-Instruct"),
             Model::Llama321b => write!(f, "meta-llama/Llama-3.2-1B"),
-            Model::Llama321bInstruct => write!(f, "meta-llama/Llama-3.2-1B-instruct"),
+            Model::Llama321bInstruct => write!(f, "meta-llama/Llama-3.2-1B-Instruct"),
             Model::Llama323b => write!(f, "meta-llama/Llama-3.2-3B"),
-            Model::Llama323bInstruct => write!(f, "meta-llama/Llama-3.2-3B-instruct"),
+            Model::Llama323bInstruct => write!(f, "meta-llama/Llama-3.2-3B-Instruct"),
         }
     }
 }
@@ -529,7 +529,7 @@ impl RequestBody {
         use serde_json::json;
 
         Self {
-            model: Model::Llama3,
+            model: Model::Llama38b,
             messages: vec![
                 Message::System {
                     content: Some(MessageContent::Text("test".into())),
@@ -810,7 +810,7 @@ pub mod json_schema_tests {
     fn deserialize_request_body_basic() {
         let json_request_body = r#"
             {
-                "model": "llama3",
+                "model": "meta-llama/Meta-Llama-3-8B-Instruct",
                 "messages": [
                     {
                         "role": "system",
@@ -1122,7 +1122,7 @@ pub mod json_schema_tests {
                     "role": "assistant",
                     "content": "Hello, how can I help you today?"
                 },
-                "finish_reason": "stop"
+                "finish_reason": "stopped"
             }],
             "usage": {
                 "prompt_tokens": 9,
@@ -1151,7 +1151,7 @@ pub mod json_schema_tests {
                 tool_calls: vec![],
             }
         );
-        assert_eq!(response.choices[0].finish_reason, FinishReason::Stop);
+        assert_eq!(response.choices[0].finish_reason, FinishReason::Stopped);
         assert_eq!(response.usage.prompt_tokens, 9);
         assert_eq!(response.usage.completion_tokens, 12);
         assert_eq!(response.usage.total_tokens, 21);
@@ -1165,25 +1165,25 @@ pub mod json_schema_tests {
                 "role": "assistant",
                 "content": "Hello, how can I help you today?"
             },
-            "finish_reason": "stop"
+            "finish_reason": "stopped"
         });
 
         let choice: Choice = serde_json::from_value(json).unwrap();
 
         assert_eq!(choice.index, 0);
         assert!(matches!(choice.message, Message::Assistant { .. }));
-        assert!(matches!(choice.finish_reason, FinishReason::Stop));
+        assert!(matches!(choice.finish_reason, FinishReason::Stopped));
     }
 
     #[test]
     fn test_deserialize_finish_reason() {
         assert_eq!(
-            serde_json::from_str::<FinishReason>("\"stop\"").unwrap(),
-            FinishReason::Stop
+            serde_json::from_str::<FinishReason>("\"stopped\"").unwrap(),
+            FinishReason::Stopped
         );
         assert_eq!(
-            serde_json::from_str::<FinishReason>("\"length\"").unwrap(),
-            FinishReason::Length
+            serde_json::from_str::<FinishReason>("\"length_capped\"").unwrap(),
+            FinishReason::LengthCapped
         );
         assert_eq!(
             serde_json::from_str::<FinishReason>("\"content_filter\"").unwrap(),
@@ -1222,7 +1222,7 @@ pub mod json_schema_tests {
                     {"can": -0.3, "may": -0.5}
                 ]
             },
-            "finish_reason": "stop"
+            "finish_reason": "stopped"
         });
 
         let choice: Choice = serde_json::from_value(json).unwrap();
@@ -1241,6 +1241,6 @@ pub mod json_schema_tests {
                 ]
             })
         );
-        assert!(matches!(choice.finish_reason, FinishReason::Stop));
+        assert!(matches!(choice.finish_reason, FinishReason::Stopped));
     }
 }

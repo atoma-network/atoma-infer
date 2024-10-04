@@ -504,7 +504,7 @@ impl ModelThreadDispatcher {
                         model,
                         enable_chunked_prefill,
                         rank,
-                        num_shards
+                        num_shards,
                     )?;
                     let model_thread = ModelThread {
                         worker: model_worker,

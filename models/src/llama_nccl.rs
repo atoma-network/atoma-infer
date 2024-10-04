@@ -350,10 +350,7 @@ mod tests {
         driver::safe::CudaDevice,
         nccl::safe::{Comm, Id},
     };
-    use hf_hub::{
-        api::sync::ApiBuilder,
-        Repo, RepoType,
-    };
+    use hf_hub::{api::sync::ApiBuilder, Repo, RepoType};
     use rand::Rng;
     use serial_test::serial;
     use std::io::Write;
