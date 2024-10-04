@@ -108,7 +108,6 @@ impl ModelLoader for LlamaModel {
         })
     }
 
-    #[cfg(not(feature = "nccl"))]
     fn load(
         config: Self::C,
         device: &Device,
@@ -134,20 +133,6 @@ impl ModelLoader for LlamaModel {
         info!("Loaded Llama model in {:?}", start.elapsed());
 
         Ok(Self { model, config })
-    }
-
-    #[cfg(feature = "nccl")]
-    fn load(
-        _: Self::C,
-        _: &Device,
-        _: DType,
-        _: &ModelFilePaths,
-        _: &Rc<Comm>,
-    ) -> Result<Self, ModelLoaderError>
-    where
-        Self: Sized,
-    {
-        unimplemented!()
     }
 }
 
