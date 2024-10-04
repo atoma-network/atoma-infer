@@ -6,7 +6,7 @@ use std::{
     sync::Arc,
 };
 
-use candle_core::{DType, Device, IndexOp, Tensor, CudaDevice};
+use candle_core::{backend::Backend, CudaDevice, DType, Device, IndexOp, Tensor};
 #[cfg(feature = "nccl")]
 use cudarc::{
     driver::{safe::CudaDevice, DriverError},
