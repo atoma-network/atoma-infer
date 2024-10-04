@@ -13,7 +13,7 @@ The Atoma Node Inference repository is a collection of optimized infrastructure 
 - [x] - Supports Llama3.1 and Llama3.2 models text generation models.
 - [x] - Optimized for serverless inference serving.
 - [x] - Supports multi-GPU Tensor parallelism inference, using multiple NVIDIA's GPU devices, by leveraging Cuda's NCCL library. This allows for running any LLM, provided the user's machine has enough GPU cards.
-- [x] - The repository is written in Rust and it integrates with the Candle ML framework for high-performance Rust-based machine learning, making it ideal to deploy in serverless environments.
+- [x] - The repository is mainly written in Rust and it integrates with the Candle ML framework for high-performance Rust-based LLM inference, making it ideal to deploy in serverless environments.
 - [x] - Avoids dependencies of very large Machine Learning frameworks such as PyTorch. Our repository can be deployed through lightweight binaries.
 - [x] - Avoids Python overhead from production workloads. 
 
@@ -70,7 +70,7 @@ max_input_length = 4096 # Maximum input length to use for the vLLM scheduler
 max_total_tokens = 8192 # Maximum total tokens to use for the vLLM scheduler
 ```
 
-10. Start the OpenAI-compatible jRPC server: 
+1. Start the OpenAI-compatible jRPC server: 
 
 - In development:
 
@@ -80,7 +80,7 @@ max_total_tokens = 8192 # Maximum total tokens to use for the vLLM scheduler
 
 `$ RUST_LOG=info cargo run --release --features vllm -- --config_path CONFIGURATION_FILE_PATH`.
 
-11. If multi-GPU inference support is enabled, you can start the server with NCCL support: 
+2. If multi-GPU inference support is enabled, you can start the server with NCCL support: 
 
 - In development:
 
@@ -94,6 +94,7 @@ max_total_tokens = 8192 # Maximum total tokens to use for the vLLM scheduler
 
 1. When building the project with NCCL support, ensure that the CUDA toolkit version is compatible with the NVIDIA driver version. You can check your CUDA version by running `nvcc --version`.
 2. Current flash-attention2 version is only compatible with sm_8x/sm_90 GPUs or newer.
+3. Nccl is currently not supported on Windows.
 
 ## Paged Attention
 
