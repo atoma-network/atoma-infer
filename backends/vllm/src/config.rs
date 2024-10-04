@@ -594,7 +594,7 @@ pub(crate) mod utils {
                 if result != cudaError::cudaSuccess {
                     return Err(CacheConfigError::GpuMemoryQueryError(format!(
                         "Failed to set device {}: {:?}",
-                        device, result
+                        device_id, result
                     )));
                 }
 
@@ -604,7 +604,7 @@ pub(crate) mod utils {
                 if result != cudaError::cudaSuccess {
                     return Err(CacheConfigError::GpuMemoryQueryError(format!(
                         "Failed to get memory info for device {}: {:?}",
-                        device, result
+                        device_id, result
                     )));
                 }
 
