@@ -1,3 +1,4 @@
+#[cfg(not(feature = "nccl"))]
 pub mod llama;
 #[cfg(feature = "nccl")]
 pub mod llama_nccl;
