@@ -7,7 +7,7 @@ The Atoma Node Inference repository is a collection of optimized infrastructure 
 
 ## Features
 
-- [ ] - Fully compatible OpenAI API, providing a seamless experience for developers to serve open source LLM models.
+- [x] - Fully compatible OpenAI API, providing a seamless experience for developers to serve open source LLM models.
 - [ ] - Supports Paged Attention for efficient KV cache management (see [paper](https://arxiv.org/pdf/2309.06180)).
 - [ ] - Supports FlashAttention2 for efficient attention computation, by minimizing HBM writes (see [paper](https://arxiv.org/abs/2307.08691)).
 - [ ] - Supports Llama3.1 and Llama3.2 models text generation models.
