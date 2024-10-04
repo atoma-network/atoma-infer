@@ -1,19 +1,12 @@
 use candle_core::{DType, Device, Tensor};
-#[cfg(not(feature = "nccl"))]
 use candle_nn::VarBuilder;
-#[cfg(feature = "nccl")]
-use cudarc::nccl::Comm;
 use hf_hub::{api::sync::ApiBuilder, Repo, RepoType};
 use models::{
     llama::{Config, LlamaEosToks},
     FlashAttentionMetadata, Llama,
 };
 use std::path::Path;
-#[cfg(feature = "nccl")]
-use std::rc::Rc;
-#[cfg(not(feature = "nccl"))]
 use std::time::Instant;
-#[cfg(not(feature = "nccl"))]
 use tracing::info;
 
 use crate::{
@@ -29,37 +22,6 @@ const LLAMA_VERSIONS_SINGLE_SAFETENSORS: &[&str] = &[
     "meta-llama/Llama-3.2-1B",
     "meta-llama/Llama-3.2-1B-Instruct",
 ];
-
-impl ModelConfig for Config {
-    fn alibi_slopes(&self) -> Option<&Tensor> {
-        None
-    }
-    fn eos_token_ids(&self) -> Option<Vec<u32>> {
-        match self.eos_token_id.clone() {
-            None => None,
-            Some(LlamaEosToks::Single(u)) => Some(vec![u]),
-            Some(LlamaEosToks::Multiple(us)) => Some(us),
-        }
-    }
-    fn hidden_dim(&self) -> usize {
-        self.hidden_size / self.num_attention_heads
-    }
-    fn num_attention_heads(&self) -> usize {
-        self.num_attention_heads
-    }
-    fn num_hidden_layers(&self) -> usize {
-        self.num_hidden_layers
-    }
-    fn num_kv_heads(&self) -> usize {
-        self.num_key_value_heads
-    }
-    fn sliding_window(&self) -> Option<usize> {
-        None
-    }
-    fn softmax_scale(&self) -> f32 {
-        1f32 / (self.hidden_dim() as f32).sqrt()
-    }
-}
 
 /// Represents a Llama language model.
 ///
@@ -156,5 +118,37 @@ impl ModelExecutor for LlamaModel {
 
     fn config(&self) -> &Self::C {
         &self.config
+    }
+}
+
+
+impl ModelConfig for Config {
+    fn alibi_slopes(&self) -> Option<&Tensor> {
+        None
+    }
+    fn eos_token_ids(&self) -> Option<Vec<u32>> {
+        match self.eos_token_id.clone() {
+            None => None,
+            Some(LlamaEosToks::Single(u)) => Some(vec![u]),
+            Some(LlamaEosToks::Multiple(us)) => Some(us),
+        }
+    }
+    fn hidden_dim(&self) -> usize {
+        self.hidden_size / self.num_attention_heads
+    }
+    fn num_attention_heads(&self) -> usize {
+        self.num_attention_heads
+    }
+    fn num_hidden_layers(&self) -> usize {
+        self.num_hidden_layers
+    }
+    fn num_kv_heads(&self) -> usize {
+        self.num_key_value_heads
+    }
+    fn sliding_window(&self) -> Option<usize> {
+        None
+    }
+    fn softmax_scale(&self) -> f32 {
+        1f32 / (self.hidden_dim() as f32).sqrt()
     }
 }

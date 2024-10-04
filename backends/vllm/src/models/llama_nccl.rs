@@ -112,3 +112,34 @@ impl ModelExecutor for LlamaModel {
         &self.config
     }
 }
+
+impl ModelConfig for Config {
+    fn alibi_slopes(&self) -> Option<&Tensor> {
+        None
+    }
+    fn eos_token_ids(&self) -> Option<Vec<u32>> {
+        match self.eos_token_id.clone() {
+            None => None,
+            Some(LlamaEosToks::Single(u)) => Some(vec![u]),
+            Some(LlamaEosToks::Multiple(us)) => Some(us),
+        }
+    }
+    fn hidden_dim(&self) -> usize {
+        self.hidden_size / self.num_attention_heads
+    }
+    fn num_attention_heads(&self) -> usize {
+        self.num_attention_heads
+    }
+    fn num_hidden_layers(&self) -> usize {
+        self.num_hidden_layers
+    }
+    fn num_kv_heads(&self) -> usize {
+        self.num_key_value_heads
+    }
+    fn sliding_window(&self) -> Option<usize> {
+        None
+    }
+    fn softmax_scale(&self) -> f32 {
+        1f32 / (self.hidden_dim() as f32).sqrt()
+    }
+}
