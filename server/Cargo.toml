@@ -22,3 +22,4 @@ async-openai.workspace = true
 
 [features]
 vllm = ["atoma-backends/vllm"]
+nccl = ["atoma-backends/nccl"]
