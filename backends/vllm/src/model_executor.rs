@@ -6,7 +6,7 @@ use std::{
     sync::Arc,
 };
 
-use candle_core::{backend::Backend, CudaDevice, DType, Device, IndexOp, Tensor};
+use candle_core::{DType, Device, IndexOp, Tensor};
 #[cfg(feature = "nccl")]
 use cudarc::{
     driver::{safe::CudaDevice, DriverError},
@@ -414,12 +414,13 @@ impl ModelThreadDispatcher {
                 let cache_config_clone = cache_config.clone();
                 let (to_workers_sender, worker_receiver) = mpsc::unbounded_channel();
                 let join_handle = tokio::task::spawn_blocking(move || {
-                    let device = CudaDevice::new(device_id)?;
+                    #[cfg(feature = "nccl")]
+                    let cuda_device = CudaDevice::new(device_id)?;
                     // Initialize the Communicator from Nvidia Collective Communication Library. This is for the inter gpu communication.
                     // For more information visit https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/overview.html
                     #[cfg(feature = "nccl")]
                     let comm = Rc::new(
-                        Comm::from_rank(device, rank, num_shards, id)
+                        Comm::from_rank(cuda_device, rank, num_shards, id)
                             .map_err(ModelThreadError::NcclError)?,
                     );
                     info!("Rank {rank:?} spawned");
