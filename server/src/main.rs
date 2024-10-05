@@ -58,6 +58,15 @@ pub struct AppState {
     llm_service_sender: UnboundedSender<(GenerateRequest, oneshot::Sender<GenerateRequestOutput>)>,
     shutdown_signal_sender: mpsc::Sender<()>,
 }
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Model {
+    id: String,
+    object: String,
+    created: i64,
+    owned_by: String,
+}
+
+
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
