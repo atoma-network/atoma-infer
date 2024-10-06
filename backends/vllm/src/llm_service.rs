@@ -106,6 +106,55 @@ impl LlmService {
         let hidden_dim = config.hidden_dim();
         let num_hidden_layers = config.num_hidden_layers();
 
+        // 1. Initialize the `ModelThreadDispatcher`'s. We need to communicate with the background
+        // task in order to know when the model is loaded for each GPU device. This is necessary
+        // to then compute the total number of blocks that can be used for the KV cache, per each GPU device.
+
+        // 2. We create oneshot channels to communicate with the `ModelThreadDispatcher`'s
+        // corresponding GPU device background threads.
+        let mut initializer_senders = Vec::with_capacity(devices_ids.len());
+        let mut initializer_receivers = Vec::with_capacity(devices_ids.len());
+        for _ in 0..devices_ids.len() {
+            let (sender, receiver) = oneshot::channel();
+            initializer_senders.push(sender);
+            initializer_receivers.push(receiver);
+        }
+
+        // 3. We create broadcast channels to send botch the cache and scheduler configs
+        // to each GPU background threads.
+        let (config_sender, _) = tokio::sync::broadcast::channel(1);
+        let mut config_receivers = Vec::with_capacity(devices_ids.len());
+        for _ in 0..devices_ids.len() {
+            let config_receiver = config_sender.subscribe();
+            config_receivers.send(config_receiver);
+        }
+
+        let now = Instant::now();
+        // 4. Start the `ModelThreadDispatcher`
+        let model_thread_dispatcher = ModelThreadDispatcher::start::<M>(
+            config.clone(),
+            devices_ids.clone(),
+            dtype,
+            file_paths,
+            model_thread_dispatchers_senders,
+            config_receivers,
+        )?;
+
+        // 5. Wait for all the model thread dispatchers to load the model weights
+        for receiver in model_thread_dispatchers_receivers {
+            receiver
+                .await
+                .expect("Failed to receive on channel to stop model thread dispatcher");
+        }
+
+        info!(
+            "All model thread dispatchers have loaded the model weights, in total {:?} seconds",
+            now.elapsed().as_secs_f32()
+        );
+
+        // 6. Compute the cache and scheduler configs and send them to all the model thread dispatchers, now
+        // that the model weights are loaded in each GPU device memory, so we can properly compute the total
+        // number of blocks that are available for the KV cache, per each GPU device.
         let cache_config = CacheConfig::from_file_path(
             config_path.as_ref(),
             num_kv_heads,
@@ -114,6 +163,16 @@ impl LlmService {
             &devices_ids,
         )?;
         let scheduler_config = SchedulerConfig::from_file_path(config_path.as_ref())?;
+
+        // 7. Send the cache and scheduler configs to all the model thread dispatchers
+        config_sender
+            .send((cache_config.clone(), scheduler_config.clone()))
+            .map_err(|e| {
+                LlmServiceError::BroadcastSenderError(format!(
+                    "Failed to send config to model threads, with error: {e}",
+                ))
+            })?;
+
         let validation_config = ValidationConfig::from_file_path(config_path.as_ref());
 
         let (tokenizer_sender, tokenizer_receiver) = mpsc::unbounded_channel();
@@ -140,15 +199,6 @@ impl LlmService {
             )
             .await?)
         });
-
-        let model_thread_dispatcher = ModelThreadDispatcher::start::<M>(
-            cache_config,
-            config,
-            devices_ids,
-            dtype,
-            Arc::new(file_paths),
-            scheduler_config,
-        )?;
 
         let (engine_sender, engine_receiver) = mpsc::unbounded_channel();
         let llm_engine_handle = tokio::spawn(async move {
@@ -342,6 +392,8 @@ impl LlmService {
 pub enum LlmServiceError {
     #[error("Boxed error: `{0}`")]
     BoxedError(#[from] Box<dyn std::error::Error + Send + Sync>),
+    #[error("Broadcast sender error: `{0}`")]
+    BroadcastSenderError(String),
     #[error("Cache config error: `{0}`")]
     CacheConfigError(#[from] CacheConfigError),
     #[error("Candle error: `{0}`")]

@@ -39,6 +39,7 @@ use crate::{
 };
 
 /// `FilePaths` - wrapper struct for the model's file paths
+#[derive(Clone)]
 pub struct ModelFilePaths {
     /// Configuration file path
     pub config_path: PathBuf,
@@ -389,51 +390,76 @@ impl ModelThreadDispatcher {
     /// * `M` - A type that implements `ModelExecutor + Send + Sync + 'static`
     #[instrument(skip_all)]
     pub(crate) fn start<M>(
-        cache_config: CacheConfig,
         config: M::C,
         devices_ids: Vec<usize>,
         dtype: DType,
-        file_paths: Arc<ModelFilePaths>,
-        scheduler_config: SchedulerConfig,
+        file_paths: ModelFilePaths,
+        model_loader_senders: Vec<oneshot::Sender<()>>,
+        config_receivers: Vec<tokio::sync::broadcast::Receiver<(CacheConfig, SchedulerConfig)>>,
     ) -> Result<Self, ModelThreadError>
     where
         M: ModelLoader + ModelExecutor + Send + Sync + 'static,
     {
-        let enable_chunked_prefill = scheduler_config.enable_chunked_prefill();
-
+        // 1. Start a new model thread for each GPU device
         let (join_handles, to_workers_senders) = {
             let num_shards = devices_ids.len();
             let mut join_handles = Vec::with_capacity(num_shards);
+            // 2. Create a new unbounded channel for each GPU device, to send and receive data
+            //    between the main thread and the model thread
             let mut to_workers_senders = Vec::with_capacity(num_shards);
             #[cfg(feature = "nccl")]
             let id = Id::new().unwrap();
-            for (rank, device_id) in devices_ids.into_iter().enumerate() {
-                let config_clone = config.clone();
+            for ((rank, device_id), (sender, mut config_receiver)) in
+                devices_ids.into_iter().enumerate().zip(
+                    model_loader_senders
+                        .into_iter()
+                        .zip(config_receivers.into_iter()),
+                )
+            {
                 let file_paths_clone = file_paths.clone();
-                let cache_config_clone = cache_config.clone();
+                let config_clone = config.clone();
                 let (to_workers_sender, worker_receiver) = mpsc::unbounded_channel();
+                // 3. Spawn a new blocking task, for each GPU device, to load the model weights
+                //    and send a signal to the main thread, so it can proceed to compute the cache
+                //    and scheduler configs, to be sent to all the model thread dispatchers, now
+                //    that the model weights are loaded in each GPU device memory.
                 let join_handle = tokio::task::spawn_blocking(move || {
                     #[cfg(feature = "nccl")]
                     let cuda_device = CudaDevice::new(device_id)?;
                     // Initialize the Communicator from Nvidia Collective Communication Library. This is for the inter gpu communication.
                     // For more information visit https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/overview.html
                     #[cfg(feature = "nccl")]
+                    // 4. Create a new communicator for each GPU device, to be used for inter-GPU communication
                     let comm = Rc::new(
                         Comm::from_rank(cuda_device, rank, num_shards, id)
                             .map_err(ModelThreadError::NcclError)?,
                     );
-                    info!("Rank {rank:?} spawned");
                     let device = Device::new_cuda(device_id)?;
+                    // 5. Load the model weights into the GPU device memory
                     let model = M::load(
                         config_clone,
                         &device,
                         dtype,
-                        file_paths_clone.as_ref(),
+                        &file_paths_clone,
                         #[cfg(feature = "nccl")]
                         &comm,
                     )?;
+                    info!("Model loaded on device {device_id}");
+                    // 6. Send a signal to the main thread, so it can proceed to compute the cache
+                    //    and scheduler configs, to be sent to all the model thread dispatchers, now
+                    //    that the model weights are loaded in each GPU device memory.
+                    sender
+                        .send(())
+                        .expect("Failed to send on model loader sender");
+
+                    // 7. Receive the cache and scheduler configs from the main thread
+                    let (cache_config, scheduler_config) = config_receiver
+                        .blocking_recv()
+                        .map_err(|e| ModelThreadError::BroadcastReceiverError(e.to_string()))?;
+                    let enable_chunked_prefill = scheduler_config.enable_chunked_prefill();
+
                     let model_worker = ModelWorker::<M>::new(
-                        cache_config_clone,
+                        cache_config,
                         device,
                         dtype,
                         model,
@@ -517,10 +543,12 @@ impl ModelThreadDispatcher {
 
 #[derive(Debug, Error)]
 pub enum ModelThreadError {
+    #[error("Broadcast receiver error: `{0}`")]
+    BroadcastReceiverError(String),
     #[error("Candle error: `{0}`")]
     CandleError(#[from] candle_core::Error),
     #[cfg(feature = "nccl")]
-    #[error("DriverError error: `{0}`")]
+    #[error("Driver error: `{0}`")]
     DriverError(#[from] DriverError),
     #[error("Core thread shutdown: `{0}`")]
     Shutdown(RecvError),
