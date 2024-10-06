@@ -1,4 +1,4 @@
-use std::{path::Path, str::FromStr, sync::Arc, time::Instant};
+use std::{path::Path, str::FromStr, time::Instant};
 
 use crate::{
     config::{
