@@ -120,13 +120,13 @@ impl LlmService {
             initializer_receivers.push(receiver);
         }
 
-        // 3. We create broadcast channels to send botch the cache and scheduler configs
+        // 3. We create broadcast channels to send both the cache and scheduler configs
         // to each GPU background threads.
         let (config_sender, _) = tokio::sync::broadcast::channel(1);
         let mut config_receivers = Vec::with_capacity(devices_ids.len());
         for _ in 0..devices_ids.len() {
             let config_receiver = config_sender.subscribe();
-            config_receivers.send(config_receiver);
+            config_receivers.push(config_receiver);
         }
 
         let now = Instant::now();
@@ -136,12 +136,12 @@ impl LlmService {
             devices_ids.clone(),
             dtype,
             file_paths,
-            model_thread_dispatchers_senders,
+            initializer_senders,
             config_receivers,
         )?;
 
         // 5. Wait for all the model thread dispatchers to load the model weights
-        for receiver in model_thread_dispatchers_receivers {
+        for receiver in initializer_receivers {
             receiver
                 .await
                 .expect("Failed to receive on channel to stop model thread dispatcher");
