@@ -228,7 +228,6 @@ pub async fn run_server(
         (status = 200, description = "Successful chat completion response", body = ChatCompletionResponse),
         (status = 500, description = "Internal server error", body = serde_json::Value)
     ),
-    tag("Atoma's Chat Completions API handler")
 )]
 pub async fn completion_handler(
     app_state: State<AppState>,
@@ -318,6 +317,15 @@ pub async fn completion_handler(
 ///
 /// Returns a JSON response indicating whether the validation was successful or not.
 /// If validation fails, it returns details about the validation errors.
+#[utoipa::path(
+    post,
+    path = "/chat/completions/validate",
+    request_body = serde_json::Value,
+    responses(
+        (status = 200, description = "Validation success"),
+        (status = 400, description = "Validation failed")
+    )
+)]
 pub async fn validate_completion_handler(
     Json(instance): Json<serde_json::Value>,
 ) -> impl IntoResponse {
