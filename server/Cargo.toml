@@ -16,7 +16,7 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal"] }
 tracing.workspace = true
 tracing-subscriber.workspace = true
 utoipa = { workspace = true, features = ["axum_extras"] }
-utoipa-swagger-ui = { workspace = true, features = ["derive"] }
+utoipa-swagger-ui = { workspace = true, features = ["axum"] }
 
 [dev-dependencies]
 expect-test.workspace = true
