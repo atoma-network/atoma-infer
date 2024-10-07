@@ -30,7 +30,7 @@ This project is currently in the early stages of development. We are looking for
 - [x] - Continuous batching of inference requests.
 - [x] - CPU offloading of inference requests, through CPU/GPU request swapping.
 - [ ] - Streaming responses through SSE.
-- [ ] - Support for quantized models.
+- [ ] - Support for different quantization techniques.
 - [ ] - FlashAttention3.
 - [-] - Utoipa OpenAPI documentation.
 - [ ] - Support for multi-modal models.
