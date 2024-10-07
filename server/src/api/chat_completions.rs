@@ -6,6 +6,7 @@ use std::{
     collections::HashMap,
     time::{Instant, SystemTime},
 };
+use utoipa::ToSchema;
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize};
@@ -400,7 +401,7 @@ pub enum StopCondition {
     String(String),
 }
 
-#[derive(Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, PartialEq, Serialize, Deserialize, JsonSchema, ToSchema)]
 #[serde(rename(serialize = "requestBody", deserialize = "requestBody"))]
 pub struct RequestBody {
     /// A list of messages comprising the conversation so far.
@@ -639,7 +640,7 @@ impl RequestBody {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct ChatCompletionResponse {
     pub id: String,
     pub object: String,
