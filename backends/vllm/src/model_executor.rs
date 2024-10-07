@@ -1,3 +1,5 @@
+#[cfg(feature = "nccl")]
+use std::rc::Rc;
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
@@ -5,8 +7,17 @@ use std::{
 };
 
 use candle_core::{DType, Device, IndexOp, Tensor};
+#[cfg(feature = "nccl")]
+use cudarc::{
+    driver::{safe::CudaDevice, DriverError},
+    nccl::{
+        result::NcclError,
+        safe::{Comm, Id},
+    },
+};
 use futures::stream::FuturesUnordered;
 use models::flash_attention::FlashAttentionMetadata;
+use serde::{de::DeserializeOwned, Deserialize};
 use thiserror::Error;
 use tokio::{
     sync::{
@@ -28,6 +39,7 @@ use crate::{
 };
 
 /// `FilePaths` - wrapper struct for the model's file paths
+#[derive(Clone)]
 pub struct ModelFilePaths {
     /// Configuration file path
     pub config_path: PathBuf,
@@ -39,6 +51,9 @@ pub struct ModelFilePaths {
 
 /// `ModelLoader` trait - interface for fetching and loading a LLM model weights.
 pub trait ModelLoader {
+    /// The model's configuration type
+    type C: Config + Send;
+
     /// Fetches model files from a remote source.
     ///
     /// # Arguments
@@ -56,6 +71,27 @@ pub trait ModelLoader {
         revision: String,
     ) -> Result<ModelFilePaths, ModelLoaderError>;
 
+    /// Loads the model into memory, with NCCL support.
+    ///
+    /// # Arguments
+    /// * `device` - The device to load the model onto (e.g., CPU, GPU).
+    /// * `dtype` - The data type for the model's parameters.
+    /// * `file_paths` - Paths to the model files.
+    /// * `comm` - The communicator for NCCL-enabled GPUs
+    ///
+    /// # Returns
+    /// `Result<Self, ModelLoaderError>` containing the loaded model.
+    #[cfg(feature = "nccl")]
+    fn load(
+        config: Self::C,
+        device: &Device,
+        dtype: DType,
+        file_paths: &ModelFilePaths,
+        comm: &Rc<Comm>,
+    ) -> Result<Self, ModelLoaderError>
+    where
+        Self: Sized;
+
     /// Loads the model into memory.
     ///
     /// # Arguments
@@ -65,8 +101,10 @@ pub trait ModelLoader {
     ///
     /// # Returns
     /// `Result<Self, ModelLoaderError>` containing the loaded model.
+    #[cfg(not(feature = "nccl"))]
     fn load(
-        device: Device,
+        config: Self::C,
+        device: &Device,
         dtype: DType,
         file_paths: &ModelFilePaths,
     ) -> Result<Self, ModelLoaderError>
@@ -74,8 +112,15 @@ pub trait ModelLoader {
         Self: Sized;
 }
 
-/// `ModelMetadata` - Metadata for a LLM model
-pub trait ModelMetadata: ModelLoader {
+/// `Config` - trait for a LLM model's configuration type
+pub trait Config: Clone + DeserializeOwned {
+    /// Creates a new instance of self, from a file path
+    fn from_file_path(path: &PathBuf) -> Result<Self, ConfigError> {
+        serde_json::from_slice(
+            &std::fs::read(path).map_err(|e| ConfigError::FailedToLoadConfig(e.to_string()))?,
+        )
+        .map_err(|e| ConfigError::FailedToLoadConfig(e.to_string()))
+    }
     /// Returns the ALiBi (Attention with Linear Biases) slopes, if applicable
     fn alibi_slopes(&self) -> Option<&Tensor>;
     /// Returns the End-of-Sequence (EOS) token IDs, if defined
@@ -96,7 +141,7 @@ pub trait ModelMetadata: ModelLoader {
 
 /// `ModelExecutor` trait - interface for running AI inference
 /// from a LLM
-pub trait ModelExecutor: ModelLoader + ModelMetadata {
+pub trait ModelExecutor: ModelLoader {
     /// Performs a forward pass through the model
     ///
     /// # Arguments
@@ -190,6 +235,7 @@ pub trait ModelExecutor: ModelLoader + ModelMetadata {
                     .sample(&sequence_logits)?;
 
                 let is_stop_token = self
+                    .config()
                     .eos_token_ids()
                     .map(|eid| eid.contains(&next_token))
                     .unwrap_or_default();
@@ -230,14 +276,18 @@ pub trait ModelExecutor: ModelLoader + ModelMetadata {
 
         Ok(sequence_group_outputs)
     }
+
+    /// Returns the model's configuration
+    fn config(&self) -> &Self::C;
 }
 
 /// `ModelThreadCommand` - Encapsulates an AI inference request and a channel for sending the result
 pub struct ModelThreadCommand {
     /// The AI inference request to be executed
     request: ExecuteModelRequest,
-    /// A one-shot channel sender for communicating the generated output back to the main task
-    sender: oneshot::Sender<Vec<SequenceGroupOutput>>,
+    /// A one-shot channel sender for communicating the generated output,
+    /// from the main worker thread, back to the main task
+    sender: Option<oneshot::Sender<Vec<SequenceGroupOutput>>>,
 }
 
 /// `ModelThread` - Encapsulates the logic for running a model thread/task in the background.
@@ -247,6 +297,8 @@ pub struct ModelThread<M: ModelExecutor> {
     worker: ModelWorker<M>,
     /// Receiver for incoming model execution requests
     receiver: mpsc::UnboundedReceiver<ModelThreadCommand>,
+    /// The associated GPU device rank, mostly for multi-GPU support
+    rank: usize,
     /// Tracing span for logging and diagnostics
     span: Span,
 }
@@ -280,20 +332,25 @@ where
             let mut output = match self.worker.execute_model(request) {
                 Ok(output) => output,
                 Err(e) => {
-                    error!("Failed to run forward pass on model, with error: {e}");
+                    error!("Failed to run forward pass on model, with error: {e}, for GPU device with rank: {}", self.rank);
                     return Err(ModelThreadError::ModelWorkerError(e));
                 }
             };
-            let execution_elapsed_time = execution_start_time.elapsed().as_secs_f32();
-            for o in output.iter_mut() {
-                o.sequence_group_metrics = SequenceGroupMetrics {
-                    time_to_generate: Some(execution_elapsed_time),
-                    num_tokens_generated: 1, // NOTE: without speculative decoding, we generate one token at a time for both prefill and decode sequences
-                };
-            }
+            if self.rank == 0 {
+                let execution_elapsed_time = execution_start_time.elapsed().as_secs_f32();
+                for o in output.iter_mut() {
+                    o.sequence_group_metrics = SequenceGroupMetrics {
+                        time_to_generate: Some(execution_elapsed_time),
+                        num_tokens_generated: 1, // NOTE: without speculative decoding, we generate one token at a time for both prefill and decode sequences
+                    };
+                }
 
-            // Send responses back to the engine
-            sender.send(output).ok();
+                // Send responses back to the engine
+                sender
+                    .expect("Failed to send output to engine from rank 0 model thread")
+                    .send(output)
+                    .ok();
+            }
         }
 
         Ok(())
@@ -303,12 +360,12 @@ where
 /// `ModelThreadDispatcher` - Manages incoming requests for background LLM inference tasks
 pub struct ModelThreadDispatcher {
     /// Sender for `ModelThreadCommand`s to the model execution thread
-    pub sender: mpsc::UnboundedSender<ModelThreadCommand>,
+    pub to_workers_senders: Vec<mpsc::UnboundedSender<ModelThreadCommand>>,
     /// Collection of receivers for AI inference outputs
     /// Yields when a new output is generated
     pub responses: FuturesUnordered<oneshot::Receiver<Vec<SequenceGroupOutput>>>,
-    /// Join handle for the model execution thread
-    pub join_handle: JoinHandle<Result<(), ModelThreadError>>,
+    /// Join handles for each GPU device model execution thread
+    pub join_handles: Vec<JoinHandle<Result<(), ModelThreadError>>>,
 }
 
 impl ModelThreadDispatcher {
@@ -319,56 +376,124 @@ impl ModelThreadDispatcher {
     ///
     /// # Arguments
     /// * `cache_config` - Configuration for the cache
+    /// * `config` - The model's associated configuration type instance
     /// * `device` - The device (CPU/GPU) to run the model on
     /// * `dtype` - The data type for model computations
-    /// * `model` - The model instance implementing `ModelExecutor`
+    /// * `file_paths` - The file paths corresponding to the files containing the model weights
     /// * `scheduler_config` - Configuration for the scheduler
     ///
     /// # Returns
     /// * `Result<Self, ModelThreadError>` - A new `ModelThreadDispatcher` instance or an error
     ///
     /// # Type Parameters
+    /// * `C` - A type that implements `Config`
     /// * `M` - A type that implements `ModelExecutor + Send + Sync + 'static`
     #[instrument(skip_all)]
     pub(crate) fn start<M>(
-        cache_config: CacheConfig,
-        device: Device,
+        config: M::C,
+        devices_ids: Vec<usize>,
         dtype: DType,
-        model: M,
-        scheduler_config: SchedulerConfig,
+        file_paths: ModelFilePaths,
+        model_loader_senders: Vec<oneshot::Sender<()>>,
+        config_receivers: Vec<tokio::sync::broadcast::Receiver<(CacheConfig, SchedulerConfig)>>,
     ) -> Result<Self, ModelThreadError>
     where
-        M: ModelExecutor + Send + Sync + 'static,
+        M: ModelLoader + ModelExecutor + Send + Sync + 'static,
     {
-        let (sender, receiver) = mpsc::unbounded_channel();
+        // 1. Start a new model thread for each GPU device
+        let (join_handles, to_workers_senders) = {
+            let num_shards = devices_ids.len();
+            let mut join_handles = Vec::with_capacity(num_shards);
+            // 2. Create a new unbounded channel for each GPU device, to send and receive data
+            //    between the main thread and the model thread
+            let mut to_workers_senders = Vec::with_capacity(num_shards);
+            #[cfg(feature = "nccl")]
+            let id = Id::new().unwrap();
+            for ((rank, device_id), (sender, mut config_receiver)) in
+                devices_ids.into_iter().enumerate().zip(
+                    model_loader_senders
+                        .into_iter()
+                        .zip(config_receivers.into_iter()),
+                )
+            {
+                let file_paths_clone = file_paths.clone();
+                let config_clone = config.clone();
+                let (to_workers_sender, worker_receiver) = mpsc::unbounded_channel();
+                // 3. Spawn a new blocking task, for each GPU device, to load the model weights
+                //    and send a signal to the main thread, so it can proceed to compute the cache
+                //    and scheduler configs, to be sent to all the model thread dispatchers, now
+                //    that the model weights are loaded in each GPU device memory.
+                let join_handle = tokio::task::spawn_blocking(move || {
+                    #[cfg(feature = "nccl")]
+                    let cuda_device = CudaDevice::new(device_id)?;
+                    // Initialize the Communicator from Nvidia Collective Communication Library. This is for the inter gpu communication.
+                    // For more information visit https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/overview.html
+                    #[cfg(feature = "nccl")]
+                    // 4. Create a new communicator for each GPU device, to be used for inter-GPU communication
+                    let comm = Rc::new(
+                        Comm::from_rank(cuda_device, rank, num_shards, id)
+                            .map_err(ModelThreadError::NcclError)?,
+                    );
+                    let device = Device::new_cuda(device_id)?;
+                    // 5. Load the model weights into the GPU device memory
+                    let model = M::load(
+                        config_clone,
+                        &device,
+                        dtype,
+                        &file_paths_clone,
+                        #[cfg(feature = "nccl")]
+                        &comm,
+                    )?;
+                    info!("Model loaded on device {device_id}");
+                    // 6. Send a signal to the main thread, so it can proceed to compute the cache
+                    //    and scheduler configs, to be sent to all the model thread dispatchers, now
+                    //    that the model weights are loaded in each GPU device memory.
+                    sender
+                        .send(())
+                        .expect("Failed to send on model loader sender");
 
-        let join_handle = tokio::task::spawn_blocking(move || {
-            let model_worker = ModelWorker::<M>::new(
-                cache_config,
-                device,
-                dtype,
-                model,
-                scheduler_config.enable_chunked_prefill(),
-            )?;
-            let model_thread = ModelThread {
-                worker: model_worker,
-                receiver,
-                span: info_span!("model-thread"),
-            };
-            if let Err(e) = model_thread.run() {
-                error!("Model thread error: {e}");
-                if !matches!(e, ModelThreadError::Shutdown(_)) {
-                    panic!("Fatal error occurred: {e}");
-                }
+                    // 7. Receive the cache and scheduler configs from the main thread
+                    let (cache_config, scheduler_config) = config_receiver
+                        .blocking_recv()
+                        .map_err(|e| ModelThreadError::BroadcastReceiverError(e.to_string()))?;
+                    let enable_chunked_prefill = scheduler_config.enable_chunked_prefill();
+
+                    let model_worker = ModelWorker::<M>::new(
+                        cache_config,
+                        device,
+                        dtype,
+                        model,
+                        enable_chunked_prefill,
+                        #[cfg(feature = "nccl")]
+                        rank,
+                        #[cfg(feature = "nccl")]
+                        num_shards,
+                    )?;
+                    let model_thread = ModelThread {
+                        worker: model_worker,
+                        receiver: worker_receiver,
+                        rank,
+                        span: info_span!("model-thread-worker-{rank}"),
+                    };
+                    if let Err(e) = model_thread.run() {
+                        error!("Model thread error: {e}");
+                        if !matches!(e, ModelThreadError::Shutdown(_)) {
+                            panic!("Fatal error occurred: {e}");
+                        }
+                    }
+
+                    Ok(())
+                });
+                join_handles.push(join_handle);
+                to_workers_senders.push(to_workers_sender);
             }
-
-            Ok(())
-        });
+            (join_handles, to_workers_senders)
+        };
 
         let model_dispatcher = ModelThreadDispatcher {
-            sender,
+            to_workers_senders,
             responses: FuturesUnordered::new(),
-            join_handle,
+            join_handles,
         };
 
         Ok(model_dispatcher)
@@ -394,10 +519,22 @@ impl ModelThreadDispatcher {
         trace!("Sending new `ExecuteModelRequest` to model executor task");
 
         let (sender, receiver) = oneshot::channel();
-        let command = ModelThreadCommand { request, sender };
 
-        if let Err(e) = self.sender.send(command) {
+        let command = ModelThreadCommand {
+            request: request.clone(),
+            sender: Some(sender),
+        };
+        if let Err(e) = self.to_workers_senders[0].send(command) {
             error!("Could not send command to model core, it might be shutting down: {e}");
+        }
+        for worker_sender in self.to_workers_senders.iter().skip(1) {
+            let command = ModelThreadCommand {
+                request: request.clone(),
+                sender: None,
+            };
+            if let Err(e) = worker_sender.send(command) {
+                error!("Could not send command to model core, it might be shutting down: {e}");
+            }
         }
 
         self.responses.push(receiver);
@@ -406,6 +543,13 @@ impl ModelThreadDispatcher {
 
 #[derive(Debug, Error)]
 pub enum ModelThreadError {
+    #[error("Broadcast receiver error: `{0}`")]
+    BroadcastReceiverError(String),
+    #[error("Candle error: `{0}`")]
+    CandleError(#[from] candle_core::Error),
+    #[cfg(feature = "nccl")]
+    #[error("Driver error: `{0}`")]
+    DriverError(#[from] DriverError),
     #[error("Core thread shutdown: `{0}`")]
     Shutdown(RecvError),
     #[error("Send error")]
@@ -416,6 +560,9 @@ pub enum ModelThreadError {
     ModelExecutorError(#[from] ModelExecutorError),
     #[error("Model worker error: `{0}`")]
     ModelWorkerError(#[from] ModelWorkerError),
+    #[cfg(feature = "nccl")]
+    #[error("Nccl error: `{}`", 0.0)]
+    NcclError(NcclError),
 }
 
 #[derive(Debug, Error)]
@@ -440,4 +587,10 @@ pub enum ModelExecutorError {
     InvalidLogits(usize, usize),
     #[error("Invalid next token parameters or stopping parameters (next token params dims: {0}, stopping params dims: {1})")]
     InvalidNextTokenParams(usize, usize),
+}
+
+#[derive(Debug, Error, Deserialize)]
+pub enum ConfigError {
+    #[error("Failed to load config file: `{0}`")]
+    FailedToLoadConfig(String),
 }

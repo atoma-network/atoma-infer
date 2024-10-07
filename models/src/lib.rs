@@ -1,6 +1,10 @@
 pub mod flash_attention;
 pub mod llama;
+#[cfg(feature = "nccl")]
+pub mod llama_nccl;
 pub mod mistral;
+#[cfg(feature = "nccl")]
+pub mod multi_gpu;
 pub mod phi3;
 
 pub use flash_attention::{

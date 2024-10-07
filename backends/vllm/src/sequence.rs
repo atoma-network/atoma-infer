@@ -372,7 +372,7 @@ impl SequenceData {
     /// * Traces the update operation.
     /// * Logs debug information about the sequence state.
     /// * Logs an error if the update would exceed the total sequence length.
-    #[instrument(skip(self))]
+    #[instrument(skip_all)]
     pub fn update_num_computed_tokens(
         &mut self,
         num_new_computed_tokens: usize,
@@ -1139,7 +1139,7 @@ impl SequenceGroup {
     ///
     /// This method is instrumented with tracing. It logs a trace event when adding the token
     /// and an error event if the sequence is not found.
-    #[instrument(skip(self))]
+    #[instrument(skip_all)]
     pub fn add_token_id_to_seq(
         &self,
         sequence_id: u64,

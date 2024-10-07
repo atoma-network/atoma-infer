@@ -1,12 +1,13 @@
 use candle_core::{DType, Device, Tensor};
-use candle_nn::VarBuilder;
+use candle_nn::var_builder::ShardedSafeTensors as VarBuilder;
+use cudarc::nccl::Comm;
 use hf_hub::{api::sync::ApiBuilder, Repo, RepoType};
 use models::{
     llama::{Config, LlamaEosToks},
-    FlashAttentionMetadata, Llama,
+    llama_nccl::Llama,
+    FlashAttentionMetadata,
 };
-use std::path::Path;
-use std::time::Instant;
+use std::{path::Path, rc::Rc, time::Instant};
 use tracing::info;
 
 use crate::{
@@ -35,7 +36,6 @@ pub struct LlamaModel {
 
 impl ModelLoader for LlamaModel {
     type C = Config;
-
     fn fetch<T: AsRef<Path>>(
         api_key: String,
         cache_dir: T,
@@ -75,6 +75,7 @@ impl ModelLoader for LlamaModel {
         device: &Device,
         dtype: DType,
         file_paths: &ModelFilePaths,
+        comm: &Rc<Comm>,
     ) -> Result<Self, ModelLoaderError>
     where
         Self: Sized,
@@ -84,13 +85,9 @@ impl ModelLoader for LlamaModel {
 
         let model = {
             let vb = unsafe {
-                VarBuilder::from_mmaped_safetensors(
-                    file_paths.weights_path.as_slice(),
-                    dtype,
-                    device,
-                )?
+                VarBuilder::var_builder(file_paths.weights_path.as_slice(), dtype, device)?
             };
-            Llama::load(vb, &config, dtype, device)?
+            Llama::load(vb, &config, comm, dtype, device)?
         };
         info!("Loaded Llama model in {:?}", start.elapsed());
 

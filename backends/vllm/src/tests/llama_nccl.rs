@@ -1,6 +1,6 @@
-use crate::models::llama::LlamaModel;
 use crate::{
     llm_service::LlmService,
+    models::llama_nccl::LlamaModel,
     types::{GenerateParameters, GenerateRequest},
 };
 use futures::{stream::FuturesUnordered, StreamExt};
@@ -8,7 +8,7 @@ use std::{path::PathBuf, time::Instant};
 use tracing::info;
 
 #[tokio::test]
-async fn test_llama_model() {
+async fn test_llama_nccl_model() {
     crate::tests::init_tracing();
 
     let (shutdown_signal_sender, shutdown_signal_receiver) = tokio::sync::mpsc::channel(1);
@@ -17,7 +17,7 @@ async fn test_llama_model() {
     let config_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("src")
         .join("tests")
-        .join("test_config.toml");
+        .join("test_config_nccl.toml");
 
     let llm_service = LlmService::start::<LlamaModel, _>(
         service_request_receiver,

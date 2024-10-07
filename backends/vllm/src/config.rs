@@ -163,6 +163,7 @@ impl CacheConfig {
         num_kv_heads: usize,
         hidden_dim: usize,
         num_hidden_layers: usize,
+        device_ids: &[usize],
     ) -> Result<Self, CacheConfigError> {
         let builder = Config::builder().add_source(config::File::with_name(
             config_file_path.as_ref().to_str().unwrap(),
@@ -199,6 +200,7 @@ impl CacheConfig {
                 num_kv_heads,
                 hidden_dim,
                 dtype,
+                device_ids,
             )?;
             this.num_gpu_blocks = Some(num_gpu_blocks);
         }
@@ -583,24 +585,16 @@ pub(crate) mod utils {
         num_kv_heads: usize,
         hidden_dim: usize,
         dtype: DType,
+        device_ids: &[usize],
     ) -> Result<usize, CacheConfigError> {
         unsafe {
-            let mut device_count = 0;
-            let result = cudaGetDeviceCount(&mut device_count);
-            if result != cudaError::cudaSuccess || device_count == 0 {
-                return Err(CacheConfigError::GpuMemoryQueryError(format!(
-                    "Failed to get device count: {:?}",
-                    result
-                )));
-            }
-
-            let mut per_device_memory = Vec::with_capacity(device_count as usize);
-            for device in 0..device_count {
-                let result = cudaSetDevice(device);
+            let mut per_device_memory = Vec::with_capacity(device_ids.len());
+            for device_id in device_ids.iter() {
+                let result = cudaSetDevice(*device_id as i32);
                 if result != cudaError::cudaSuccess {
                     return Err(CacheConfigError::GpuMemoryQueryError(format!(
                         "Failed to set device {}: {:?}",
-                        device, result
+                        device_id, result
                     )));
                 }
 
@@ -610,7 +604,7 @@ pub(crate) mod utils {
                 if result != cudaError::cudaSuccess {
                     return Err(CacheConfigError::GpuMemoryQueryError(format!(
                         "Failed to get memory info for device {}: {:?}",
-                        device, result
+                        device_id, result
                     )));
                 }
 

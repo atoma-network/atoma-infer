@@ -1,8 +1,8 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::Arc, time::Instant};
 
 use crate::{
     config::CacheConfig,
-    model_executor::{ModelExecutor, ModelExecutorError, ModelLoaderError},
+    model_executor::{Config as ModelConfig, ModelExecutor, ModelExecutorError, ModelLoaderError},
     sequence::{ExecuteModelRequest, SequenceGroupMetadata, SequenceGroupOutput},
 };
 use candle_core::{DType, DTypeParseError, Device, Error as CandleError, Tensor};
@@ -46,9 +46,9 @@ pub struct ModelWorker<M: ModelExecutor> {
     enable_chunked_prefill: bool,
     /// Model runner instance
     model: M,
-    /// Initial GPU available memory
-    #[allow(dead_code)]
-    initial_gpu_memory: usize,
+    #[cfg(feature = "nccl")]
+    /// The associated GPU device rank
+    rank: usize,
     /// Tracing Span
     span: Span,
 }
@@ -65,6 +65,8 @@ where
         dtype: DType,
         model: M,
         enable_chunked_prefill: bool,
+        #[cfg(feature = "nccl")] rank: usize,
+        #[cfg(feature = "nccl")] world_size: usize,
     ) -> Result<Self, ModelWorkerError> {
         let span = info_span!("model-worker");
         let _span = span.clone();
@@ -75,24 +77,26 @@ where
             cache_config,
             device.clone(),
             dtype,
-            model.alibi_slopes(),
-            model.hidden_dim(),
-            model.num_attention_heads(),
-            model.num_hidden_layers(),
-            model.num_kv_heads(),
-            model.softmax_scale(),
-            model.sliding_window(),
+            model.config().alibi_slopes(),
+            model.config().hidden_dim(),
+            model.config().num_attention_heads(),
+            model.config().num_hidden_layers(),
+            model.config().num_kv_heads(),
+            model.config().softmax_scale(),
+            model.config().sliding_window(),
+            #[cfg(feature = "nccl")]
+            world_size,
         )?;
 
         // TODO:
         // 1. Check cuda is available (error otherwise);
-        // 2. Access initial GPU memory (using cudarc)
         Ok(Self {
             cache_engine,
             device,
             enable_chunked_prefill,
             model,
-            initial_gpu_memory: 0, // TODO 2.
+            #[cfg(feature = "nccl")]
+            rank,
             span,
         })
     }
@@ -170,9 +174,18 @@ where
             attention_metadata,
         )?;
 
+        #[cfg(not(feature = "nccl"))]
         let sampled_outputs = self
             .model
             .sample(&logits.squeeze(0)?, &sequence_groups_metadata)?;
+
+        #[cfg(feature = "nccl")]
+        let sampled_outputs = if self.rank == 0 {
+            self.model
+                .sample(&logits.squeeze(0)?, &sequence_groups_metadata)?
+        } else {
+            vec![]
+        };
 
         Ok(sampled_outputs)
     }
@@ -284,10 +297,14 @@ where
                 // This is a hack to make sliding window work with
                 // Paged Attention. We can remove it if we make paged attn kernel
                 // to properly handle sliding window attention.
-                if self.model.sliding_window().is_some() && !is_prompt {
+                if self.model.config().sliding_window().is_some() && !is_prompt {
                     // DON'T PANIC: by the branch check
-                    sliding_sequence_length =
-                        self.model.sliding_window().unwrap().min(sequence_length);
+                    sliding_sequence_length = self
+                        .model
+                        .config()
+                        .sliding_window()
+                        .unwrap()
+                        .min(sequence_length);
                 }
 
                 // 6. Get block table for the current sequence
@@ -301,7 +318,7 @@ where
                         .clone();
 
                     // 7. If sliding window is used, we need to trim the block table
-                    if let Some(sliding_window) = self.model.sliding_window() {
+                    if let Some(sliding_window) = self.model.config().sliding_window() {
                         let sw_block_num = (sliding_window + self.cache_engine.get_block_size()
                             - 1)
                             / self.cache_engine.get_block_size();
@@ -368,6 +385,7 @@ where
                 // [-1, -1, 2, 3, 4, 5, 6, 7, 0, 1].
                 let start_index = self
                     .model
+                    .config()
                     .sliding_window()
                     .map(|sw| query_length.saturating_sub(sw))
                     .unwrap_or(0);
@@ -499,6 +517,7 @@ impl CacheEngine {
         num_kv_heads: usize,
         softmax_scale: f32,
         sliding_window: Option<usize>,
+        #[cfg(feature = "nccl")] world_size: usize,
     ) -> Result<Self, CacheEngineError> {
         info!("Starting a new `CacheEngine` instance");
         let mut this = Self {
@@ -520,8 +539,29 @@ impl CacheEngine {
             span: info_span!("cache-engine"),
         };
 
-        this.cpu_cache = this.allocate_blocks(this.get_num_cpu_blocks(), &Device::Cpu)?;
-        this.gpu_cache = this.allocate_blocks(this.get_num_gpu_blocks(), &device)?;
+        // NOTE: each GPU worker needs its own set of allocated CPU tensor blocks
+        let start = Instant::now();
+        this.cpu_cache = this.allocate_blocks(
+            this.get_num_cpu_blocks(),
+            &Device::Cpu,
+            #[cfg(feature = "nccl")]
+            world_size,
+        )?;
+        info!(
+            "Time taken to allocate CPU blocks: {:?}s",
+            start.elapsed().as_secs_f32()
+        );
+        let start = Instant::now();
+        this.gpu_cache = this.allocate_blocks(
+            this.get_num_gpu_blocks(),
+            &device,
+            #[cfg(feature = "nccl")]
+            world_size,
+        )?;
+        info!(
+            "Time taken to allocate GPU blocks: {:?}s",
+            start.elapsed().as_secs_f32()
+        );
 
         Ok(this)
     }
@@ -532,12 +572,21 @@ impl CacheEngine {
         &mut self,
         num_blocks: usize,
         device: &Device,
+        #[cfg(feature = "nccl")] world_size: usize,
     ) -> Result<Vec<Tensor>, CacheEngineError> {
         let _enter = self.span.enter();
+        #[cfg(not(feature = "nccl"))]
         let kv_cache_shape = FlashAttention::get_kv_cache_shape(
             num_blocks,
             self.get_block_size(),
-            self.attention.num_kv_heads,
+            self.attention.num_kv_heads, // tensor parallelism across kv heads dimension
+            self.attention.head_dim,
+        );
+        #[cfg(feature = "nccl")]
+        let kv_cache_shape = FlashAttention::get_kv_cache_shape(
+            num_blocks,
+            self.get_block_size(),
+            self.attention.num_kv_heads / world_size, // tensor parallelism across kv heads dimension
             self.attention.head_dim,
         );
         let mut kv_caches = Vec::with_capacity(self.num_hidden_layers);
