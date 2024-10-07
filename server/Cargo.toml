@@ -1,5 +1,5 @@
 [package]
-name = "atoma-node-inference-server"
+name = "atoma-infer-server"
 version.workspace = true
 edition = "2021"
 

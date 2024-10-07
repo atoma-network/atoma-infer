@@ -31,7 +31,7 @@ jobs:
 
     - name: Run the inference server
       run: |
-        cargo run --bin atoma-node-inference-server &
+        cargo run --bin atoma-infer-server &
         SERVER_PID=$!
         # Wait for the server to start
         sleep 5
