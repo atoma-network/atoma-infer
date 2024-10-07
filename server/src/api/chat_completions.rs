@@ -2,6 +2,7 @@
 
 #[cfg(feature = "vllm")]
 use atoma_backends::{GenerateParameters, GenerateRequest, GenerateRequestOutput};
+use utoipa::ToSchema;
 use std::{
     collections::HashMap,
     time::{Instant, SystemTime},
@@ -400,7 +401,7 @@ pub enum StopCondition {
     String(String),
 }
 
-#[derive(Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, PartialEq, Serialize, Deserialize, JsonSchema, ToSchema)]
 #[serde(rename(serialize = "requestBody", deserialize = "requestBody"))]
 pub struct RequestBody {
     /// A list of messages comprising the conversation so far.
@@ -639,7 +640,7 @@ impl RequestBody {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct ChatCompletionResponse {
     pub id: String,
     pub object: String,

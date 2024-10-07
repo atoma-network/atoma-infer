@@ -228,7 +228,7 @@ pub async fn run_server(
         (status = 200, description = "Successful chat completion response", body = ChatCompletionResponse),
         (status = 500, description = "Internal server error", body = serde_json::Value)
     ),
-    tags("Atoma's Chat Completions")
+    tag("Atoma's Chat Completions API handler")
 )]
 pub async fn completion_handler(
     app_state: State<AppState>,
