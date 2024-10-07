@@ -84,9 +84,9 @@ impl CustomOp1 for AllGather {
         let num_devices = self.comm.world_size();
         let dev = s.device().clone();
         let mut new_shape: Vec<usize> = l.shape().dims().to_vec();
-        new_shape.last_mut().map(|last| {
+        if let Some(last) = new_shape.last_mut() {
             *last *= num_devices;
-        });
+        }
         // new_shape[new_shape.len() - 1] *= num_devices;
         let new_shape = Shape::from(new_shape);
         let dst = match s.dtype() {
