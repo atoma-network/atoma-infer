@@ -28,6 +28,8 @@ use tokio::{
     task::JoinHandle,
 };
 use tracing::{error, info};
+use utoipa::OpenApi;
+use utoipa_swagger_ui::SwaggerUi;
 
 use api::{
     chat_completions::{ChatCompletionResponse, RequestBody},
@@ -58,6 +60,19 @@ pub struct AppState {
     llm_service_sender: UnboundedSender<(GenerateRequest, oneshot::Sender<GenerateRequestOutput>)>,
     shutdown_signal_sender: mpsc::Sender<()>,
 }
+
+#[derive(OpenApi)]
+#[openapi(
+    paths(
+        completion_handler,
+        validate_completion_handler
+    ),
+    components(schemas(ChatCompletionResponse, RequestBody)),
+    tags(
+        (name = "Atoma's Chat Completions", description = "Atoma's Chat completion API")
+    )
+)]
+pub struct ApiDoc;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -98,6 +113,35 @@ async fn main() -> anyhow::Result<()> {
     run_server(listener, app_state, join_handle).await
 }
 
+/// Runs the Axums server and manages its lifecycle, including graceful shutdown.
+///
+/// This function sets up the HTTP router, starts the server, and handles the shutdown process
+/// for both the server and the LLM service.
+///
+/// # Arguments
+///
+/// * `listener` - A `TcpListener` that the server will bind to.
+/// * `app_state` - The `AppState` containing shared application data.
+/// * `join_handle` - A `JoinHandle` for the LLM service task.
+///
+/// # Returns
+///
+/// Returns `Ok(())` if the server runs and shuts down successfully, or an error if any part
+/// of the process fails.
+///
+/// # Flow
+///
+/// 1. Sets up the HTTP router with routes for chat completions and validation.
+/// 2. Configures a shutdown signal to listen for Ctrl+C.
+/// 3. Starts the server with graceful shutdown capabilities.
+/// 4. Waits for the shutdown signal.
+/// 5. Initiates shutdown of the app state and LLM service.
+/// 6. Waits for the LLM service to shut down, with a timeout.
+///
+/// # Error Handling
+///
+/// - Returns an error if the server fails to start or encounters an error during operation.
+/// - Logs errors if the LLM service encounters issues during shutdown or times out.
 pub async fn run_server(
     listener: TcpListener,
     app_state: AppState,
@@ -110,7 +154,8 @@ pub async fn run_server(
             &format!("{CHAT_COMPLETIONS_PATH}/validate"),
             post(validate_completion_handler),
         )
-        .with_state(app_state);
+        .with_state(app_state)
+        .merge(SwaggerUi::new("/docs").url("/api-docs/openapi.json", ApiDoc::openapi()));
 
     let shutdown_signal = async {
         signal::ctrl_c()
@@ -175,6 +220,16 @@ pub async fn run_server(
 ///   - Sending the request to the LLM service fails.
 ///   - Receiving the response from the LLM service fails.
 ///   - Converting the LLM output to a `ChatCompletionResponse` fails.
+#[utoipa::path(
+    post,
+    path = CHAT_COMPLETIONS_PATH,
+    request_body = RequestBody,
+    responses(
+        (status = 200, description = "Successful chat completion response", body = ChatCompletionResponse),
+        (status = 500, description = "Internal server error", body = serde_json::Value)
+    ),
+    tags("Atoma's Chat Completions")
+)]
 pub async fn completion_handler(
     app_state: State<AppState>,
     headers: HeaderMap,
