@@ -32,7 +32,7 @@ This project is currently in the early stages of development. We are looking for
 - [ ] - Streaming responses through SSE.
 - [ ] - Support for different quantization techniques.
 - [ ] - FlashAttention3.
-- [-] - Utoipa OpenAPI documentation.
+- [x] - Utoipa OpenAPI documentation.
 - [ ] - Support for multi-modal models.
 - [ ] - Support backends other than vLLM.
 - [ ] - Prompt caching.
