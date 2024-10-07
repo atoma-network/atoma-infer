@@ -38,6 +38,7 @@ This project is currently in the early stages of development. We are looking for
 - [ ] - Prompt caching.
 - [ ] - Speculative decoding.
 - [ ] - Parallel sampling for multiple completions.
+- [ ] - Support for asymmetric signature server authentication.
 
 ## Getting Started
 
