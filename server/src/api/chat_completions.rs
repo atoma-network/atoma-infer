@@ -2,11 +2,11 @@
 
 #[cfg(feature = "vllm")]
 use atoma_backends::{GenerateParameters, GenerateRequest, GenerateRequestOutput};
-use utoipa::ToSchema;
 use std::{
     collections::HashMap,
     time::{Instant, SystemTime},
 };
+use utoipa::ToSchema;
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize};
