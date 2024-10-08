@@ -157,6 +157,7 @@ pub async fn run_server(
             post(validate_completion_handler),
         )
         .route(MODELS_PATH, get(models_handler))
+        .with_state(app_state)
         .merge(SwaggerUi::new("/docs").url("/api-docs/openapi.json", ApiDoc::openapi()));
 
     let shutdown_signal = async {
