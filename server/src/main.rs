@@ -14,7 +14,7 @@ use axum::{
     extract::State,
     http::{header, HeaderMap, StatusCode},
     response::IntoResponse,
-    routing::post,
+    routing::{get, post},
     Json, Router,
 };
 use serde_json::json;
@@ -43,6 +43,7 @@ pub mod tests;
 // TODO: Add version path prefix, eg. `/v1` although maybe something along the lines of `/beta` would be more fitting?
 /// The URL path to POST JSON for model chat completions.
 pub const CHAT_COMPLETIONS_PATH: &str = "/chat/completions";
+pub const MODELS_PATH: &str = "/models";
 pub const DEFAULT_SERVER_ADDRESS: &str = "0.0.0.0";
 pub const DEFAULT_SERVER_PORT: &str = "8080";
 pub const AUTH_BEARER_PREFIX: &str = "Bearer ";
@@ -85,6 +86,7 @@ async fn main() -> anyhow::Result<()> {
         env::var("ATOMA_NODE_INFERENCE_SERVER_ADDRESS").unwrap_or(DEFAULT_SERVER_ADDRESS.into());
     let config_path = cli.config_path;
     let port = env::var("ATOMA_NODE_INFERENCE_SERVER_PORT").unwrap_or(DEFAULT_SERVER_PORT.into());
+    info!("Starting OpenAI API server at {address}:{port}");
     let listener = TcpListener::bind(format!("{address}:{port}")).await?;
 
     let (llm_service_sender, llm_service_receiver) = mpsc::unbounded_channel();
@@ -154,6 +156,7 @@ pub async fn run_server(
             &format!("{CHAT_COMPLETIONS_PATH}/validate"),
             post(validate_completion_handler),
         )
+        .route(MODELS_PATH, get(models_handler))
         .with_state(app_state)
         .merge(SwaggerUi::new("/docs").url("/api-docs/openapi.json", ApiDoc::openapi()));
 
@@ -188,6 +191,32 @@ pub async fn run_server(
     info!("Server and LlmService shutdown complete");
 
     Ok(())
+}
+
+/// Hardcore models for now, required by the OpenAI to know which models is this server running.
+pub async fn models_handler(
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    info!("Received request for models");
+    Ok(Json(json!({
+      "data": [
+        {
+          "actions": [],
+          "created": 1706048358,
+          "id": "meta-llama/Llama-3.2-3B-Instruct",
+          "name": "meta-llama/Llama-3.2-3B-Instruct",
+          "object": "model",
+          "openai": {
+              "created": 1706048358,
+              "id": "meta-llama/Llama-3.2-3B-Instruct",
+              "object": "model",
+              "owned_by": "system"
+          },
+          "owned_by": "meta",
+          "urlIdx": 0
+        }
+      ]
+    })))
 }
 
 /// Handles chat completion requests by processing the input, sending it to the LLM service,

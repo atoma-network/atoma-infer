@@ -13,6 +13,10 @@
 #include "philox.cuh"
 #include "utils.h"
 
+#ifdef _WIN32
+#define M_LOG2E 1.44269504088896340736f
+#endif  // _WIN32
+
 namespace flash {
 
 using namespace cute;

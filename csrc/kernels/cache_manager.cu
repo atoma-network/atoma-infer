@@ -7,7 +7,9 @@
 #include <vector>
 
 typedef unsigned short uint16_t;
+#ifndef _WIN32
 typedef unsigned long uint32_t;
+#endif  // !_WIN32
 
 namespace vllm {
 
