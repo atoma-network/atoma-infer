@@ -415,7 +415,7 @@ impl LlmEngine {
                     logprobs: sequence_guard_lock.output_logprobs.clone(),
                     num_prompt_tokens: sequence_guard_lock.prompt_token_ids().len(),
                     num_completion_tokens: sequence_guard_lock.tokens.len(),
-                    output_text: generated_text,
+                    output_text: generated_text.clone(),
                 };
                 response_sender
                     .send(StreamResponse::Chunk(streaming_output))

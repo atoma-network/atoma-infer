@@ -265,7 +265,7 @@ impl LlmService {
         loop {
             tokio::select! {
                 Some(service_request) = self.service_request_receiver.recv() => {
-                    let (request, response_sender) = match service_request {
+                    match service_request {
                         ServiceRequest::GenerateRequest(request, response_sender) => {
                             let sequence_group = match self.handle_request(request).await {
                                 Ok(sequence_group) => sequence_group,
