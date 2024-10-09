@@ -13,7 +13,7 @@ use std::task::{Context, Poll};
 /// of the streaming process.
 pub struct Streamer {
     /// The receiver end of a channel for incoming `ChatCompletionChunk`s.
-    receiver: Receiver<GenerateStreamingOutput>,
+    receiver: Receiver<StreamResponse>,
     /// The current status of the streaming process.
     status: StreamStatus,
     /// The model used for generating the output.
@@ -86,7 +86,7 @@ impl Stream for Streamer {
                 }
                 StreamResponse::Error(error) => {
                     self.status = StreamStatus::Failed { error };
-                    Poll::Ready(Some(Ok(Event::default().data(e))))
+                    Poll::Ready(Some(Ok(Event::default().data(error))))
                 }
             },
             Err(error) => {

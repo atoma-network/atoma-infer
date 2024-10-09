@@ -1,6 +1,4 @@
-use clap::Parser;
 use std::{
-    env,
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
@@ -10,8 +8,7 @@ use std::{
 
 #[cfg(feature = "vllm")]
 use atoma_backends::{
-    GenerateRequest, GenerateRequestOutput, GenerateStreamingOutput, LlamaModel, LlmService,
-    ServiceRequest,
+    GenerateRequest, GenerateRequestOutput, GenerateStreamingOutput, ServiceRequest,
 };
 use axum::{
     extract::State,
@@ -20,7 +17,8 @@ use axum::{
     routing::post,
     Json, Router,
 };
-use serde_json::json;
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 use tokio::{
     net::TcpListener,
     signal,
@@ -31,18 +29,19 @@ use tokio::{
     task::JoinHandle,
 };
 use tracing::{error, info, instrument};
-use utoipa::OpenApi;
+use utoipa::{OpenApi, ToSchema};
 use utoipa_swagger_ui::SwaggerUi;
 
 use crate::{
     api::{
-        chat_completions::{ChatCompletionChunk, ChatCompletionResponse, RequestBody},
+        chat_completions::{ChatCompletionResponse, RequestBody},
         validate_schema::validate_with_schema,
     },
     stream::Streamer,
 };
 
 pub const CHAT_COMPLETIONS_PATH: &str = "/chat/completions";
+pub const AUTH_BEARER_PREFIX: &str = "Bearer ";
 
 /// Represents the shared state of the application.
 ///
@@ -58,14 +57,7 @@ pub struct AppState {
     ///
     /// This channel is used to send generate requests to the LLM service and receive
     /// the output through a oneshot channel.
-    pub llm_service_sender:
-        UnboundedSender<(GenerateRequest, oneshot::Sender<GenerateRequestOutput>)>,
-    /// A sender for streaming LLM service requests.
-    ///
-    /// This channel is used to send generate requests to the LLM service for streaming responses.
-    /// The output is sent through an mpsc channel to allow for multiple messages.
-    pub llm_service_streaming_sender:
-        UnboundedSender<(GenerateRequest, mpsc::Sender<GenerateStreamingOutput>)>,
+    pub llm_service_sender: UnboundedSender<ServiceRequest>,
     /// A sender for the shutdown signal.
     ///
     /// This channel is used to send a shutdown signal to gracefully stop the server.
@@ -251,13 +243,13 @@ pub async fn completion_handler(
     let generate_request = request.to_generate_request(request_id.clone());
 
     let chat_response = if stream {
-        ChatResponse::Stream(handle_generate_stream_request(
-            &app_state,
-            model,
-            generate_request,
-        ))
+        ChatResponse::Stream(
+            handle_generate_stream_request(&app_state, model, generate_request).await?,
+        )
     } else {
-        ChatResponse::Completion(handle_generate_request(&app_state, generate_request))
+        ChatResponse::Completion(
+            handle_generate_request(&app_state, model, generate_request).await?,
+        )
     };
 
     Ok(Json(chat_response))
@@ -343,13 +335,14 @@ pub async fn validate_completion_handler(
 #[instrument(skip_all)]
 async fn handle_generate_request(
     app_state: &AppState,
+    model: String,
     generate_request: GenerateRequest,
 ) -> Result<Json<ChatCompletionResponse>, (StatusCode, Json<Value>)> {
+    let request_id = generate_request.request_id.clone();
     let (sender, receiver) = oneshot::channel();
     if let Err(send_error) = app_state
         .llm_service_sender
         .send(ServiceRequest::GenerateRequest(generate_request, sender))
-        .await?
     {
         error!("Failed to send request to LLM Service: {}", send_error);
         return Err((
@@ -421,7 +414,7 @@ async fn handle_generate_request(
 ///
 /// # Streaming Behavior
 ///
-/// The function sets up a streaming channel using `flume::channel()` and creates a `Streamer`
+/// The function sets up a streaming channel using `flume::unbounded()` and creates a `Streamer`
 /// to manage the response stream. The `Sse` struct is used to wrap the streamer and configure
 /// Server-Sent Events, including keep-alive functionality to maintain the connection.
 ///
@@ -435,14 +428,14 @@ async fn handle_generate_stream_request(
     model: String,
     generate_request: GenerateRequest,
 ) -> Result<Sse<Streamer>, (StatusCode, Json<Value>)> {
-    let (sender, receiver) = flume::channel();
-    if let Err(send_error) = app_state
-        .llm_service_sender
-        .send(ServiceRequest::GenerateStreamingRequest(
-            generate_request,
-            sender,
-        ))
-        .await
+    let (sender, receiver) = flume::unbounded();
+    if let Err(send_error) =
+        app_state
+            .llm_service_sender
+            .send(ServiceRequest::GenerateStreamingRequest(
+                generate_request,
+                sender,
+            ))
     {
         error!("Failed to send request to LLM Service: {}", send_error);
         return Err((

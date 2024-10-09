@@ -1,7 +1,9 @@
 //! Responsible for creating the json schema associated with the AtomaAPI, which is modeled after OpenAI's own API.
 
 #[cfg(feature = "vllm")]
-use atoma_backends::{GenerateParameters, GenerateRequest, GenerateRequestOutput};
+use atoma_backends::{
+    GenerateParameters, GenerateRequest, GenerateRequestOutput, GenerateStreamingOutput,
+};
 use std::{
     collections::HashMap,
     time::{Instant, SystemTime},

@@ -1,25 +1,11 @@
 use clap::Parser;
 use std::{
     env,
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        Arc,
-    },
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    sync::{atomic::AtomicU64, Arc},
 };
 
 #[cfg(feature = "vllm")]
-use atoma_backends::{
-    GenerateRequest, GenerateRequestOutput, GenerateStreamingOutput, LlamaModel, LlmService,
-};
-use axum::{
-    extract::State,
-    http::{header, HeaderMap, StatusCode},
-    response::{IntoResponse, Sse},
-    routing::post,
-    Json, Router,
-};
-use serde_json::json;
+use atoma_backends::{LlamaModel, LlmService};
 use tokio::{
     net::TcpListener,
     signal,
@@ -29,15 +15,8 @@ use tokio::{
     },
     task::JoinHandle,
 };
-use tracing::{error, info};
-use utoipa::OpenApi;
-use utoipa_swagger_ui::SwaggerUi;
 
-use api::{
-    chat_completions::{ChatCompletionChunk, ChatCompletionResponse, RequestBody},
-    validate_schema::validate_with_schema,
-};
-use server::CHAT_COMPLETIONS_PATH;
+use server::{run_server, AppState, AUTH_BEARER_TOKEN};
 
 pub mod api;
 pub mod server;
@@ -49,7 +28,6 @@ pub mod tests;
 /// The URL path to POST JSON for model chat completions.
 pub const DEFAULT_SERVER_ADDRESS: &str = "0.0.0.0";
 pub const DEFAULT_SERVER_PORT: &str = "8080";
-pub const AUTH_BEARER_PREFIX: &str = "Bearer ";
 
 #[derive(Debug, Parser)]
 #[command(author, version, about, long_about = None)]
@@ -95,6 +73,7 @@ async fn main() -> anyhow::Result<()> {
         llm_service_sender,
         llm_service_streaming_sender,
         shutdown_signal_sender,
+        streaming_interval_in_millis: env::var("STREAMING_INTERVAL_IN_MILLIS").unwrap_or(100),
     };
     run_server(listener, app_state, join_handle).await
 }
