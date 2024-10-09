@@ -169,7 +169,7 @@ pub async fn run_server(
 
 /// Represents the response from a chat completion request.
 /// This enum can either be a full completion response or a stream chunk.
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, ToSchema)]
 pub enum ChatResponse {
     /// A complete chat completion response.
     Completion(ChatCompletionResponse),
