@@ -553,6 +553,18 @@ pub struct InferenceOutput {
     pub stop_reason: Option<u32>,
 }
 
+#[derive(Clone, Debug)]
+pub struct GenerateStreamingOutput {
+    pub request_id: String,
+    pub created: u32,
+    pub finish_reason: Option<String>,
+    pub logprobs: Vec<HashMap<u32, LogProb>>,
+    pub num_prompt_tokens: usize,
+    pub num_completion_tokens: usize,
+    pub output_text: String,
+    pub usage: Usage,
+}
+
 #[derive(Debug, Error)]
 pub enum EngineError {
     #[error("Scheduler error: `{0}`")]
