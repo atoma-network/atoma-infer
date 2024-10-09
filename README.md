@@ -29,7 +29,7 @@ This project is currently in the early stages of development. We are looking for
 - [x] - Highly-optimized inference request scheduler.
 - [x] - Continuous batching of inference requests.
 - [x] - CPU offloading of inference requests, through CPU/GPU request swapping.
-- [ ] - Streaming responses through SSE.
+- [x] - Streaming responses through SSE.
 - [ ] - Support for different quantization techniques.
 - [ ] - FlashAttention3.
 - [x] - Utoipa OpenAPI documentation.
