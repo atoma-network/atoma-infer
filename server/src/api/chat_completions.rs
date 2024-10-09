@@ -853,6 +853,7 @@ pub mod json_schema_tests {
     use super::{
         messages, ChatCompletionResponse, Choice, FinishReason, Message, MessageContent,
         MessageContentPart, MessageContentPartImageUrl, ToolCall, ToolCallFunction, Usage,
+        Delta, StreamChoice, ChatCompletionChunk,
     };
     use crate::{validate_with_schema, RequestBody};
 
