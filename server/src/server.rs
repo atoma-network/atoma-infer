@@ -7,9 +7,7 @@ use std::{
 };
 
 #[cfg(feature = "vllm")]
-use atoma_backends::{
-    GenerateRequest, ServiceRequest,
-};
+use atoma_backends::{GenerateRequest, ServiceRequest};
 use axum::{
     extract::State,
     http::{header, HeaderMap, StatusCode},

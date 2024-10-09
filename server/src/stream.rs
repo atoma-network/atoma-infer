@@ -77,7 +77,7 @@ impl Stream for Streamer {
                         self.status = StreamStatus::Started;
                     }
                     let response = ChatCompletionChunk::try_from((self.model.clone(), chunk))
-                        .map_err(|e| Error::new(e))?;
+                        .map_err(Error::new)?;
                     Poll::Ready(Some(Event::default().json_data(response)))
                 }
                 StreamResponse::Finished => {
