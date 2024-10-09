@@ -177,6 +177,15 @@ pub enum ChatResponse {
     Stream(Sse<Streamer>),
 }
 
+impl IntoResponse for ChatResponse {
+    fn into_response(self) -> axum::response::Response {
+        match self {
+            ChatResponse::Completion(completion) => Json(completion).into_response(),
+            ChatResponse::Stream(stream) => stream.into_response(),
+        }
+    }
+}
+
 /// Handles chat completion requests by processing the input, sending it to the LLM service,
 /// and returning the generated response.
 ///
