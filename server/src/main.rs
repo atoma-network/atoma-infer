@@ -6,15 +6,7 @@ use std::{
 
 #[cfg(feature = "vllm")]
 use atoma_backends::{LlamaModel, LlmService};
-use tokio::{
-    net::TcpListener,
-    signal,
-    sync::{
-        mpsc::{self, UnboundedSender},
-        oneshot,
-    },
-    task::JoinHandle,
-};
+use tokio::{net::TcpListener, sync::mpsc};
 
 use server::{run_server, AppState};
 

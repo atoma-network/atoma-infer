@@ -8,7 +8,7 @@ use std::{
 
 #[cfg(feature = "vllm")]
 use atoma_backends::{
-    GenerateRequest, GenerateRequestOutput, GenerateStreamingOutput, ServiceRequest,
+    GenerateRequest, ServiceRequest,
 };
 use axum::{
     extract::State,
@@ -17,7 +17,6 @@ use axum::{
     routing::post,
     Json, Router,
 };
-use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::{
     net::TcpListener,

@@ -66,7 +66,7 @@ pub enum StreamStatus {
 impl Stream for Streamer {
     type Item = Result<Event, Error>;
 
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+    fn poll_next(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         if self.status == StreamStatus::Completed {
             return Poll::Ready(None);
         }

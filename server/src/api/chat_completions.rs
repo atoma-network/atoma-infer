@@ -829,7 +829,7 @@ impl TryFrom<(String, GenerateStreamingOutput)> for ChatCompletionChunk {
         let chunk = ChatCompletionChunk {
             id,
             object: "chat.completion.chunk".into(),
-            created: value.created,
+            created,
             model,
             system_fingerprint: "vllm".into(),
             choices,
