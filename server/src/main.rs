@@ -77,7 +77,6 @@ async fn main() -> anyhow::Result<()> {
     // TODO: Add model dispatcher
     let llm_service = LlmService::start::<LlamaModel, _>(
         llm_service_receiver,
-        llm_service_streaming_receiver,
         config_path,
         shutdown_signal_receiver,
     )

@@ -11,6 +11,7 @@ use std::{
 #[cfg(feature = "vllm")]
 use atoma_backends::{
     GenerateRequest, GenerateRequestOutput, GenerateStreamingOutput, LlamaModel, LlmService,
+    ServiceRequest,
 };
 use axum::{
     extract::State,
@@ -176,7 +177,7 @@ pub async fn run_server(
 
 /// Represents the response from a chat completion request.
 /// This enum can either be a full completion response or a stream chunk.
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub enum ChatResponse {
     /// A complete chat completion response.
     Completion(ChatCompletionResponse),
@@ -228,7 +229,7 @@ pub async fn completion_handler(
     app_state: State<AppState>,
     headers: HeaderMap,
     Json(request): Json<RequestBody>,
-) -> Result<Json<ChatCompletionResponse>, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<Json<ChatResponse>, (StatusCode, Json<serde_json::Value>)> {
     let request_number = app_state.request_counter.fetch_add(1, Ordering::SeqCst);
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -249,52 +250,15 @@ pub async fn completion_handler(
     let stream = request.stream().unwrap_or(false);
     let generate_request = request.to_generate_request(request_id.clone());
 
-    let (sender, receiver) = oneshot::channel();
-    if let Err(send_error) = app_state
-        .llm_service_sender
-        .send((generate_request, sender))
-        .await?
-    {
-        error!("Failed to send request to LLM Service: {}", send_error);
-        return Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({
-                "error": {
-                    "message": "Internal server error: failed to process request",
-                    "type": "internal_error",
-                    "request_id": request_id,
-                }
-            })),
-        ));
-    }
-    let outputs = match receiver.await {
-        Ok(outputs) => outputs,
-        Err(_) => {
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({
-                    "error": {
-                        "message": "Failed to receive response from LLM Service",
-                        "type": "internal_error",
-                        "request_id": request_id,
-                    }
-                })),
-            ));
-        }
+    let chat_response = if stream {
+        ChatResponse::Stream(handle_generate_stream_request(
+            &app_state,
+            model,
+            generate_request,
+        ))
+    } else {
+        ChatResponse::Completion(handle_generate_request(&app_state, generate_request))
     };
-
-    let chat_response = ChatCompletionResponse::try_from((model, outputs)).map_err(|err| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({
-                "error": {
-                    "message": err,
-                    "type": "internal_error",
-                    "request_id": request_id,
-                }
-            })),
-        )
-    })?;
 
     Ok(Json(chat_response))
 }
@@ -384,7 +348,7 @@ async fn handle_generate_request(
     let (sender, receiver) = oneshot::channel();
     if let Err(send_error) = app_state
         .llm_service_sender
-        .send((generate_request, sender))
+        .send(ServiceRequest::GenerateRequest(generate_request, sender))
         .await?
     {
         error!("Failed to send request to LLM Service: {}", send_error);
@@ -468,13 +432,16 @@ async fn handle_generate_request(
 #[instrument(skip_all)]
 async fn handle_generate_stream_request(
     app_state: &AppState,
+    model: String,
     generate_request: GenerateRequest,
 ) -> Result<Sse<Streamer>, (StatusCode, Json<Value>)> {
     let (sender, receiver) = flume::channel();
-    let model = generate_request.model.clone();
     if let Err(send_error) = app_state
         .llm_service_sender
-        .send((generate_request, sender))
+        .send(ServiceRequest::GenerateStreamingRequest(
+            generate_request,
+            sender,
+        ))
         .await
     {
         error!("Failed to send request to LLM Service: {}", send_error);

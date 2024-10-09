@@ -1,6 +1,6 @@
 use crate::api::chat_completions::ChatCompletionChunk;
 #[cfg(feature = "vllm")]
-use atoma_backends::GenerateStreamingOutput;
+use atoma_backends::{GenerateStreamingOutput, StreamResponse};
 use axum::{response::sse::Event, Error};
 use flume::Receiver;
 use futures::stream::Stream;

@@ -763,7 +763,7 @@ pub struct ChatCompletionChunk {
     /// A unique identifier for the model's configuration and version.
     pub system_fingerprint: String,
     /// An array of chat completion choices. Each choice represents a possible completion for the input.
-    pub choices: Vec<Choice>,
+    pub choices: Vec<StreamChoice>,
     /// Usage statistics for the completion request.
     pub usage: Usage,
 }
