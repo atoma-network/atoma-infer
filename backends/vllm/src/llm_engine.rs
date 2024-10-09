@@ -622,7 +622,7 @@ pub struct InferenceOutput {
 #[derive(Clone, Debug)]
 pub struct GenerateStreamingOutput {
     pub request_id: String,
-    pub created: u32,
+    pub created: u64,
     pub finish_reason: Option<String>,
     pub logprobs: Vec<HashMap<u32, LogProb>>,
     pub num_prompt_tokens: usize,
