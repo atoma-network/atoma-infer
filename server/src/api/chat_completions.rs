@@ -851,11 +851,11 @@ pub mod json_schema_tests {
     use serde_json::json;
 
     use super::{
-        messages, ChatCompletionResponse, Choice, FinishReason, Message, MessageContent,
-        MessageContentPart, MessageContentPartImageUrl, ToolCall, ToolCallFunction, Usage,
-        Delta, StreamChoice, ChatCompletionChunk,
+        messages, ChatCompletionChunk, ChatCompletionResponse, Choice, Delta, FinishReason,
+        Message, MessageContent, MessageContentPart, MessageContentPartImageUrl, RequestBody,
+        StreamChoice, ToolCall, ToolCallFunction, Usage,
     };
-    use crate::{validate_with_schema, RequestBody};
+    use crate::api::validate_with_schema;
 
     /// Used in tandem with a schema file, this will check if there are
     /// changes to the JSON API schema, and show a diff if so.
