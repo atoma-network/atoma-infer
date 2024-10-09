@@ -230,7 +230,7 @@ pub async fn completion_handler(
     app_state: State<AppState>,
     headers: HeaderMap,
     Json(request): Json<RequestBody>,
-) -> Result<Json<ChatResponse>, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<ChatResponse, (StatusCode, Json<serde_json::Value>)> {
     let request_number = app_state.request_counter.fetch_add(1, Ordering::SeqCst);
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -261,7 +261,7 @@ pub async fn completion_handler(
         )
     };
 
-    Ok(Json(chat_response))
+    Ok(chat_response)
 }
 
 /// Validates the incoming JSON request body against the OpenAI Chat Completion API schema.
