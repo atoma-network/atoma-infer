@@ -827,7 +827,7 @@ impl TryFrom<(String, GenerateStreamingOutput)> for ChatCompletionChunk {
             finish_reason: value.finish_reason,
         }];
         let chunk = ChatCompletionChunk {
-            id: value.request_id,
+            id,
             object: "chat.completion.chunk".into(),
             created: value.created,
             model,

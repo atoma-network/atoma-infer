@@ -1,6 +1,6 @@
 use crate::api::chat_completions::ChatCompletionChunk;
 #[cfg(feature = "vllm")]
-use atoma_backends::{GenerateStreamingOutput, StreamResponse};
+use atoma_backends::StreamResponse;
 use axum::{response::sse::Event, Error};
 use flume::Receiver;
 use futures::stream::Stream;
@@ -22,7 +22,7 @@ pub struct Streamer {
 
 impl Streamer {
     /// Creates a new `Streamer` with the specified receiver and model.
-    pub fn new(receiver: Receiver<GenerateStreamingOutput>, model: String) -> Self {
+    pub fn new(receiver: Receiver<StreamResponse>, model: String) -> Self {
         Self {
             receiver,
             status: StreamStatus::NotStarted,
@@ -85,7 +85,9 @@ impl Stream for Streamer {
                     Poll::Ready(Some(Ok(Event::default().data("[DONE]"))))
                 }
                 StreamResponse::Error(error) => {
-                    self.status = StreamStatus::Failed { error };
+                    self.status = StreamStatus::Failed {
+                        error: error.clone(),
+                    };
                     Poll::Ready(Some(Ok(Event::default().data(error))))
                 }
             },

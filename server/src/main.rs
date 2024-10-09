@@ -16,7 +16,7 @@ use tokio::{
     task::JoinHandle,
 };
 
-use server::{run_server, AppState, AUTH_BEARER_TOKEN};
+use server::{run_server, AppState};
 
 pub mod api;
 pub mod server;
@@ -50,7 +50,6 @@ async fn main() -> anyhow::Result<()> {
     let listener = TcpListener::bind(format!("{address}:{port}")).await?;
 
     let (llm_service_sender, llm_service_receiver) = mpsc::unbounded_channel();
-    let (llm_service_streaming_sender, llm_service_streaming_receiver) = mpsc::unbounded_channel();
     let (shutdown_signal_sender, shutdown_signal_receiver) = mpsc::channel(1);
     // TODO: Add model dispatcher
     let llm_service = LlmService::start::<LlamaModel, _>(
@@ -71,9 +70,10 @@ async fn main() -> anyhow::Result<()> {
     let app_state = AppState {
         request_counter: Arc::new(AtomicU64::new(0)),
         llm_service_sender,
-        llm_service_streaming_sender,
         shutdown_signal_sender,
-        streaming_interval_in_millis: env::var("STREAMING_INTERVAL_IN_MILLIS").unwrap_or(100),
+        streaming_interval_in_millis: env::var("STREAMING_INTERVAL_IN_MILLIS")
+            .map(|s| s.parse::<u64>().unwrap_or(100))
+            .unwrap_or(100),
     };
     run_server(listener, app_state, join_handle).await
 }

@@ -337,7 +337,7 @@ async fn handle_generate_request(
     app_state: &AppState,
     model: String,
     generate_request: GenerateRequest,
-) -> Result<Json<ChatCompletionResponse>, (StatusCode, Json<Value>)> {
+) -> Result<ChatCompletionResponse, (StatusCode, Json<Value>)> {
     let request_id = generate_request.request_id.clone();
     let (sender, receiver) = oneshot::channel();
     if let Err(send_error) = app_state
@@ -385,7 +385,7 @@ async fn handle_generate_request(
         )
     })?;
 
-    Ok(Json(chat_response))
+    Ok(chat_response)
 }
 
 /// Handles a streaming generate request by sending it to the LLM service and processing the response.
