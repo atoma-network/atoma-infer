@@ -264,30 +264,41 @@ impl LlmService {
     pub async fn run(mut self) -> Result<(), LlmServiceError> {
         loop {
             tokio::select! {
-                Some((request, response_sender)) = self.service_request_receiver.recv() => {
-                    let sequence_group = match self.handle_request(request).await {
-                        Ok(sequence_group) => sequence_group,
-                        Err(e) => {
-                            error!("Failed to handle request, with error: {e}");
-                            continue;
-                            // TODO: we need to handle errors more appropriately,
-                            //       we want to commit to these errors, as validation
-                            //       errors should also be committed to, by the node.
+                Some(service_request) = self.service_request_receiver.recv() => {
+                    let (request, response_sender) = match service_request {
+                        ServiceRequest::GenerateRequest(request, response_sender) => {
+                            let sequence_group = match self.handle_request(request).await {
+                                Ok(sequence_group) => sequence_group,
+                                Err(e) => {
+                                    error!("Failed to handle request, with error: {e}");
+                                    continue;
+                                    // TODO: we need to handle errors more appropriately,
+                                    //       we want to commit to these errors, as validation
+                                    //       errors should also be committed to, by the node.
+                                }
+                            };
+                            self
+                                .engine_sender
+                                .send(EngineRequest::GenerateRequest(sequence_group, response_sender))
+                                .map_err(Box::new)?;
+                        }
+                        ServiceRequest::GenerateStreamingRequest(request, response_sender) => {
+                            let sequence_group = match self.handle_request(request).await {
+                                Ok(sequence_group) => sequence_group,
+                                Err(e) => {
+                                    error!("Failed to handle request, with error: {e}");
+                                    continue;
+                                    // TODO: we need to handle errors more appropriately,
+                                    //       we want to commit to these errors, as validation
+                                    //       errors should also be committed to, by the node.
+                                }
+                            };
+                                self
+                                    .engine_sender
+                                    .send(EngineRequest::GenerateStreamingRequest(sequence_group, response_sender))
+                                    .map_err(Box::new)?;
                         }
                     };
-                    self.engine_sender.send((sequence_group, response_sender)).map_err(Box::new)?;
-                },
-                Some((request, response_sender)) = self.service_streaming_request_receiver.recv() => {
-                    let sequence_group = match self.handle_request(request).await {
-                        Ok(sequence_group) => sequence_group,
-                        Err(e) => {
-                            error!("Failed to handle request, with error: {e}");
-                            continue;
-                            // TODO: we need to handle errors more appropriately,
-                            //       we want to commit to these errors, as validation
-                        }
-                    };
-                    self.engine_sender.send((sequence_group, response_sender)).map_err(Box::new)?;
                 },
                 _ = self.shutdown_signal.recv() => {
                     info!("Received shutdown signal, stopping `LlmService` instance..");
@@ -457,7 +468,7 @@ pub enum LlmServiceError {
     #[error("Sequence error: `{0}`")]
     SequenceError(#[from] SequenceError),
     #[error("Send error: `{0}`")]
-    SendError(#[from] Box<SendError<(SequenceGroup, oneshot::Sender<GenerateRequestOutput>)>>),
+    SendError(#[from] Box<SendError<EngineRequest>>),
     #[error("Tokenizer error: `{0}`")]
     TokenizerError(#[from] TokenizerError),
 }

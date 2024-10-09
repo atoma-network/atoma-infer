@@ -43,7 +43,7 @@ pub struct LlmEngine {
     response_senders: HashMap<String, oneshot::Sender<GenerateRequestOutput>>,
     /// Hashmap for sending finished `SequenceGroup`'s outputs back to the OpenAI API service,
     /// with streaming responses.
-    response_streaming_senders: HashMap<String, flume::Sender<GenerateStreamingOutput>>,
+    response_streaming_senders: HashMap<String, flume::Sender<StreamResponse>>,
     /// Metadata of currently scheduled `SequenceGroup`s.
     sequence_groups_metadata: Vec<Arc<SequenceGroupMetadata>>,
     /// Current outputs from the scheduler.
@@ -96,9 +96,9 @@ impl LlmEngine {
         loop {
             tokio::select! {
                 Some(engine_request) = self.request_receiver.recv() => {
-                    info!("Received new sequence group, with id = {}", sequence_group.request_id);
                     match engine_request {
                         EngineRequest::GenerateRequest(sequence_group, response_sender) => {
+                            info!("Received new sequence group, with id = {}", sequence_group.request_id);
                             let sequence_group_request_id = sequence_group.request_id.clone();
                             // 1. Adds the received `SequenceGroup` to the `Scheduler` instance.
                             self.scheduler.add_sequence_group(sequence_group);
@@ -106,6 +106,7 @@ impl LlmEngine {
                             self.response_senders.insert(sequence_group_request_id, response_sender);
                         },
                         EngineRequest::GenerateStreamingRequest(sequence_group, response_sender) => {
+                            info!("Received new sequence group, with id = {}", sequence_group.request_id);
                             let sequence_group_request_id = sequence_group.request_id.clone();
                             // 1. Adds the received `SequenceGroup` to the `Scheduler` instance.
                             self.scheduler.add_sequence_group(sequence_group);
@@ -450,7 +451,7 @@ impl LlmEngine {
                 {
                     response_sender
                         .send(StreamResponse::Finished)
-                        .map_err(|e| EngineError::FlumeSendResponseError(e.to_string()))?;
+                        .map_err(|e| EngineError::FlumeSendError(e.to_string()))?;
                 }
                 sequence_guard_lock.set_sequence_status(SequenceStatus::FinishedStopped)
             }
@@ -465,7 +466,7 @@ impl LlmEngine {
                 {
                     response_sender
                         .send(StreamResponse::Finished)
-                        .map_err(|e| EngineError::FlumeSendResponseError(e.to_string()))?;
+                        .map_err(|e| EngineError::FlumeSendError(e.to_string()))?;
                 }
                 sequence_guard_lock.set_sequence_status(SequenceStatus::FinishedStopped)
             }
@@ -481,7 +482,7 @@ impl LlmEngine {
                 {
                     response_sender
                         .send(StreamResponse::Finished)
-                        .map_err(|e| EngineError::FlumeSendResponseError(e.to_string()))?;
+                        .map_err(|e| EngineError::FlumeSendError(e.to_string()))?;
                 }
                 sequence_guard_lock.set_sequence_status(SequenceStatus::FinishedLengthCapped)
             }
@@ -496,7 +497,7 @@ impl LlmEngine {
                 {
                     response_sender
                         .send(StreamResponse::Finished)
-                        .map_err(|e| EngineError::FlumeSendResponseError(e.to_string()))?;
+                        .map_err(|e| EngineError::FlumeSendError(e.to_string()))?;
                 }
                 sequence_guard_lock.set_sequence_status(SequenceStatus::FinishedLengthCapped)
             }
