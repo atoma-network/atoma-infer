@@ -63,25 +63,6 @@ pub enum StreamStatus {
     },
 }
 
-/// Represents the different types of responses that can be received during streaming.
-///
-/// This enum is used to encapsulate the various outcomes of a streaming operation,
-/// allowing for proper handling of successful chunks, errors, and stream completion.
-pub enum StreamResponse {
-    /// Represents a successful chunk of generated output.
-    ///
-    /// This variant is used when a new piece of generated content is available for streaming.
-    Chunk(GenerateStreamingOutput),
-    /// Represents an error that occurred during the streaming process.
-    ///
-    /// This variant is used when an error is encountered, allowing for proper error handling and reporting.
-    Error(String),
-    /// Indicates that the streaming process has finished successfully.
-    ///
-    /// This variant is used to signal the end of the stream when all data has been processed without errors.
-    Finished,
-}
-
 impl Stream for Streamer {
     type Item = Result<Event, Error>;
 
@@ -97,7 +78,7 @@ impl Stream for Streamer {
                     }
                     let response = ChatCompletionChunk::try_from((self.model.clone(), chunk))
                         .map_err(|e| Error::new(e))?;
-                    Poll::Ready(Some(Ok(Event::default().json_data(response))))
+                    Poll::Ready(Some(Event::default().json_data(response)))
                 }
                 StreamResponse::Finished => {
                     self.status = StreamStatus::Completed;

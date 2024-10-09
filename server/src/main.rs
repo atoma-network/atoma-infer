@@ -37,6 +37,7 @@ use api::{
     chat_completions::{ChatCompletionChunk, ChatCompletionResponse, RequestBody},
     validate_schema::validate_with_schema,
 };
+use server::CHAT_COMPLETIONS_PATH;
 
 pub mod api;
 pub mod server;
@@ -46,7 +47,6 @@ pub mod tests;
 
 // TODO: Add version path prefix, eg. `/v1` although maybe something along the lines of `/beta` would be more fitting?
 /// The URL path to POST JSON for model chat completions.
-pub const CHAT_COMPLETIONS_PATH: &str = "/chat/completions";
 pub const DEFAULT_SERVER_ADDRESS: &str = "0.0.0.0";
 pub const DEFAULT_SERVER_PORT: &str = "8080";
 pub const AUTH_BEARER_PREFIX: &str = "Bearer ";

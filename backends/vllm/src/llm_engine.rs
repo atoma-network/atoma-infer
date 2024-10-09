@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     sync::{Arc, RwLock},
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime},
 };
 
 use futures::StreamExt;
@@ -14,6 +14,7 @@ use tokio::sync::{
 use tracing::{debug, error, info, info_span, instrument, trace, Span};
 
 use crate::{
+    llm_service::EngineRequest,
     model_executor::ModelThreadDispatcher,
     policy::FcfsPolicy,
     scheduler::{Scheduler, SchedulerError, SchedulerOutputs},
@@ -37,9 +38,12 @@ pub struct LlmEngine {
     /// responsible for running prefill and decoding inference to produce AI-generated outputs.
     model_thread_dispatcher: ModelThreadDispatcher,
     /// Channel for receiving new requests from the running main `LlmService` instance.
-    request_receiver: UnboundedReceiver<(SequenceGroup, oneshot::Sender<GenerateRequestOutput>)>,
+    request_receiver: UnboundedReceiver<EngineRequest>,
     /// Hashmap for sending finished `SequenceGroup`'s outputs back to the OpenAI API service.
     response_senders: HashMap<String, oneshot::Sender<GenerateRequestOutput>>,
+    /// Hashmap for sending finished `SequenceGroup`'s outputs back to the OpenAI API service,
+    /// with streaming responses.
+    response_streaming_senders: HashMap<String, flume::Sender<GenerateStreamingOutput>>,
     /// Metadata of currently scheduled `SequenceGroup`s.
     sequence_groups_metadata: Vec<Arc<SequenceGroupMetadata>>,
     /// Current outputs from the scheduler.
@@ -56,10 +60,7 @@ impl LlmEngine {
     /// Constructor
     pub fn new(
         model_thread_dispatcher: ModelThreadDispatcher,
-        request_receiver: UnboundedReceiver<(
-            SequenceGroup,
-            oneshot::Sender<GenerateRequestOutput>,
-        )>,
+        request_receiver: UnboundedReceiver<EngineRequest>,
         scheduler: Scheduler<FcfsPolicy>,
         tokenizer: Tokenizer,
     ) -> Self {
@@ -71,6 +72,7 @@ impl LlmEngine {
             tokenizer,
             request_receiver,
             response_senders: HashMap::new(),
+            response_streaming_senders: HashMap::new(),
             span: info_span!("llm-engine"),
         }
     }
@@ -93,14 +95,24 @@ impl LlmEngine {
 
         loop {
             tokio::select! {
-                Some((sequence_group, response_sender)) = self.request_receiver.recv() => {
+                Some(engine_request) = self.request_receiver.recv() => {
                     info!("Received new sequence group, with id = {}", sequence_group.request_id);
-                    let sequence_group_request_id = sequence_group.request_id.clone();
-                    // 1. Adds the received `SequenceGroup` to the `Scheduler` instance.
-                    self.scheduler.add_sequence_group(sequence_group);
-                    // 2. Add the response sender to the `response_senders` map.
-                    self.response_senders.insert(sequence_group_request_id, response_sender);
-
+                    match engine_request {
+                        EngineRequest::GenerateRequest(sequence_group, response_sender) => {
+                            let sequence_group_request_id = sequence_group.request_id.clone();
+                            // 1. Adds the received `SequenceGroup` to the `Scheduler` instance.
+                            self.scheduler.add_sequence_group(sequence_group);
+                            // 2. Add the response sender to the `response_senders` map.
+                            self.response_senders.insert(sequence_group_request_id, response_sender);
+                        },
+                        EngineRequest::GenerateStreamingRequest(sequence_group, response_sender) => {
+                            let sequence_group_request_id = sequence_group.request_id.clone();
+                            // 1. Adds the received `SequenceGroup` to the `Scheduler` instance.
+                            self.scheduler.add_sequence_group(sequence_group);
+                            // 2. Add the response sender to the `response_senders` map.
+                            self.response_streaming_senders.insert(sequence_group_request_id, response_sender);
+                        },
+                    }
                     // 3. If the current `LlmInstance` doesn't have any on-going
                     //    scheduled sequence groups, we wait some time and then
                     //    schedule all the received requests so far.
@@ -164,13 +176,14 @@ impl LlmEngine {
                 if !request_outputs.is_empty() {
                     // 4. Extract the response sender from the `response_senders` hashmap
                     for request_output in request_outputs {
-                        let response_sender = self
-                            .response_senders
-                            .remove(&request_output.request_id)
-                            .ok_or(EngineError::SendResponseError(format!(
-                                "Failed to get response sender for request with id = {}",
-                                request_output.request_id
-                            )))?;
+                        let response_sender = if let Some(response_sender) =
+                            self.response_senders.remove(&request_output.request_id)
+                        {
+                            response_sender
+                        } else {
+                            // NOTE: In this case, the request was streamed back to the OpenAI API service, already.
+                            continue;
+                        };
                         response_sender
                             .send(request_output)
                             .map_err(|out| EngineError::SendResponseError(out.request_id))?;
@@ -197,7 +210,6 @@ impl LlmEngine {
     ///
     /// # Returns
     /// - `Ok(())` if the scheduling and request sending are successful.
-
     #[instrument(skip_all)]
     pub fn step(&mut self) -> Result<(), EngineError> {
         let span = self.span.clone();
@@ -385,7 +397,31 @@ impl LlmEngine {
                 .decode(&token_ids, true)
                 .map_err(|e| EngineError::TokenizerError(e.to_string()))?;
 
-            // 6. Update the `output_text` with the newly generated token,
+            // 7. If the request is a streaming request, we need to send the generated token to the client
+            //    as soon as possible.
+            if let Some(response_sender) = self
+                .response_streaming_senders
+                .get(&sequence_group_metadata.request_id)
+            {
+                let created = SystemTime::now()
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .expect("Failed to get system duration")
+                    .as_millis() as u64;
+                let streaming_output = GenerateStreamingOutput {
+                    request_id: sequence_group_metadata.request_id.clone(),
+                    created,
+                    finish_reason: None,
+                    logprobs: sequence_guard_lock.output_logprobs.clone(),
+                    num_prompt_tokens: sequence_guard_lock.prompt_token_ids().len(),
+                    num_completion_tokens: sequence_guard_lock.tokens.len(),
+                    output_text: generated_text,
+                };
+                response_sender
+                    .send(StreamResponse::Chunk(streaming_output))
+                    .map_err(|e| EngineError::FlumeSendError(e.to_string()))?;
+            }
+
+            // 8. Update the `output_text` with the newly generated token,
             //    if in decoding phase.
             let generated_token = if sequence_guard_lock.tokens.last().is_some() {
                 let start = sequence_guard_lock.output_text.chars().count();
@@ -394,14 +430,11 @@ impl LlmEngine {
                 let start = sequence_guard_lock.prompt.chars().count();
                 generated_text.chars().skip(start).collect()
             };
-
             sequence_guard_lock.output_text.push_str(&generated_token);
-            // TODO: send generated token to the client, if streaming is enabled
 
-            // 7. Check if the last generated token is a stop token.
+            // 9. Check if the last generated token is a stop token.
             //    If so, update the `Sequence`'s `SequenceState` and
             //    the `stop_reason`, as well.
-
             if stopping_criteria_params
                 .stop_sequences
                 .contains(&generated_token)
@@ -411,32 +444,64 @@ impl LlmEngine {
                     sequence_guard_lock.stop_reason = Some(generated_token_id)
                 }
 
+                if let Some(response_sender) = self
+                    .response_streaming_senders
+                    .get(&sequence_group_metadata.request_id)
+                {
+                    response_sender
+                        .send(StreamResponse::Finished)
+                        .map_err(|e| EngineError::FlumeSendResponseError(e.to_string()))?;
+                }
                 sequence_guard_lock.set_sequence_status(SequenceStatus::FinishedStopped)
             }
 
-            // 8. Check if the current `Sequence` last generated token
+            // 10. Check if the current `Sequence` last generated token
             //    id equals to the `eos_token_id`, in which case the
             //    the `Sequence`'s status should become `FinishedStopped`.
             if is_stop_token && !stopping_criteria_params.ignore_eos_token {
+                if let Some(response_sender) = self
+                    .response_streaming_senders
+                    .get(&sequence_group_metadata.request_id)
+                {
+                    response_sender
+                        .send(StreamResponse::Finished)
+                        .map_err(|e| EngineError::FlumeSendResponseError(e.to_string()))?;
+                }
                 sequence_guard_lock.set_sequence_status(SequenceStatus::FinishedStopped)
             }
 
-            // 9. Check if the `Sequence`'s length exceeds that of
+            // 11. Check if the `Sequence`'s length exceeds that of
             //     `SchedulerConfig`'s. If so, update the `Sequence`'s
             //     `SequenceStatus` to `FinishedLengthCapped`.
             let sequence_len = sequence_guard_lock.length();
             if sequence_len > self.scheduler.scheduler_config.max_model_len() {
+                if let Some(response_sender) = self
+                    .response_streaming_senders
+                    .get(&sequence_group_metadata.request_id)
+                {
+                    response_sender
+                        .send(StreamResponse::Finished)
+                        .map_err(|e| EngineError::FlumeSendResponseError(e.to_string()))?;
+                }
                 sequence_guard_lock.set_sequence_status(SequenceStatus::FinishedLengthCapped)
             }
 
-            // 10. Check if the `Sequence`'s output length exceeds that of
+            // 12. Check if the `Sequence`'s output length exceeds that of
             //     Request's `max_new_tokens`.
             let sequence_output_len = sequence_guard_lock.get_output_len();
             if sequence_output_len >= stopping_criteria_params.max_new_tokens as usize {
+                if let Some(response_sender) = self
+                    .response_streaming_senders
+                    .get(&sequence_group_metadata.request_id)
+                {
+                    response_sender
+                        .send(StreamResponse::Finished)
+                        .map_err(|e| EngineError::FlumeSendResponseError(e.to_string()))?;
+                }
                 sequence_guard_lock.set_sequence_status(SequenceStatus::FinishedLengthCapped)
             }
 
-            // 11. Update the `Sequence`'s tokens vec.
+            // 13. Update the `Sequence`'s tokens vec.
             sequence_guard_lock.tokens.push(generated_token)
         } else {
             // NOTE: in this case, we are not sampling newly
@@ -562,11 +627,31 @@ pub struct GenerateStreamingOutput {
     pub num_prompt_tokens: usize,
     pub num_completion_tokens: usize,
     pub output_text: String,
-    pub usage: Usage,
+}
+
+/// Represents the different types of responses that can be received during streaming.
+///
+/// This enum is used to encapsulate the various outcomes of a streaming operation,
+/// allowing for proper handling of successful chunks, errors, and stream completion.
+pub enum StreamResponse {
+    /// Represents a successful chunk of generated output.
+    ///
+    /// This variant is used when a new piece of generated content is available for streaming.
+    Chunk(GenerateStreamingOutput),
+    /// Represents an error that occurred during the streaming process.
+    ///
+    /// This variant is used when an error is encountered, allowing for proper error handling and reporting.
+    Error(String),
+    /// Indicates that the streaming process has finished successfully.
+    ///
+    /// This variant is used to signal the end of the stream when all data has been processed without errors.
+    Finished,
 }
 
 #[derive(Debug, Error)]
 pub enum EngineError {
+    #[error("Flume send error: `{0}`")]
+    FlumeSendError(String),
     #[error("Scheduler error: `{0}`")]
     SchedulerError(#[from] SchedulerError),
     #[error("Sequence error: `{0}`")]

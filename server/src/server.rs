@@ -41,6 +41,8 @@ use crate::{
     stream::Streamer,
 };
 
+pub const CHAT_COMPLETIONS_PATH: &str = "/chat/completions";
+
 /// Represents the shared state of the application.
 ///
 /// This struct contains various components that are shared across different parts of the
