@@ -1,3 +1,4 @@
+use crate::llm_service::ServiceRequest;
 use crate::models::llama::LlamaModel;
 use crate::{
     llm_service::LlmService,
@@ -39,7 +40,7 @@ async fn test_llama_model() {
         let request_id = format!("{}", i);
         let (sender, receiver) = tokio::sync::oneshot::channel();
         service_request_sender
-            .send((
+            .send(ServiceRequest::GenerateRequest(
                 GenerateRequest {
                     request_id,
                     inputs: prompt.clone(),
