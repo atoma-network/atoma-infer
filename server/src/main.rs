@@ -64,7 +64,7 @@ async fn main() -> anyhow::Result<()> {
         llm_service_sender,
         shutdown_signal_sender,
         streaming_interval_in_millis: env::var("STREAMING_INTERVAL_IN_MILLIS")
-            .map(|s| s.parse::<u64>().unwrap_or(100))
+            .and_then(|s| s.parse::<u64>().ok())
             .unwrap_or(100),
     };
     run_server(listener, app_state, join_handle).await
