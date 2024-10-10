@@ -100,7 +100,7 @@ impl LlmEngine {
                         EngineRequest::GenerateRequest(sequence_group, response_sender) => {
                             info!("Received new sequence group, with id = {}", sequence_group.request_id);
                             let sequence_group_request_id = sequence_group.request_id.clone();
-                            // 1. Adds the received `SequenceGroup` to the `Scheduler` instance.
+                            // 1. Add the received `SequenceGroup` to the `Scheduler` instance.
                             self.scheduler.add_sequence_group(sequence_group);
                             // 2. Add the response sender to the `response_senders` map.
                             self.response_senders.insert(sequence_group_request_id, response_sender);
