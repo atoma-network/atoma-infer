@@ -37,7 +37,8 @@ use crate::{
     stream::Streamer,
 };
 
-pub const CHAT_COMPLETIONS_PATH: &str = "/chat/completions";
+/// The URL path to POST JSON for model chat completions.
+pub const CHAT_COMPLETIONS_PATH: &str = "v1/chat/completions";
 pub const AUTH_BEARER_PREFIX: &str = "Bearer ";
 
 /// Represents the shared state of the application.
