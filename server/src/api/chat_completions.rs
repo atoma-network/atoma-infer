@@ -1,7 +1,9 @@
 //! Responsible for creating the json schema associated with the AtomaAPI, which is modeled after OpenAI's own API.
 
 #[cfg(feature = "vllm")]
-use atoma_backends::{GenerateParameters, GenerateRequest, GenerateRequestOutput};
+use atoma_backends::{
+    GenerateParameters, GenerateRequest, GenerateRequestOutput, GenerateStreamingOutput,
+};
 use std::{
     collections::HashMap,
     time::{Instant, SystemTime},
@@ -749,6 +751,94 @@ impl TryFrom<(String, GenerateRequestOutput)> for ChatCompletionResponse {
     }
 }
 
+/// Represents a chunk of a streaming chat completion response.
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct ChatCompletionChunk {
+    /// A unique identifier for this chat completion.
+    pub id: String,
+    /// The object type, which is "chat.completion" for this struct.
+    pub object: String,
+    /// The Unix timestamp (in seconds) of when the chat completion was created.
+    pub created: u64,
+    /// The model used for this chat completion.
+    pub model: String,
+    /// A unique identifier for the model's configuration and version.
+    pub system_fingerprint: String,
+    /// An array of chat completion choices. Each choice represents a possible completion for the input.
+    pub choices: Vec<StreamChoice>,
+    /// Usage statistics for the completion request.
+    pub usage: Usage,
+}
+
+/// Represents a single choice in a streaming chat completion response.
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StreamChoice {
+    /// The index of this choice in the list of choices.
+    pub index: u32,
+    /// The delta (incremental update) for this choice.
+    pub delta: Delta,
+    /// Log probabilities for the tokens in this choice, if requested.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub logprobs: Option<Value>,
+    /// The reason why the model stopped generating tokens, if applicable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finish_reason: Option<String>,
+}
+
+/// Represents the delta (incremental update) in a streaming chat completion response.
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Delta {
+    /// The role of the message author (e.g., "assistant").
+    pub role: String,
+    /// The content of the message, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
+    /// A refusal message, if the assistant refuses to respond.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refusal: Option<String>,
+    /// A list of tool calls made by the assistant, if any.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_calls: Vec<ToolCall>,
+}
+
+impl TryFrom<(String, GenerateStreamingOutput)> for ChatCompletionChunk {
+    type Error = String;
+
+    fn try_from((model, value): (String, GenerateStreamingOutput)) -> Result<Self, Self::Error> {
+        let id = value.request_id;
+        let created = value.created;
+        let usage = Usage {
+            prompt_tokens: value.num_prompt_tokens as u32,
+            completion_tokens: value.num_completion_tokens as u32,
+            total_tokens: value.num_prompt_tokens as u32 + value.num_completion_tokens as u32,
+        };
+        let choices = vec![StreamChoice {
+            index: 0,
+            delta: Delta {
+                role: "assistant".into(),
+                content: Some(value.output_text),
+                refusal: None,
+                tool_calls: vec![],
+            },
+            logprobs: Some(
+                serde_json::to_value(&value.logprobs)
+                    .map_err(|e| format!("Failed to convert logprobs to JSON: {}", e))?,
+            ),
+            finish_reason: value.finish_reason,
+        }];
+        let chunk = ChatCompletionChunk {
+            id,
+            object: "chat.completion.chunk".into(),
+            created,
+            model,
+            system_fingerprint: "vllm".into(),
+            choices,
+            usage,
+        };
+        Ok(chunk)
+    }
+}
+
 #[cfg(test)]
 pub mod json_schema_tests {
     // TODO: Move check functions to a test utils module.
@@ -761,10 +851,11 @@ pub mod json_schema_tests {
     use serde_json::json;
 
     use super::{
-        messages, ChatCompletionResponse, Choice, FinishReason, Message, MessageContent,
-        MessageContentPart, MessageContentPartImageUrl, ToolCall, ToolCallFunction, Usage,
+        messages, ChatCompletionChunk, ChatCompletionResponse, Choice, Delta, FinishReason,
+        Message, MessageContent, MessageContentPart, MessageContentPartImageUrl, RequestBody,
+        StreamChoice, ToolCall, ToolCallFunction, Usage,
     };
-    use crate::{validate_with_schema, RequestBody};
+    use crate::api::validate_with_schema;
 
     /// Used in tandem with a schema file, this will check if there are
     /// changes to the JSON API schema, and show a diff if so.
@@ -1243,5 +1334,90 @@ pub mod json_schema_tests {
             })
         );
         assert!(matches!(choice.finish_reason, FinishReason::Stopped));
+    }
+
+    #[test]
+    fn test_deserialize_delta() {
+        let json = json!({
+            "role": "assistant",
+            "content": "Hello, how can I help you today?",
+            "tool_calls": [],
+            "refusal": "refusal"
+        });
+
+        let delta: Delta = serde_json::from_value(json).unwrap();
+
+        assert_eq!(delta.role, "assistant");
+        assert_eq!(
+            delta.content,
+            Some("Hello, how can I help you today?".to_string())
+        );
+        assert_eq!(delta.tool_calls, vec![]);
+        assert_eq!(delta.refusal, Some("refusal".to_string()));
+    }
+
+    #[test]
+    fn test_deserialize_stream_choice() {
+        let json = json!({
+            "index": 0,
+            "delta": {
+                "role": "assistant",
+                "content": "Hello, how can I help you today?"
+            }
+        });
+
+        let choice: StreamChoice = serde_json::from_value(json).unwrap();
+
+        assert_eq!(choice.index, 0);
+        assert_eq!(choice.delta.role, "assistant");
+        assert_eq!(
+            choice.delta.content,
+            Some("Hello, how can I help you today?".to_string())
+        );
+    }
+
+    #[test]
+    fn test_deserialize_chat_completion_chunk() {
+        let json = json!({
+            "id": "chatcmpl-123",
+            "object": "chat.completion",
+            "created": 1677652288,
+            "model": "llama",
+            "system_fingerprint": "fp_44709d6fcb",
+            "choices": [{
+                "index": 0,
+                "delta": {
+                    "role": "assistant",
+                    "content": "Hello, how can I help you today?"
+                }
+            }],
+            "usage": {
+                "prompt_tokens": 9,
+                "completion_tokens": 12,
+                "total_tokens": 21
+            }
+        });
+
+        let chunk: ChatCompletionChunk = serde_json::from_value(json).unwrap();
+
+        assert_eq!(chunk.id, "chatcmpl-123");
+        assert_eq!(chunk.object, "chat.completion");
+        assert_eq!(chunk.created, 1677652288);
+        assert_eq!(chunk.model, "llama");
+        assert_eq!(chunk.system_fingerprint, "fp_44709d6fcb");
+        assert_eq!(chunk.choices.len(), 1);
+        assert_eq!(chunk.choices[0].index, 0);
+        assert_eq!(
+            chunk.choices[0].delta,
+            Delta {
+                role: "assistant".to_string(),
+                content: Some("Hello, how can I help you today?".to_string()),
+                tool_calls: vec![],
+                refusal: None,
+            }
+        );
+        assert_eq!(chunk.usage.prompt_tokens, 9);
+        assert_eq!(chunk.usage.completion_tokens, 12);
+        assert_eq!(chunk.usage.total_tokens, 21);
     }
 }

@@ -1,7 +1,7 @@
 #[cfg(feature = "vllm")]
 pub use atoma_vllm_backend::{
-    llm_engine::GenerateRequestOutput,
-    llm_service::{LlmService, LlmServiceError},
+    llm_engine::{GenerateRequestOutput, GenerateStreamingOutput, StreamResponse},
+    llm_service::{LlmService, LlmServiceError, ServiceRequest},
     types::{GenerateParameters, GenerateRequest},
     validation::Validation,
 };

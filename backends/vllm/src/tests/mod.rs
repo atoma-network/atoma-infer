@@ -20,7 +20,7 @@ use tokio::sync::{mpsc, oneshot};
 use tracing::info;
 
 use crate::{
-    llm_service::LlmService,
+    llm_service::{LlmService, ServiceRequest},
     model_executor::{
         Config, ConfigError, ModelExecutor, ModelExecutorError, ModelFilePaths, ModelLoader,
         ModelLoaderError,
@@ -221,7 +221,7 @@ async fn test_llm_engine() {
     for request in requests {
         let (sender, receiver) = oneshot::channel();
         service_request_sender
-            .send((request, sender))
+            .send(ServiceRequest::GenerateRequest(request, sender))
             .expect("Failed to send request");
         futures.push(receiver);
     }
@@ -315,7 +315,7 @@ async fn test_llm_engine_with_enable_chunking() {
     for request in requests {
         let (sender, receiver) = oneshot::channel();
         service_request_sender
-            .send((request, sender))
+            .send(ServiceRequest::GenerateRequest(request, sender))
             .expect("Failed to send request");
         futures.push(receiver);
     }

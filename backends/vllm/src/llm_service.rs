@@ -5,7 +5,7 @@ use crate::{
         CacheConfig, CacheConfigError, ModelConfig, SchedulerConfig, SchedulerConfigError,
         ValidationConfig,
     },
-    llm_engine::{EngineError, GenerateRequestOutput, LlmEngine},
+    llm_engine::{EngineError, GenerateRequestOutput, LlmEngine, StreamResponse},
     model_executor::{
         Config, ConfigError, ModelExecutor, ModelLoaderError, ModelThreadDispatcher,
         ModelThreadError,
@@ -33,6 +33,38 @@ use tracing::{error, info, info_span, instrument, Span};
 // TODO:
 // 1. Add proper tokenizer shutdown logic, and other related services
 
+/// Represents different types of requests that can be sent to the LLM service.
+pub enum ServiceRequest {
+    /// A request for generating text without streaming.
+    ///
+    /// # Fields
+    /// * `GenerateRequest` - The request parameters for text generation.
+    /// * `oneshot::Sender<GenerateRequestOutput>` - A channel to send back the generated output.
+    GenerateRequest(GenerateRequest, oneshot::Sender<GenerateRequestOutput>),
+    /// A request for generating text with streaming output.
+    ///
+    /// # Fields
+    /// * `GenerateRequest` - The request parameters for text generation.
+    /// * `flume::Sender<GenerateStreamingOutput>` - A channel to stream the generated output.
+    GenerateStreamingRequest(GenerateRequest, flume::Sender<StreamResponse>),
+}
+
+/// Represents different types of requests that can be sent to the LLM engine.
+pub enum EngineRequest {
+    /// A request for generating text without streaming.
+    ///
+    /// # Fields
+    /// * `SequenceGroup` - The sequence group to be processed.
+    /// * `oneshot::Sender<GenerateRequestOutput>` - A channel to send back the generated output.
+    GenerateRequest(SequenceGroup, oneshot::Sender<GenerateRequestOutput>),
+    /// A request for generating text with streaming output.
+    ///
+    /// # Fields
+    /// * `SequenceGroup` - The sequence group to be processed.
+    /// * `flume::Sender<GenerateStreamingOutput>` - A channel to stream the generated output.
+    GenerateStreamingRequest(SequenceGroup, flume::Sender<StreamResponse>),
+}
+
 /// `LlmService` - the entrypoint of the Atoma's inference service.
 /// It receives requests from the Atoma's event subscriber
 /// service. It validates and tokenizes such requests
@@ -40,10 +72,9 @@ use tracing::{error, info, info_span, instrument, Span};
 pub struct LlmService {
     /// A receiver channel, it is responsible for
     /// receiving incoming requests from the OpenAI API server
-    service_request_receiver:
-        UnboundedReceiver<(GenerateRequest, oneshot::Sender<GenerateRequestOutput>)>,
+    service_request_receiver: UnboundedReceiver<ServiceRequest>,
     /// Sender to communicate with the `LlmEngine` serviceservice_response_sender,
-    engine_sender: UnboundedSender<(SequenceGroup, oneshot::Sender<GenerateRequestOutput>)>,
+    engine_sender: UnboundedSender<EngineRequest>,
     /// Block size
     block_size: usize,
     /// Join handle for the background task
@@ -69,10 +100,7 @@ impl LlmService {
     /// Starts the service
     #[instrument(skip_all)]
     pub async fn start<M, P: AsRef<Path>>(
-        service_request_receiver: UnboundedReceiver<(
-            GenerateRequest,
-            oneshot::Sender<GenerateRequestOutput>,
-        )>,
+        service_request_receiver: UnboundedReceiver<ServiceRequest>,
         config_path: P,
         shutdown_signal: mpsc::Receiver<()>,
     ) -> Result<Self, LlmServiceError>
@@ -236,18 +264,41 @@ impl LlmService {
     pub async fn run(mut self) -> Result<(), LlmServiceError> {
         loop {
             tokio::select! {
-                Some((request, response_sender)) = self.service_request_receiver.recv() => {
-                    let sequence_group = match self.handle_request(request).await {
-                        Ok(sequence_group) => sequence_group,
-                        Err(e) => {
-                            error!("Failed to handle request, with error: {e}");
-                            continue;
-                            // TODO: we need to handle errors more appropriately,
-                            //       we want to commit to these errors, as validation
-                            //       errors should also be committed to, by the node.
+                Some(service_request) = self.service_request_receiver.recv() => {
+                    match service_request {
+                        ServiceRequest::GenerateRequest(request, response_sender) => {
+                            let sequence_group = match self.handle_request(request).await {
+                                Ok(sequence_group) => sequence_group,
+                                Err(e) => {
+                                    error!("Failed to handle request, with error: {e}");
+                                    continue;
+                                    // TODO: we need to handle errors more appropriately,
+                                    //       we want to commit to these errors, as validation
+                                    //       errors should also be committed to, by the node.
+                                }
+                            };
+                            self
+                                .engine_sender
+                                .send(EngineRequest::GenerateRequest(sequence_group, response_sender))
+                                .map_err(Box::new)?;
+                        }
+                        ServiceRequest::GenerateStreamingRequest(request, response_sender) => {
+                            let sequence_group = match self.handle_request(request).await {
+                                Ok(sequence_group) => sequence_group,
+                                Err(e) => {
+                                    error!("Failed to handle request, with error: {e}");
+                                    continue;
+                                    // TODO: we need to handle errors more appropriately,
+                                    //       we want to commit to these errors, as validation
+                                    //       errors should also be committed to, by the node.
+                                }
+                            };
+                                self
+                                    .engine_sender
+                                    .send(EngineRequest::GenerateStreamingRequest(sequence_group, response_sender))
+                                    .map_err(Box::new)?;
                         }
                     };
-                    self.engine_sender.send((sequence_group, response_sender)).map_err(Box::new)?;
                 },
                 _ = self.shutdown_signal.recv() => {
                     info!("Received shutdown signal, stopping `LlmService` instance..");
@@ -417,7 +468,7 @@ pub enum LlmServiceError {
     #[error("Sequence error: `{0}`")]
     SequenceError(#[from] SequenceError),
     #[error("Send error: `{0}`")]
-    SendError(#[from] Box<SendError<(SequenceGroup, oneshot::Sender<GenerateRequestOutput>)>>),
+    SendError(#[from] Box<SendError<EngineRequest>>),
     #[error("Tokenizer error: `{0}`")]
     TokenizerError(#[from] TokenizerError),
 }

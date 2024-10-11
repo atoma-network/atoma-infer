@@ -12,6 +12,7 @@ cudarc = { workspace = true, optional = true }
 cuda-runtime-sys.workspace = true
 dotenv.workspace = true
 futures.workspace = true
+flume.workspace = true
 hf-hub.workspace = true
 indexmap.workspace = true
 metrics.workspace = true

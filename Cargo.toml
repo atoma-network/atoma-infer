@@ -40,6 +40,7 @@ cudarc = { version = "0.12.0", features = [
 cuda-runtime-sys = "0.3.0-alpha.1"
 dotenv = "0.15.0"
 expect-test = "1.5"
+flume = "0.11.0"
 futures = "0.3.30"
 half = "2.4.1"
 help = { path = "help" }
