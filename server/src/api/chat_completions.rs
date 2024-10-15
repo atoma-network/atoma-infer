@@ -243,7 +243,7 @@ pub(crate) mod messages {
             match message {
                 Message::System { .. } => {
                     if is_first_turn {
-                        prompt.push_str("[INST] <<SYS>>\n");
+                        prompt.push_str("[INST]\n<<SYS>>\n");
                         prompt.push_str(&message.to_prompt_string());
                         prompt.push_str("\n<</SYS>>\n\n");
                     } else {
@@ -252,15 +252,15 @@ pub(crate) mod messages {
                 }
                 Message::User { .. } => {
                     if is_first_turn {
-                        prompt.push_str("[INST] ");
+                        prompt.push_str("[INST]\n");
                     } else if i > 0 && !matches!(messages[i - 1], Message::Assistant { .. }) {
-                        prompt.push_str("[INST] ");
+                        prompt.push_str("[INST]\n");
                     }
                     prompt.push_str(&message.to_prompt_string());
                     if i + 1 < messages.len()
                         && matches!(messages[i + 1], Message::Assistant { .. })
                     {
-                        prompt.push_str(" [/INST]\n");
+                        prompt.push_str("\n[/INST]\n");
                     } else {
                         prompt.push('\n');
                     }
