@@ -13,6 +13,7 @@ use utoipa::ToSchema;
 use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
+use tracing::warn;
 
 // TODO: fields that are named `r#type` should have values that represent
 // actual expected types that are deserializable from a string instead of
@@ -118,6 +119,18 @@ impl std::fmt::Display for Model {
     }
 }
 
+impl Model {
+    pub fn messages_to_prompt(&self, messages: &[Message]) -> String {
+        use Model::*;
+        match self {
+            Llama38b | Llama38bInstruct | Llama370b | Llama370bInstruct | Llama318b
+            | Llama318bInstruct | Llama3170b | Llama3170bInstruct | Llama31405b
+            | Llama31405bInstruct | Llama321b | Llama321bInstruct | Llama323b
+            | Llama323bInstruct => messages::messages_to_llama_prompt(messages),
+        }
+    }
+}
+
 /// A message that is part of a conversation which is based on the role
 /// of the author of the message.
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -168,40 +181,32 @@ pub enum Message {
 }
 
 impl Message {
+    /// Converts a message to its string representation in the prompt.
     pub fn to_prompt_string(&self) -> String {
         match self {
-            Message::System { content, name } => {
-                let role = "System";
-                messages::format_message(role, content, name)
+            Message::System { content, name: _ } => {
+                let content_str = content.clone().unwrap_or_default();
+                format!("<<SYS>>\n{}\n</SYS>>\n", content_str)
             }
-            Message::User { content, name } => {
-                let role = "User";
-                messages::format_message(role, content, name)
+            Message::User { content, name: _ } => {
+                let content_str = content.clone().unwrap_or_default();
+                content_str
             }
             Message::Assistant {
                 content,
-                name,
-                refusal,
-                tool_calls,
+                name: _,
+                refusal: _,
+                tool_calls: _,
             } => {
-                let role = "Assistant";
-                let mut prompt = messages::format_message(role, content, name);
-                if let Some(refusal_message) = refusal {
-                    prompt.push_str(&format!("\nRefusal: {}", refusal_message));
-                }
-                if !tool_calls.is_empty() {
-                    prompt.push_str(&format!("\nTool Calls: {:?}", tool_calls));
-                }
-                prompt
+                let content_str = content.clone().unwrap_or_default();
+                content_str
             }
             Message::Tool {
                 content,
-                tool_call_id,
+                tool_call_id: _,
             } => {
-                let role = "Tool";
-                let mut prompt = messages::format_message(role, content, &None);
-                prompt.push_str(&format!("\nTool Call ID: {}", tool_call_id));
-                prompt
+                let content_str = content.clone().unwrap_or_default();
+                content_str
             }
         }
     }
@@ -210,34 +215,46 @@ impl Message {
 pub(crate) mod messages {
     use super::{Message, MessageContent};
 
-    /// Helper function to format a message
-    pub(crate) fn format_message(
-        role: &str,
-        content: &Option<MessageContent>,
-        name: &Option<String>,
-    ) -> String {
-        let name_str = if let Some(name) = name {
-            format!(" ({})", name)
-        } else {
-            String::new()
-        };
+    /// Function to convert a list of messages to a prompt string in Llama format.
+    pub(crate) fn messages_to_llama_prompt(messages: &[Message]) -> String {
+        let mut prompt = String::new();
+        let mut is_first_turn = true;
 
-        let content_str = if let Some(content) = content {
-            format!("{}", content)
-        } else {
-            String::new()
-        };
+        for message in messages {
+            match message {
+                Message::System { .. } => {
+                    // System messages are handled at the beginning.
+                    if is_first_turn {
+                        prompt.push_str("[INST] ");
+                        prompt.push_str(&message.to_prompt_string());
+                        prompt.push('\n');
+                    }
+                }
+                Message::User { .. } => {
+                    if is_first_turn {
+                        // After the system message and first user message, close the [INST] block.
+                        prompt.push_str(&message.to_prompt_string());
+                        prompt.push_str("\n[/INST]\n");
+                        is_first_turn = false;
+                    } else {
+                        // For subsequent turns, open a new [INST] block.
+                        prompt.push_str("[INST]\n");
+                        prompt.push_str(&message.to_prompt_string());
+                        prompt.push_str("\n[/INST]\n");
+                    }
+                }
+                Message::Assistant { .. } => {
+                    // Assistant responses are added directly after the user message.
+                    prompt.push_str(&message.to_prompt_string());
+                    prompt.push('\n');
+                }
+                _ => {
+                    warn!("Unsupported message type: {:?}", message);
+                }
+            }
+        }
 
-        format!("{}{}: {}", role, name_str, content_str)
-    }
-
-    /// Function to convert a list of messages to a prompt string
-    pub(crate) fn messages_to_prompt(messages: &[Message]) -> String {
-        messages
-            .iter()
-            .map(|message| message.to_prompt_string())
-            .collect::<Vec<_>>()
-            .join("\n\n") // Separate each message by two newlines
+        prompt
     }
 }
 
@@ -600,7 +617,8 @@ impl RequestBody {
 
 impl RequestBody {
     pub fn to_generate_request(self, request_id: String) -> GenerateRequest {
-        let inputs = messages::messages_to_prompt(self.messages());
+        let model = self.model();
+        let inputs = model.messages_to_prompt(self.messages());
         let frequency_penalty = self.frequency_penalty();
         let max_new_tokens = self.max_completion_tokens();
         let decoder_input_details = self.logprobs().unwrap_or_default();
@@ -1079,124 +1097,182 @@ pub mod json_schema_tests {
     }
 
     #[test]
-    fn test_messages_to_prompt() {
-        // Create some sample messages
+    fn test_messages_to_llama_prompt() {
         let messages = vec![
             Message::System {
-                content: Some(MessageContent::Text(
-                    "You are a helpful assistant.".to_string(),
-                )),
+                content: Some("You are a helpful assistant.".to_string()),
                 name: None,
             },
             Message::User {
-                content: Some(MessageContent::Text(
-                    "What is the capital of France?".to_string(),
-                )),
-                name: Some("User1".to_string()),
+                content: Some("Hello, how are you?".to_string()),
+                name: None,
             },
             Message::Assistant {
-                content: Some(MessageContent::Text(
-                    "The capital of France is Paris.".to_string(),
-                )),
+                content: Some("I'm doing well, thank you! How can I assist you today?".to_string()),
                 name: None,
                 refusal: None,
-                tool_calls: vec![],
+                tool_calls: Vec::new(),
+            },
+            Message::User {
+                content: Some("Can you tell me a joke?".to_string()),
+                name: None,
+            },
+            Message::Assistant {
+                content: Some(
+                    "Sure! Why did the computer show up at work late? Because it had a hard drive!"
+                        .to_string(),
+                ),
+                name: None,
+                refusal: None,
+                tool_calls: Vec::new(),
             },
         ];
 
-        let expected_prompt = "\
-            System: You are a helpful assistant.\n\n\
-            User (User1): What is the capital of France?\n\n\
-            Assistant: The capital of France is Paris.";
+        let model = Model::Llama38bInstruct;
 
-        let prompt = messages::messages_to_prompt(&messages);
+        let prompt = model.messages_to_prompt(&messages);
+
+        let expected_prompt = "[INST] <<SYS>>
+            You are a helpful assistant.
+            </SYS>>
+            Hello, how are you?
+            [/INST]
+            I'm doing well, thank you! How can I assist you today?
+
+            [INST]
+            Can you tell me a joke?
+            [/INST]
+            Sure! Why did the computer show up at work late? Because it had a hard drive!
+
+            ";
+
         assert_eq!(prompt, expected_prompt);
     }
 
     #[test]
-    fn test_empty_messages() {
-        let messages: Vec<Message> = vec![];
-        let expected_prompt = "";
-
-        let prompt = messages::messages_to_prompt(&messages);
-        assert_eq!(prompt, expected_prompt);
-    }
-
-    #[test]
-    fn test_message_with_no_content() {
+    fn test_empty_string_message() {
         let messages = vec![
             Message::System {
-                content: None,
+                content: Some("".to_string()),
                 name: None,
             },
             Message::User {
-                content: Some(MessageContent::Text("What is 2 + 2?".to_string())),
+                content: Some("".to_string()),
                 name: None,
             },
             Message::Assistant {
-                content: Some(MessageContent::Text("2 + 2 is 4.".to_string())),
+                content: Some("".to_string()),
                 name: None,
                 refusal: None,
-                tool_calls: vec![],
+                tool_calls: Vec::new(),
             },
         ];
 
-        let expected_prompt = "\
-            System: \n\n\
-            User: What is 2 + 2?\n\n\
-            Assistant: 2 + 2 is 4.";
+        let model = Model::Llama38bInstruct;
 
-        let prompt = messages::messages_to_prompt(&messages);
+        let prompt = model.messages_to_prompt(&messages);
+
+        let expected_prompt = "[INST] <<SYS>>\n\n</SYS>>\n\n[/INST]\n\n";
+
         assert_eq!(prompt, expected_prompt);
     }
 
     #[test]
-    fn test_message_to_prompt_without_sytem() {
+    fn test_no_system_message() {
         let messages = vec![
             Message::User {
-                content: Some(MessageContent::Text("What is 2 + 2?".to_string())),
+                content: Some("What is the weather like?".to_string()),
                 name: None,
             },
             Message::Assistant {
-                content: Some(MessageContent::Text("2 + 2 is 4.".to_string())),
+                content: Some("The weather is sunny today.".to_string()),
                 name: None,
                 refusal: None,
-                tool_calls: vec![],
+                tool_calls: Vec::new(),
             },
         ];
 
-        let expected_prompt = "\
-            User: What is 2 + 2?\n\n\
-            Assistant: 2 + 2 is 4.";
+        let model = Model::Llama38bInstruct;
 
-        let prompt = messages::messages_to_prompt(&messages);
+        let prompt = model.messages_to_prompt(&messages);
+
+        let expected_prompt =
+            "[INST]\nWhat is the weather like?\n[/INST]\nThe weather is sunny today.\n";
+
         assert_eq!(prompt, expected_prompt);
     }
 
     #[test]
-    fn test_message_to_prompt_without_user() {
+    fn test_only_system_and_assistant_messages() {
         let messages = vec![
             Message::System {
-                content: Some(MessageContent::Text(
-                    "You are a helpful assistant.".to_string(),
-                )),
-                name: Some("Me".to_string()),
+                content: Some("You are an AI assistant.".to_string()),
+                name: None,
             },
             Message::Assistant {
-                content: Some(MessageContent::Text(
-                    "The capital of France is Paris.".to_string(),
-                )),
+                content: Some("Hello, how can I assist you today?".to_string()),
                 name: None,
                 refusal: None,
-                tool_calls: vec![],
+                tool_calls: Vec::new(),
             },
         ];
 
-        let expected_prompt = "\
-            System (Me): You are a helpful assistant.\n\n\
-            Assistant: The capital of France is Paris.";
+        let model = Model::Llama38bInstruct;
 
-        let prompt = messages::messages_to_prompt(&messages);
+        let prompt = model.messages_to_prompt(&messages);
+
+        let expected_prompt = "[INST] <<SYS>>\nYou are an AI assistant.\n</SYS>>\n[/INST]\nHello, how can I assist you today?\n";
+
+        assert_eq!(prompt, expected_prompt);
+    }
+
+    #[test]
+    fn test_only_user_message() {
+        let messages = vec![Message::User {
+            content: Some("Is the sky blue?".to_string()),
+            name: None,
+        }];
+
+        let model = Model::Llama38bInstruct;
+
+        let prompt = model.messages_to_prompt(&messages);
+
+        let expected_prompt = "[INST]\nIs the sky blue?\n[/INST]\n";
+
+        assert_eq!(prompt, expected_prompt);
+    }
+
+    #[test]
+    fn test_only_system_message() {
+        let messages = vec![Message::System {
+            content: Some("You are a helpful AI assistant.".to_string()),
+            name: None,
+        }];
+
+        let model = Model::Llama38bInstruct;
+
+        let prompt = model.messages_to_prompt(&messages);
+
+        let expected_prompt = "[INST] <<SYS>>\nYou are a helpful AI assistant.\n</SYS>>\n";
+
+        assert_eq!(prompt, expected_prompt);
+    }
+
+    #[test]
+    fn test_only_assistant_message() {
+        let messages = vec![Message::Assistant {
+            content: Some("How can I help you today?".to_string()),
+            name: None,
+            refusal: None,
+            tool_calls: Vec::new(),
+        }];
+
+        let model = Model::Llama38bInstruct;
+
+        let prompt = model.messages_to_prompt(&messages);
+
+        let expected_prompt = "How can I help you today?\n";
+
         assert_eq!(prompt, expected_prompt);
     }
 
