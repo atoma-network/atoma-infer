@@ -1466,7 +1466,7 @@ pub mod json_schema_tests {
             },
         ];
 
-        let model = Model::Llama38bInstruct;
+        let model = Model::Llama27b;
 
         let prompt = model.messages_to_prompt(&messages);
 
@@ -1494,7 +1494,7 @@ pub mod json_schema_tests {
             },
         ];
 
-        let model = Model::Llama38bInstruct;
+        let model = Model::Llama27b;
 
         let prompt = model.messages_to_prompt(&messages);
 
@@ -1521,7 +1521,7 @@ pub mod json_schema_tests {
             },
         ];
 
-        let model = Model::Llama38bInstruct;
+        let model = Model::Llama27b;
 
         let prompt = model.messages_to_prompt(&messages);
 
@@ -1537,7 +1537,7 @@ pub mod json_schema_tests {
             name: None,
         }];
 
-        let model = Model::Llama38bInstruct;
+        let model = Model::Llama27b;
 
         let prompt = model.messages_to_prompt(&messages);
 
@@ -1555,7 +1555,7 @@ pub mod json_schema_tests {
             name: None,
         }];
 
-        let model = Model::Llama38bInstruct;
+        let model = Model::Llama27b;
 
         let prompt = model.messages_to_prompt(&messages);
 
@@ -1575,7 +1575,7 @@ pub mod json_schema_tests {
             tool_calls: Vec::new(),
         }];
 
-        let model = Model::Llama38bInstruct;
+        let model = Model::Llama27b;
 
         let prompt = model.messages_to_prompt(&messages);
 
