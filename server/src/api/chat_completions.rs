@@ -1498,7 +1498,7 @@ pub mod json_schema_tests {
 
         let prompt = model.messages_to_prompt(&messages);
 
-        let expected_prompt = "[INST]\n<<SYS>>\n\n<</SYS>>\n\n\n[/INST]\n\n";
+        let expected_prompt = "<s>[INST] <<SYS>>\n\n<</SYS>>\n\n [/INST]\n\n";
 
         assert_eq!(prompt, expected_prompt);
     }
@@ -1527,7 +1527,7 @@ pub mod json_schema_tests {
         let prompt = model.messages_to_prompt(&messages);
 
         let expected_prompt =
-            "[INST]\nWhat is the weather like?\n[/INST]\nThe weather is sunny today.\n";
+            "<s>[INST] What is the weather like? [/INST]\nThe weather is sunny today.\n";
 
         assert_eq!(prompt, expected_prompt);
     }
