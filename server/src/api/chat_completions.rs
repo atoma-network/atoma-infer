@@ -1285,7 +1285,7 @@ pub mod json_schema_tests {
 
         let prompt = model.messages_to_prompt(&messages);
 
-        let expected_prompt = "How can I help you today?\n";
+        let expected_prompt = "You are a helpful AI assistant.\n";
 
         assert_eq!(prompt, expected_prompt);
     }
