@@ -36,6 +36,11 @@ pub enum Model {
     ))]
     Llama27bChatHf,
     #[serde(rename(
+        serialize = "meta-llama/Llama-2-70b-hf",
+        deserialize = "meta-llama/Llama-2-70b-hf"
+    ))]
+    Llama270b,
+    #[serde(rename(
         serialize = "meta-llama/Meta-Llama-3-8B",
         deserialize = "meta-llama/Meta-Llama-3-8B"
     ))]
@@ -112,6 +117,7 @@ impl std::fmt::Display for Model {
         match self {
             Model::Llama27b => write!(f, "meta-llama/Meta-Llama-2-7b"),
             Model::Llama27bChatHf => write!(f, "meta-llama/Llama-2-7b-chat-hf"),
+            Model::Llama270b => write!(f, "meta-llama/Llama-2-70b-hf"),
             Model::Llama38b => write!(f, "meta-llama/Meta-Llama-3-8B"),
             Model::Llama38bInstruct => write!(f, "meta-llama/Meta-Llama-3-8B-Instruct"),
             Model::Llama370b => write!(f, "meta-llama/Meta-Llama-3-70B"),
@@ -134,6 +140,7 @@ impl Model {
     pub fn messages_to_prompt(&self, messages: &[Message]) -> String {
         use Model::*;
         match self {
+            Llama27b | Llama27bChatHf | Llama270b => messages::messages_to_llama2_prompt(messages),
             Llama38b | Llama38bInstruct | Llama370b | Llama370bInstruct | Llama318b
             | Llama318bInstruct | Llama3170b | Llama3170bInstruct | Llama31405b
             | Llama31405bInstruct | Llama321b | Llama321bInstruct | Llama323b
