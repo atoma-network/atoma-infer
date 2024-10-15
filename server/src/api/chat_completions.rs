@@ -204,7 +204,7 @@ impl Message {
         match self {
             Message::System { content, name: _ } => {
                 let content_str = content.as_ref().map(|s| s.to_string()).unwrap_or_default();
-                format!("<<SYS>>\n{}\n<</SYS>>>\n", content_str)
+                format!("<<SYS>>\n{}\n<</SYS>>\n", content_str)
             }
             Message::User { content, name: _ } => {
                 let content_str = content.as_ref().map(|s| s.to_string()).unwrap_or_default();
