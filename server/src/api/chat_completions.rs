@@ -1196,7 +1196,7 @@ pub mod json_schema_tests {
     #[test]
     fn test_system_message_only() {
         let messages = vec![Message::System {
-            content: Some(MessageContent("You are a helpful assistant.".to_string())),
+            content: Some(MessageContent::Text("You are a helpful assistant.".to_string())),
             name: None,
         }];
         let result = messages::messages_to_llama3_prompt(&messages);
@@ -1207,7 +1207,7 @@ pub mod json_schema_tests {
     #[test]
     fn test_user_message_only() {
         let messages = vec![Message::User {
-            content: Some(MessageContent("Hello, who are you?".to_string())),
+            content: Some(MessageContent::Text("Hello, who are you?".to_string())),
             name: None,
         }];
         let result = messages::messages_to_llama3_prompt(&messages);
@@ -1218,7 +1218,7 @@ pub mod json_schema_tests {
     #[test]
     fn test_assistant_message_only() {
         let messages = vec![Message::Assistant {
-            content: Some(MessageContent("I am an AI assistant.".to_string())),
+            content: Some(MessageContent::Text("I am an AI assistant.".to_string())),
             name: None,
             refusal: None,
             tool_calls: vec![],
@@ -1231,7 +1231,7 @@ pub mod json_schema_tests {
     #[test]
     fn test_tool_message_only() {
         let messages = vec![Message::Tool {
-            content: Some(MessageContent("25 C".to_string())),
+            content: Some(MessageContent::Text("25 C".to_string())),
             tool_call_id: "get_weather".to_string(),
         }];
         let result = messages::messages_to_llama3_prompt(&messages);
@@ -1243,11 +1243,11 @@ pub mod json_schema_tests {
     fn test_system_and_user() {
         let messages = vec![
             Message::System {
-                content: Some(MessageContent("You are a helpful assistant.".to_string())),
+                content: Some(MessageContent::Text("You are a helpful assistant.".to_string())),
                 name: None,
             },
             Message::User {
-                content: Some(MessageContent("Hello, who are you?".to_string())),
+                content: Some(MessageContent::Text("Hello, who are you?".to_string())),
                 name: None,
             },
         ];
@@ -1266,11 +1266,11 @@ pub mod json_schema_tests {
     fn test_system_and_assistant() {
         let messages = vec![
             Message::System {
-                content: Some(MessageContent("You are a helpful assistant.".to_string())),
+                content: Some(MessageContent::Text("You are a helpful assistant.".to_string())),
                 name: None,
             },
             Message::Assistant {
-                content: Some(MessageContent("I am an AI assistant.".to_string())),
+                content: Some(MessageContent::Text("I am an AI assistant.".to_string())),
                 name: None,
                 refusal: None,
                 tool_calls: vec![],
@@ -1291,11 +1291,11 @@ pub mod json_schema_tests {
     fn test_user_and_assistant() {
         let messages = vec![
             Message::User {
-                content: Some(MessageContent("Hello, who are you?".to_string())),
+                content: Some(MessageContent::Text("Hello, who are you?".to_string())),
                 name: None,
             },
             Message::Assistant {
-                content: Some(MessageContent("I am an AI assistant.".to_string())),
+                content: Some(MessageContent::Text("I am an AI assistant.".to_string())),
                 name: None,
                 refusal: None,
                 tool_calls: vec![],
@@ -1316,11 +1316,11 @@ pub mod json_schema_tests {
     fn test_system_user_assistant() {
         let messages = vec![
             Message::System {
-                content: Some(MessageContent("You are a helpful assistant.".to_string())),
+                content: Some(MessageContent::Text("You are a helpful assistant.".to_string())),
                 name: None,
             },
             Message::User {
-                content: Some(MessageContent("What is the weather in SF?".to_string())),
+                content: Some(MessageContent::Text("What is the weather in SF?".to_string())),
                 name: None,
             },
             Message::Assistant {
@@ -1330,11 +1330,11 @@ pub mod json_schema_tests {
                 tool_calls: vec![],
             },
             Message::Tool {
-                content: Some(MessageContent("\"25 C\"".to_string())),
+                content: Some(MessageContent::Text("\"25 C\"".to_string())),
                 tool_call_id: "get_weather".to_string(),
             },
             Message::Assistant {
-                content: Some(MessageContent("The weather in San Francisco is 25 C.".to_string())),
+                content: Some(MessageContent::Text("The weather in San Francisco is 25 C.".to_string())),
                 name: None,
                 refusal: None,
                 tool_calls: vec![],
@@ -1438,7 +1438,7 @@ pub mod json_schema_tests {
             },
         ];
 
-        let model = Model::Llama2;
+        let model = Model::Llama27b;
 
         let prompt = model.messages_to_prompt(&messages);
 
