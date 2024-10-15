@@ -334,7 +334,7 @@ pub(crate) mod messages {
                         prompt.push_str("[");
                         let tool_calls_str = tool_calls
                             .iter()
-                            .map(|tc| tc.function.name.clone())
+                            .map(|tc| tc.to_string())
                             .collect::<Vec<_>>()
                             .join(", ");
                         prompt.push_str(&tool_calls_str);
@@ -343,15 +343,19 @@ pub(crate) mod messages {
                     } else if let Some(content) = content {
                         prompt.push_str(&content.to_string());
                         prompt.push_str("<|eot_id|>");
+                    } else {
+                        // If both content and tool_calls are empty, just add <|eot_id|>
+                        prompt.push_str("<|eot_id|>");
                     }
                 }
                 Message::Tool {
                     content,
-                    tool_call_id,
+                    tool_call_id: _,
+                    name,
                 } => {
                     // For tool responses, the role is the tool name or "ipython" as in the examples
                     prompt.push_str("<|start_header_id|>");
-                    prompt.push_str("ipython");
+                    prompt.push_str(name.as_deref().unwrap_or("tool"));
                     prompt.push_str("<|end_header_id|>\n\n");
                     if let Some(content) = content {
                         prompt.push_str(&content.to_string());
@@ -1553,7 +1557,7 @@ pub mod json_schema_tests {
 
         let prompt = model.messages_to_prompt(&messages);
 
-        let expected_prompt = "<s>[INST] <<SYS>>\nYou are an AI assistant.\n<</SYS>>\n[/INST]\nHello, how can I assist you today?\n";
+        let expected_prompt = "<s>[INST] <<SYS>>\nYou are an AI assistant.\n<</SYS>>\n\n[/INST]\nHello, how can I assist you today?\n";
 
         assert_eq!(prompt, expected_prompt);
     }
@@ -1569,7 +1573,7 @@ pub mod json_schema_tests {
 
         let prompt = model.messages_to_prompt(&messages);
 
-        let expected_prompt = "<s>[INST] Is the sky blue?\n[/INST]\n";
+        let expected_prompt = "<s>[INST] Is the sky blue? [/INST]\n";
 
         assert_eq!(prompt, expected_prompt);
     }
@@ -1587,7 +1591,8 @@ pub mod json_schema_tests {
 
         let prompt = model.messages_to_prompt(&messages);
 
-        let expected_prompt = "<s>[INST] <<SYS>>\nYou are a helpful AI assistant.\n<</SYS>>\n";
+        let expected_prompt =
+            "<s>[INST] <<SYS>>\nYou are a helpful AI assistant.\n<</SYS>>\n\n[/INST]\n";
 
         assert_eq!(prompt, expected_prompt);
     }
