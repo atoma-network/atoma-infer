@@ -185,11 +185,11 @@ impl Message {
     pub fn to_prompt_string(&self) -> String {
         match self {
             Message::System { content, name: _ } => {
-                let content_str = content.clone().unwrap_or_default();
+                let content_str = content.map(|s| s.to_string()).unwrap_or_default();
                 format!("<<SYS>>\n{}\n</SYS>>\n", content_str)
             }
             Message::User { content, name: _ } => {
-                let content_str = content.clone().unwrap_or_default();
+                let content_str = content.map(|s| s.to_string()).unwrap_or_default();
                 content_str
             }
             Message::Assistant {
@@ -198,14 +198,14 @@ impl Message {
                 refusal: _,
                 tool_calls: _,
             } => {
-                let content_str = content.clone().unwrap_or_default();
+                let content_str = content.map(|s| s.to_string()).unwrap_or_default();
                 content_str
             }
             Message::Tool {
                 content,
                 tool_call_id: _,
             } => {
-                let content_str = content.clone().unwrap_or_default();
+                let content_str = content.map(|s| s.to_string()).unwrap_or_default();
                 content_str
             }
         }
@@ -870,8 +870,8 @@ pub mod json_schema_tests {
 
     use super::{
         messages, ChatCompletionChunk, ChatCompletionResponse, Choice, Delta, FinishReason,
-        Message, MessageContent, MessageContentPart, MessageContentPartImageUrl, RequestBody,
-        StreamChoice, ToolCall, ToolCallFunction, Usage,
+        Message, MessageContent, MessageContentPart, MessageContentPartImageUrl, Model,
+        RequestBody, StreamChoice, ToolCall, ToolCallFunction, Usage,
     };
     use crate::api::validate_with_schema;
 
