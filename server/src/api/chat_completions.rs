@@ -237,48 +237,58 @@ pub(crate) mod messages {
     /// Function to convert a list of messages to a prompt string in Llama2 format.
     pub(crate) fn messages_to_llama2_prompt(messages: &[Message]) -> String {
         let mut prompt = String::new();
-        let mut is_first_turn = true;
+        let mut i = 0;
 
-        for (i, message) in messages.iter().enumerate() {
-            match message {
-                Message::System { .. } => {
-                    if is_first_turn {
-                        prompt.push_str("[INST]\n<<SYS>>\n");
-                        prompt.push_str(&message.to_prompt_string());
-                        prompt.push_str("\n<</SYS>>\n\n");
-                    } else {
-                        warn!("System message not at the beginning: {:?}", message);
-                    }
-                }
-                Message::User { .. } => {
-                    if is_first_turn {
-                        prompt.push_str("[INST]\n");
-                    } else if i > 0 && !matches!(messages[i - 1], Message::Assistant { .. }) {
-                        prompt.push_str("[INST]\n");
-                    }
-                    prompt.push_str(&message.to_prompt_string());
-                    if i + 1 < messages.len()
-                        && matches!(messages[i + 1], Message::Assistant { .. })
-                    {
-                        prompt.push_str("\n[/INST]\n");
-                    } else {
-                        prompt.push('\n');
-                    }
-                    is_first_turn = false;
-                }
-                Message::Assistant { .. } => {
-                    prompt.push_str(&message.to_prompt_string());
-                    prompt.push('\n');
-                }
-                _ => {
-                    warn!("Unsupported message type: {:?}", message);
-                }
+        // Check if the first message is a system message
+        if i < messages.len() && matches!(messages[i], Message::System { .. }) {
+            // Start the initial [INST] block with the system prompt
+            prompt.push_str("[INST] <<SYS>>\n");
+            prompt.push_str(&messages[i].to_prompt_string());
+            prompt.push_str("\n<</SYS>>\n\n");
+
+            i += 1;
+
+            // Check if the next message is a user message
+            if i < messages.len() && matches!(messages[i], Message::User { .. }) {
+                // Add the user's message and close the [INST] block
+                prompt.push_str(&messages[i].to_prompt_string());
+                prompt.push_str(" [/INST]\n");
+
+                i += 1;
+            } else {
+                // No user message after system prompt, close the [INST] block
+                prompt.push_str("[/INST]\n");
             }
         }
 
-        // If the last message is from the user, close the [INST] block
-        if let Some(Message::User { .. }) = messages.last() {
-            prompt.push_str("[/INST]");
+        // Process the rest of the messages
+        while i < messages.len() {
+            match &messages[i] {
+                Message::User { .. } => {
+                    // Start a new [INST] block for each user message
+                    prompt.push_str("[INST] ");
+                    prompt.push_str(&messages[i].to_prompt_string());
+                    prompt.push_str(" [/INST]\n");
+                    i += 1;
+
+                    // Add the assistant's response if it exists
+                    if i < messages.len() && matches!(messages[i], Message::Assistant { .. }) {
+                        prompt.push_str(&messages[i].to_prompt_string());
+                        prompt.push('\n');
+                        i += 1;
+                    }
+                }
+                Message::Assistant { .. } => {
+                    // Assistant's response without preceding user message
+                    prompt.push_str(&messages[i].to_prompt_string());
+                    prompt.push('\n');
+                    i += 1;
+                }
+                _ => {
+                    warn!("Unsupported message type: {:?}", messages[i]);
+                    i += 1;
+                }
+            }
         }
 
         prompt
@@ -1459,7 +1469,7 @@ pub mod json_schema_tests {
 
         let prompt = model.messages_to_prompt(&messages);
 
-        let expected_prompt = "[INST] <<SYS>>\nYou are a helpful assistant.\n<</SYS>>\n\nHello, how are you?\n[/INST]\nI'm doing well, thank you! How can I assist you today?\n[INST]\nCan you tell me a joke?\n[/INST]\nSure! Why did the computer show up at work late? Because it had a hard drive!\n";
+        let expected_prompt = "[INST]\n<<SYS>>\n<<SYS>>\nYou are a helpful assistant.\n<</SYS>>\n\n<</SYS>>\n\n[INST]\nHello, how are you?\n[/INST]\nI'm doing well, thank you! How can I assist you today?\nCan you tell me a joke?\n[/INST]\nSure! Why did the computer show up at work late? Because it had a hard drive!\n";
 
         assert_eq!(prompt, expected_prompt);
     }
