@@ -1100,28 +1100,32 @@ pub mod json_schema_tests {
     fn test_messages_to_llama_prompt() {
         let messages = vec![
             Message::System {
-                content: Some("You are a helpful assistant.".to_string()),
+                content: Some(MessageContent::Text(
+                    "You are a helpful assistant.".to_string(),
+                )),
                 name: None,
             },
             Message::User {
-                content: Some("Hello, how are you?".to_string()),
+                content: Some(MessageContent::Text("Hello, how are you?".to_string())),
                 name: None,
             },
             Message::Assistant {
-                content: Some("I'm doing well, thank you! How can I assist you today?".to_string()),
+                content: Some(MessageContent::Text(
+                    "I'm doing well, thank you! How can I assist you today?".to_string(),
+                )),
                 name: None,
                 refusal: None,
                 tool_calls: Vec::new(),
             },
             Message::User {
-                content: Some("Can you tell me a joke?".to_string()),
+                content: Some(MessageContent::Text("Can you tell me a joke?".to_string())),
                 name: None,
             },
             Message::Assistant {
-                content: Some(
+                content: Some(MessageContent::Text(
                     "Sure! Why did the computer show up at work late? Because it had a hard drive!"
                         .to_string(),
-                ),
+                )),
                 name: None,
                 refusal: None,
                 tool_calls: Vec::new(),
@@ -1153,15 +1157,15 @@ pub mod json_schema_tests {
     fn test_empty_string_message() {
         let messages = vec![
             Message::System {
-                content: Some("".to_string()),
+                content: Some(MessageContent::Text("".to_string())),
                 name: None,
             },
             Message::User {
-                content: Some("".to_string()),
+                content: Some(MessageContent::Text("".to_string())),
                 name: None,
             },
             Message::Assistant {
-                content: Some("".to_string()),
+                content: Some(MessageContent::Text("".to_string())),
                 name: None,
                 refusal: None,
                 tool_calls: Vec::new(),
@@ -1181,11 +1185,15 @@ pub mod json_schema_tests {
     fn test_no_system_message() {
         let messages = vec![
             Message::User {
-                content: Some("What is the weather like?".to_string()),
+                content: Some(MessageContent::Text(
+                    "What is the weather like?".to_string(),
+                )),
                 name: None,
             },
             Message::Assistant {
-                content: Some("The weather is sunny today.".to_string()),
+                content: Some(MessageContent::Text(
+                    "The weather is sunny today.".to_string(),
+                )),
                 name: None,
                 refusal: None,
                 tool_calls: Vec::new(),
@@ -1206,11 +1214,13 @@ pub mod json_schema_tests {
     fn test_only_system_and_assistant_messages() {
         let messages = vec![
             Message::System {
-                content: Some("You are an AI assistant.".to_string()),
+                content: Some(MessageContent::Text("You are an AI assistant.".to_string())),
                 name: None,
             },
             Message::Assistant {
-                content: Some("Hello, how can I assist you today?".to_string()),
+                content: Some(MessageContent::Text(
+                    "Hello, how can I assist you today?".to_string(),
+                )),
                 name: None,
                 refusal: None,
                 tool_calls: Vec::new(),
@@ -1229,7 +1239,7 @@ pub mod json_schema_tests {
     #[test]
     fn test_only_user_message() {
         let messages = vec![Message::User {
-            content: Some("Is the sky blue?".to_string()),
+            content: Some(MessageContent::Text("Is the sky blue?".to_string())),
             name: None,
         }];
 
@@ -1245,7 +1255,9 @@ pub mod json_schema_tests {
     #[test]
     fn test_only_system_message() {
         let messages = vec![Message::System {
-            content: Some("You are a helpful AI assistant.".to_string()),
+            content: Some(MessageContent::Text(
+                "You are a helpful AI assistant.".to_string(),
+            )),
             name: None,
         }];
 
@@ -1261,7 +1273,9 @@ pub mod json_schema_tests {
     #[test]
     fn test_only_assistant_message() {
         let messages = vec![Message::Assistant {
-            content: Some("How can I help you today?".to_string()),
+            content: Some(MessageContent::Text(
+                "You are a helpful AI assistant.".to_string(),
+            )),
             name: None,
             refusal: None,
             tool_calls: Vec::new(),
