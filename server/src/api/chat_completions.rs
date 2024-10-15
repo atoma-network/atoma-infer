@@ -238,7 +238,7 @@ pub(crate) mod messages {
     pub(crate) fn messages_to_llama2_prompt(messages: &[Message]) -> String {
         let mut prompt = String::new();
         let mut is_first_turn = true;
-        prompt.push_str("[INST] ");
+        prompt.push_str("[INST]\n");
 
         for message in messages {
             match message {
@@ -249,7 +249,7 @@ pub(crate) mod messages {
                         prompt.push('\n');
                         is_first_turn = false;
                     } else { 
-                        prompt.push_str("[INST] ");
+                        prompt.push_str("[INST]\n");
                         prompt.push_str(&message.to_prompt_string());
                         prompt.push('\n');
                     }
