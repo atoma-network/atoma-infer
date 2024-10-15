@@ -1553,7 +1553,7 @@ pub mod json_schema_tests {
 
         let prompt = model.messages_to_prompt(&messages);
 
-        let expected_prompt = "[INST] <<SYS>>\nYou are an AI assistant.\n<</SYS>>\n[/INST]\nHello, how can I assist you today?\n";
+        let expected_prompt = "<s>[INST] <<SYS>>\nYou are an AI assistant.\n<</SYS>>\n[/INST]\nHello, how can I assist you today?\n";
 
         assert_eq!(prompt, expected_prompt);
     }
@@ -1569,7 +1569,7 @@ pub mod json_schema_tests {
 
         let prompt = model.messages_to_prompt(&messages);
 
-        let expected_prompt = "[INST]\nIs the sky blue?\n[/INST]\n";
+        let expected_prompt = "<s>[INST] Is the sky blue?\n[/INST]\n";
 
         assert_eq!(prompt, expected_prompt);
     }
@@ -1587,7 +1587,7 @@ pub mod json_schema_tests {
 
         let prompt = model.messages_to_prompt(&messages);
 
-        let expected_prompt = "[INST] <<SYS>>\nYou are a helpful AI assistant.\n<</SYS>>\n";
+        let expected_prompt = "<s>[INST] <<SYS>>\nYou are a helpful AI assistant.\n<</SYS>>\n";
 
         assert_eq!(prompt, expected_prompt);
     }
@@ -1607,7 +1607,7 @@ pub mod json_schema_tests {
 
         let prompt = model.messages_to_prompt(&messages);
 
-        let expected_prompt = "You are a helpful AI assistant.\n";
+        let expected_prompt = "<s>You are a helpful AI assistant.\n";
 
         assert_eq!(prompt, expected_prompt);
     }
