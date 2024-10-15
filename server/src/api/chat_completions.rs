@@ -1470,7 +1470,7 @@ pub mod json_schema_tests {
 
         let prompt = model.messages_to_prompt(&messages);
 
-        let expected_prompt = "[INST]\n<<SYS>>\n<<SYS>>\nYou are a helpful assistant.\n<</SYS>>\n\n<</SYS>>\n\n[INST]\nHello, how are you?\n[/INST]\nI'm doing well, thank you! How can I assist you today?\nCan you tell me a joke?\n[/INST]\nSure! Why did the computer show up at work late? Because it had a hard drive!\n";
+        let expected_prompt = "<s>[INST] <<SYS>>\nYou are a helpful assistant.\n<</SYS>>\n\nHello, how are you? [/INST]\nI'm doing well, thank you! How can I assist you today?\n[INST] Can you tell me a joke? [/INST]\nSure! Why did the computer show up at work late? Because it had a hard drive!\n";
 
         assert_eq!(prompt, expected_prompt);
     }
