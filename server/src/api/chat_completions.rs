@@ -13,7 +13,6 @@ use utoipa::ToSchema;
 use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
-use tracing::warn;
 
 // TODO: fields that are named `r#type` should have values that represent
 // actual expected types that are deserializable from a string instead of
@@ -214,6 +213,7 @@ impl Message {
 
 pub(crate) mod messages {
     use super::{Message, MessageContent};
+    use tracing::warn;
 
     /// Function to convert a list of messages to a prompt string in Llama format.
     pub(crate) fn messages_to_llama_prompt(messages: &[Message]) -> String {
