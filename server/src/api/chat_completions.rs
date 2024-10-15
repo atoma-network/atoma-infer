@@ -204,7 +204,7 @@ impl Message {
         match self {
             Message::System { content, name: _ } => {
                 let content_str = content.as_ref().map(|s| s.to_string()).unwrap_or_default();
-                format!("<<SYS>>\n{}\n<</SYS>>\n", content_str)
+                content_str
             }
             Message::User { content, name: _ } => {
                 let content_str = content.as_ref().map(|s| s.to_string()).unwrap_or_default();
@@ -238,6 +238,7 @@ pub(crate) mod messages {
     pub(crate) fn messages_to_llama2_prompt(messages: &[Message]) -> String {
         let mut prompt = String::new();
         let mut i = 0;
+        prompt.push_str("<s>");
 
         // Check if the first message is a system message
         if i < messages.len() && matches!(messages[i], Message::System { .. }) {
