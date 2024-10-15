@@ -334,7 +334,7 @@ pub(crate) mod messages {
                         prompt.push_str("[");
                         let tool_calls_str = tool_calls
                             .iter()
-                            .map(|tc| tc.to_string())
+                            .map(|tc| tc.function.name.clone())
                             .collect::<Vec<_>>()
                             .join(", ");
                         prompt.push_str(&tool_calls_str);
@@ -351,11 +351,10 @@ pub(crate) mod messages {
                 Message::Tool {
                     content,
                     tool_call_id: _,
-                    name,
                 } => {
                     // For tool responses, the role is the tool name or "ipython" as in the examples
                     prompt.push_str("<|start_header_id|>");
-                    prompt.push_str(name.as_deref().unwrap_or("tool"));
+                    prompt.push_str("ipython");
                     prompt.push_str("<|end_header_id|>\n\n");
                     if let Some(content) = content {
                         prompt.push_str(&content.to_string());
