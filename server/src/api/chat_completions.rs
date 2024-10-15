@@ -251,7 +251,9 @@ pub(crate) mod messages {
                     }
                 }
                 Message::User { .. } => {
-                    if !is_first_turn {
+                    if is_first_turn {
+                        prompt.push_str("[INST] ");
+                    } else if i > 0 && !matches!(messages[i - 1], Message::Assistant { .. }) {
                         prompt.push_str("[INST] ");
                     }
                     prompt.push_str(&message.to_prompt_string());
@@ -260,7 +262,7 @@ pub(crate) mod messages {
                     {
                         prompt.push_str(" [/INST]\n");
                     } else {
-                        prompt.push_str("\n");
+                        prompt.push('\n');
                     }
                     is_first_turn = false;
                 }
