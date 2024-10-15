@@ -238,37 +238,33 @@ pub(crate) mod messages {
     pub(crate) fn messages_to_llama2_prompt(messages: &[Message]) -> String {
         let mut prompt = String::new();
         let mut is_first_turn = true;
-        prompt.push_str("[INST]\n");
 
-        for message in messages {
+        for (i, message) in messages.iter().enumerate() {
             match message {
                 Message::System { .. } => {
-                    // System messages are handled at the beginning.
                     if is_first_turn {
+                        prompt.push_str("[INST] <<SYS>>\n");
                         prompt.push_str(&message.to_prompt_string());
-                        prompt.push('\n');
-                        is_first_turn = false;
-                    } else { 
-                        prompt.push_str("[INST]\n");
-                        prompt.push_str(&message.to_prompt_string());
-                        prompt.push('\n');
+                        prompt.push_str("\n<</SYS>>\n\n");
+                    } else {
+                        warn!("System message not at the beginning: {:?}", message);
                     }
                 }
                 Message::User { .. } => {
-                    if is_first_turn {
-                        // After the system message and first user message, close the [INST] block.
-                        prompt.push_str(&message.to_prompt_string());
-                        prompt.push_str("\n[/INST]\n");
-                        is_first_turn = false;
-                    } else {
-                        // For subsequent turns, open a new [INST] block.
-                        prompt.push_str("[INST]\n");
-                        prompt.push_str(&message.to_prompt_string());
-                        prompt.push_str("\n[/INST]\n");
+                    if !is_first_turn {
+                        prompt.push_str("[INST] ");
                     }
+                    prompt.push_str(&message.to_prompt_string());
+                    if i + 1 < messages.len()
+                        && matches!(messages[i + 1], Message::Assistant { .. })
+                    {
+                        prompt.push_str(" [/INST]\n");
+                    } else {
+                        prompt.push_str("\n");
+                    }
+                    is_first_turn = false;
                 }
                 Message::Assistant { .. } => {
-                    // Assistant responses are added directly after the user message.
                     prompt.push_str(&message.to_prompt_string());
                     prompt.push('\n');
                 }
@@ -278,13 +274,16 @@ pub(crate) mod messages {
             }
         }
 
+        // If the last message is from the user, close the [INST] block
+        if let Some(Message::User { .. }) = messages.last() {
+            prompt.push_str("[/INST]");
+        }
+
         prompt
     }
 
     /// Function to convert a list of messages to a prompt string in Llama3 format.
-    pub(crate) fn messages_to_llama3_prompt(
-        messages: &[Message],
-    ) -> String {
+    pub(crate) fn messages_to_llama3_prompt(messages: &[Message]) -> String {
         let mut prompt = String::new();
         prompt.push_str("<|begin_of_text|>");
 
@@ -1201,7 +1200,9 @@ pub mod json_schema_tests {
     #[test]
     fn test_system_message_only() {
         let messages = vec![Message::System {
-            content: Some(MessageContent::Text("You are a helpful assistant.".to_string())),
+            content: Some(MessageContent::Text(
+                "You are a helpful assistant.".to_string(),
+            )),
             name: None,
         }];
         let result = messages::messages_to_llama3_prompt(&messages);
@@ -1240,7 +1241,8 @@ pub mod json_schema_tests {
             tool_call_id: "get_weather".to_string(),
         }];
         let result = messages::messages_to_llama3_prompt(&messages);
-        let expected = "<|begin_of_text|><|start_header_id|>ipython<|end_header_id|>\n\n25 C<|eot_id|>";
+        let expected =
+            "<|begin_of_text|><|start_header_id|>ipython<|end_header_id|>\n\n25 C<|eot_id|>";
         assert_eq!(result, expected);
     }
 
@@ -1248,7 +1250,9 @@ pub mod json_schema_tests {
     fn test_system_and_user() {
         let messages = vec![
             Message::System {
-                content: Some(MessageContent::Text("You are a helpful assistant.".to_string())),
+                content: Some(MessageContent::Text(
+                    "You are a helpful assistant.".to_string(),
+                )),
                 name: None,
             },
             Message::User {
@@ -1271,7 +1275,9 @@ pub mod json_schema_tests {
     fn test_system_and_assistant() {
         let messages = vec![
             Message::System {
-                content: Some(MessageContent::Text("You are a helpful assistant.".to_string())),
+                content: Some(MessageContent::Text(
+                    "You are a helpful assistant.".to_string(),
+                )),
                 name: None,
             },
             Message::Assistant {
@@ -1321,11 +1327,15 @@ pub mod json_schema_tests {
     fn test_system_user_assistant() {
         let messages = vec![
             Message::System {
-                content: Some(MessageContent::Text("You are a helpful assistant.".to_string())),
+                content: Some(MessageContent::Text(
+                    "You are a helpful assistant.".to_string(),
+                )),
                 name: None,
             },
             Message::User {
-                content: Some(MessageContent::Text("What is the weather in SF?".to_string())),
+                content: Some(MessageContent::Text(
+                    "What is the weather in SF?".to_string(),
+                )),
                 name: None,
             },
             Message::Assistant {
@@ -1339,7 +1349,9 @@ pub mod json_schema_tests {
                 tool_call_id: "get_weather".to_string(),
             },
             Message::Assistant {
-                content: Some(MessageContent::Text("The weather in San Francisco is 25 C.".to_string())),
+                content: Some(MessageContent::Text(
+                    "The weather in San Francisco is 25 C.".to_string(),
+                )),
                 name: None,
                 refusal: None,
                 tool_calls: vec![],
@@ -1369,35 +1381,33 @@ pub mod json_schema_tests {
 
     #[test]
     fn test_tool_call_with_multiple_functions() {
-        let messages = vec![
-            Message::Assistant {
-                content: None,
-                name: None,
-                refusal: None,
-                tool_calls: vec![
-                    ToolCall {
-                        id: "1".to_string(),
-                        r#type: "function".to_string(),
-                        function: ToolCallFunction {
-                            name: "func1".to_string(),
-                            arguments: json!({
-                                "param1": "value1"
-                            }),
-                        },
+        let messages = vec![Message::Assistant {
+            content: None,
+            name: None,
+            refusal: None,
+            tool_calls: vec![
+                ToolCall {
+                    id: "1".to_string(),
+                    r#type: "function".to_string(),
+                    function: ToolCallFunction {
+                        name: "func1".to_string(),
+                        arguments: json!({
+                            "param1": "value1"
+                        }),
                     },
-                    ToolCall {
-                        id: "2".to_string(),
-                        r#type: "function".to_string(),
-                        function: ToolCallFunction {
-                            name: "func2".to_string(),
-                            arguments: json!({
-                                "param2": "value2"
-                            }),
-                        },
+                },
+                ToolCall {
+                    id: "2".to_string(),
+                    r#type: "function".to_string(),
+                    function: ToolCallFunction {
+                        name: "func2".to_string(),
+                        arguments: json!({
+                            "param2": "value2"
+                        }),
                     },
-                ],
-            },
-        ];
+                },
+            ],
+        }];
         let result = messages::messages_to_llama3_prompt(&messages);
         let expected = concat!(
             "<|begin_of_text|>",
@@ -1406,7 +1416,7 @@ pub mod json_schema_tests {
         );
         assert_eq!(result, expected);
     }
-    
+
     #[test]
     fn test_messages_to_llama2_prompt() {
         let messages = vec![
@@ -1475,7 +1485,7 @@ pub mod json_schema_tests {
 
         let prompt = model.messages_to_prompt(&messages);
 
-        let expected_prompt = "[INST] <<SYS>>\n\n<</SYS>>\n\n\n[/INST]\n\n";
+        let expected_prompt = "[INST]\n<<SYS>>\n\n<</SYS>>\n\n\n[/INST]\n\n";
 
         assert_eq!(prompt, expected_prompt);
     }
