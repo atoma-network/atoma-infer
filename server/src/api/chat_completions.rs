@@ -231,7 +231,7 @@ impl Message {
 }
 
 pub(crate) mod messages {
-    use super::{Message, MessageContent};
+    use super::Message;
     use tracing::warn;
 
     /// Function to convert a list of messages to a prompt string in Llama2 format.
@@ -299,7 +299,7 @@ pub(crate) mod messages {
     pub(crate) fn messages_to_llama3_prompt(messages: &[Message]) -> String {
         let mut prompt = String::new();
         prompt.push_str("<|begin_of_text|>");
-    
+
         for message in messages {
             match message {
                 Message::System { content, name } => {
@@ -360,9 +360,9 @@ pub(crate) mod messages {
                 }
             }
         }
-    
+
         prompt
-    }    
+    }
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize, JsonSchema)]
