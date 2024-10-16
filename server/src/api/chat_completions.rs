@@ -1358,7 +1358,17 @@ pub mod json_schema_tests {
                 content: None,
                 name: None,
                 refusal: None,
-                tool_calls: vec![],
+                tool_calls: vec![ToolCall {
+                    id: "get_weather".to_string(),
+                    r#type: "function".to_string(),
+                    function: ToolCallFunction {
+                        name: "get_weather".to_string(),
+                        arguments: json!({
+                            "city": "San Francisco",
+                            "metric": "celsius"
+                        }),
+                    },
+                }],
             },
             Message::Tool {
                 content: Some(MessageContent::Text("\"25 C\"".to_string())),
@@ -1370,19 +1380,7 @@ pub mod json_schema_tests {
                 )),
                 name: None,
                 refusal: None,
-                tool_calls: vec![
-                    ToolCall {
-                        id: "get_weather".to_string(),
-                        r#type: "function".to_string(),
-                        function: ToolCallFunction {
-                            name: "get_weather".to_string(),
-                            arguments: json!({
-                                "city": "San Francisco",
-                                "metric": "celsius"
-                            }),
-                        },
-                    },
-                ],
+                tool_calls: vec![],
             },
         ];
         let result = messages::messages_to_llama3_prompt(&messages);
