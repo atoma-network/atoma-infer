@@ -572,7 +572,7 @@ impl ToolCall {
             Model::HermesLlama318b | Model::HermesLlama3170b | Model::HermesLlama31405b => {
                 format!(
                     "{{\"arguments\": {}, \"name\": \"{}\"}}",
-                    self.function.arguments.to_string(),
+                    serde_json::to_string_pretty(&self.function.arguments).unwrap(),
                     self.function.name
                 )
             }
