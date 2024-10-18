@@ -12,7 +12,7 @@ use axum::{
     extract::State,
     http::{header, HeaderMap, StatusCode},
     response::{sse::KeepAlive, IntoResponse, Sse},
-    routing::post,
+    routing::{get, post},
     Json, Router,
 };
 use serde_json::{json, Value};
@@ -32,7 +32,8 @@ use utoipa_swagger_ui::SwaggerUi;
 use crate::{
     api::{
         chat_completions::{ChatCompletionResponse, RequestBody},
-        validate_schema::validate_with_schema, ModelInfo,
+        validate_schema::validate_with_schema,
+        ModelInfo,
     },
     stream::Streamer,
 };
