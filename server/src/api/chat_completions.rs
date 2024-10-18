@@ -570,10 +570,13 @@ impl ToolCall {
     pub fn function_call_string(&self, model: Model) -> String {
         match model {
             Model::HermesLlama318b | Model::HermesLlama3170b | Model::HermesLlama31405b => {
+                let formatted_arguments = serde_json::to_string(&self.function.arguments)
+                    .unwrap()
+                    .replace("\":\"", "\": \""); // Add a space after the colon
+
                 format!(
                     "{{\"arguments\": {}, \"name\": \"{}\"}}",
-                    serde_json::to_string(&self.function.arguments).unwrap(),
-                    self.function.name
+                    formatted_arguments, self.function.name
                 )
             }
             Model::Llama38b
