@@ -252,7 +252,7 @@ impl Message {
 }
 
 pub(crate) mod messages {
-    use super::Message;
+    use super::{Message, Model};
     use tracing::warn;
 
     /// Function to convert a list of messages to a prompt string in Llama2 format.
@@ -354,7 +354,7 @@ pub(crate) mod messages {
                         prompt.push_str("<|python_tag|>[");
                         let tool_calls_str = tool_calls
                             .iter()
-                            .map(|tc| tc.function_call_string())
+                            .map(|tc| tc.function_call_string(Model::Llama318bInstruct)) // all llama3 model versions have the same functionality
                             .collect::<Vec<_>>()
                             .join(", ");
                         prompt.push_str(&tool_calls_str);
@@ -415,7 +415,7 @@ pub(crate) mod messages {
                         prompt.push_str("<tool_call>");
                         let tool_calls_str = tool_calls
                             .iter()
-                            .map(|tc| tc.function_call_string())
+                            .map(|tc| tc.function_call_string(Model::Llama318bInstruct)) // all llama3 model versions have the same functionality
                             .collect::<Vec<_>>()
                             .join(", ");
                         prompt.push_str(&tool_calls_str);
