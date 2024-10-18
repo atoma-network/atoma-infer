@@ -1565,7 +1565,9 @@ pub mod json_schema_tests {
         #[test]
         fn test_system_message() {
             let messages = vec![Message::System {
-                content: Some("You are Hermes 3, a superintelligent AI.".to_string()),
+                content: Some(MessageContent::Text(
+                    "You are Hermes 3, a superintelligent AI.".to_string(),
+                )),
                 name: None,
             }];
 
@@ -1578,7 +1580,7 @@ pub mod json_schema_tests {
         #[test]
         fn test_user_message() {
             let messages = vec![Message::User {
-                content: Some("Hello, who are you?".to_string()),
+                content: Some(MessageContent::Text("Hello, who are you?".to_string())),
                 name: None,
             }];
 
@@ -1590,8 +1592,9 @@ pub mod json_schema_tests {
         #[test]
         fn test_assistant_message() {
             let messages = vec![Message::Assistant {
-                content: Some("I am Hermes 3, a superintelligent AI.".to_string()),
+                content: Some(MessageContent::Text("I am Hermes 3, a superintelligent AI.".to_string())),
                 name: None,
+                refusal: None,
                 tool_calls: vec![],
             }];
 
@@ -1604,7 +1607,7 @@ pub mod json_schema_tests {
         #[test]
         fn test_tool_message() {
             let messages = vec![Message::Tool {
-                content: Some("Tool response here.".to_string()),
+                content: Some(MessageContent::Text("Tool response here.".to_string())),
                 tool_call_id: "tool_call_id".to_string(),
             }];
 
@@ -1616,13 +1619,18 @@ pub mod json_schema_tests {
         #[test]
         fn test_tool_call_in_assistant_message() {
             let tool_call = ToolCall {
-                name: "get_stock_fundamentals".to_string(),
-                arguments: serde_json::json!({"symbol": "TSLA"}),
+                id: "1".to_string(),
+                r#type: "function".to_string(),
+                function: ToolCallFunction {
+                    name: "get_stock_fundamentals".to_string(),
+                    arguments: serde_json::json!({"symbol": "TSLA"}),
+                },
             };
 
             let messages = vec![Message::Assistant {
                 content: None,
                 name: None,
+                refusal: None,
                 tool_calls: vec![tool_call],
             }];
 
@@ -1635,16 +1643,17 @@ pub mod json_schema_tests {
         fn test_mixed_messages() {
             let messages = vec![
                 Message::System {
-                    content: Some("You are Hermes 3, a superintelligent AI.".to_string()),
+                    content: Some(MessageContent::Text("You are Hermes 3, a superintelligent AI.".to_string())),
                     name: None,
                 },
                 Message::User {
-                    content: Some("Fetch stock data for TSLA.".to_string()),
+                    content: Some(MessageContent::Text("Fetch stock data for TSLA.".to_string())),
                     name: None,
                 },
                 Message::Assistant {
-                    content: Some("Fetching stock data...".to_string()),
+                    content: Some(MessageContent::Text("Fetching stock data...".to_string())),
                     name: None,
+                    refusal: None,
                     tool_calls: vec![],
                 },
             ];
@@ -1682,18 +1691,27 @@ pub mod json_schema_tests {
         #[test]
         fn test_hermes3_multiple_tool_calls() {
             let tool_call1 = ToolCall {
-                name: "get_stock_fundamentals".to_string(),
-                arguments: serde_json::json!({"symbol": "TSLA"}),
+                id: "1".to_string(),
+                r#type: "function".to_string(),
+                function: ToolCallFunction {
+                    name: "get_stock_fundamentals".to_string(),
+                    arguments: serde_json::json!({"symbol": "TSLA"}),
+                },
             };
 
             let tool_call2 = ToolCall {
-                name: "get_crypto_data".to_string(),
-                arguments: serde_json::json!({"symbol": "BTC"}),
+                id: "2".to_string(),
+                r#type: "function".to_string(),
+                function: ToolCallFunction {
+                    name: "get_crypto_data".to_string(),
+                    arguments: serde_json::json!({"symbol": "BTC"}),
+                },
             };
 
             let messages = vec![Message::Assistant {
                 content: None,
                 name: None,
+                refusal: None,
                 tool_calls: vec![tool_call1, tool_call2],
             }];
 
@@ -1705,7 +1723,7 @@ pub mod json_schema_tests {
         #[test]
         fn test_hermes3_tool_message_with_tool_call_id() {
             let messages = vec![Message::Tool {
-                content: Some("Stock data for TSLA".to_string()),
+                content: Some(MessageContent::Text("Stock data for TSLA".to_string())),
                 tool_call_id: "123".to_string(),
             }];
 
