@@ -415,7 +415,7 @@ pub(crate) mod messages {
                         prompt.push_str("<tool_call>");
                         let tool_calls_str = tool_calls
                             .iter()
-                            .map(|tc| tc.function_call_string(Model::Llama318bInstruct)) // all llama3 model versions have the same functionality
+                            .map(|tc| tc.function_call_string(Model::HermesLlama318b)) // all hermes3 model versions have the same functionality
                             .collect::<Vec<_>>()
                             .join(", ");
                         prompt.push_str(&tool_calls_str);
