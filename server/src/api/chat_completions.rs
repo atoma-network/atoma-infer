@@ -110,6 +110,21 @@ pub enum Model {
         deserialize = "meta-llama/Llama-3.2-3B-Instruct"
     ))]
     Llama323bInstruct,
+    #[serde(rename(
+        serialize = "NousResearch/Hermes-3-Llama-3.1-8B",
+        deserialize = "NousResearch/Hermes-3-Llama-3.1-8B"
+    ))]
+    HermesLlama318b,
+    #[serde(rename(
+        serialize = "NousResearch/Hermes-3-Llama-3.1-70B",
+        deserialize = "NousResearch/Hermes-3-Llama-3.1-70B"
+    ))]
+    HermesLlama3170b,
+    #[serde(rename(
+        serialize = "NousResearch/Hermes-3-Llama-3.1-405B",
+        deserialize = "NousResearch/Hermes-3-Llama-3.1-405B"
+    ))]
+    HermesLlama31405b,
 }
 
 impl std::fmt::Display for Model {
@@ -132,6 +147,9 @@ impl std::fmt::Display for Model {
             Model::Llama321bInstruct => write!(f, "meta-llama/Llama-3.2-1B-Instruct"),
             Model::Llama323b => write!(f, "meta-llama/Llama-3.2-3B"),
             Model::Llama323bInstruct => write!(f, "meta-llama/Llama-3.2-3B-Instruct"),
+            Model::HermesLlama318b => write!(f, "NousResearch/Hermes-3-Llama-3.1-8B"),
+            Model::HermesLlama3170b => write!(f, "NousResearch/Hermes-3-Llama-3.1-70B"),
+            Model::HermesLlama31405b => write!(f, "NousResearch/Hermes-3-Llama-3.1-405B"),
         }
     }
 }
@@ -145,6 +163,9 @@ impl Model {
             | Llama318bInstruct | Llama3170b | Llama3170bInstruct | Llama31405b
             | Llama31405bInstruct | Llama321b | Llama321bInstruct | Llama323b
             | Llama323bInstruct => messages::messages_to_llama3_prompt(messages),
+            HermesLlama318b | HermesLlama3170b | HermesLlama31405b => {
+                messages::messages_to_hermes3_prompt(messages)
+            }
         }
     }
 }
@@ -357,6 +378,59 @@ pub(crate) mod messages {
                         prompt.push_str(&content.to_string());
                     }
                     prompt.push_str("<|eot_id|>");
+                }
+            }
+        }
+
+        prompt
+    }
+
+    /// Function to convert a list of messages to a prompt string in Hermes3 format.
+    pub(crate) fn messages_to_hermes3_prompt(messages: &[Message]) -> String {
+        let mut prompt = String::new();
+
+        for message in messages {
+            match message {
+                Message::System { content, .. } => {
+                    prompt.push_str("<|im_start|>system\n");
+                    if let Some(content) = content {
+                        prompt.push_str(&content.to_string());
+                    }
+                    prompt.push_str("\n<|im_end|>\n");
+                }
+                Message::User { content, .. } => {
+                    prompt.push_str("<|im_start|>user\n");
+                    if let Some(content) = content {
+                        prompt.push_str(&content.to_string());
+                    }
+                    prompt.push_str("\n<|im_end|>\n");
+                }
+                Message::Assistant {
+                    content,
+                    tool_calls,
+                    ..
+                } => {
+                    prompt.push_str("<|im_start|>assistant\n");
+                    if !tool_calls.is_empty() {
+                        prompt.push_str("<tool_call>");
+                        let tool_calls_str = tool_calls
+                            .iter()
+                            .map(|tc| tc.function_call_string())
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        prompt.push_str(&tool_calls_str);
+                        prompt.push_str("</tool_call>");
+                    } else if let Some(content) = content {
+                        prompt.push_str(&content.to_string());
+                    }
+                    prompt.push_str("\n<|im_end|>\n");
+                }
+                Message::Tool { content, .. } => {
+                    prompt.push_str("<|im_start|>tool\n");
+                    if let Some(content) = content {
+                        prompt.push_str(&content.to_string());
+                    }
+                    prompt.push_str("\n<|im_end|>\n");
                 }
             }
         }
@@ -1482,6 +1556,181 @@ pub mod json_schema_tests {
             "<|python_tag|>[func1(param1='value1'), func2(param2='value2')]<|eot_id|>",
         );
         assert_eq!(result, expected);
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn test_system_message() {
+            let messages = vec![Message::System {
+                content: Some("You are Hermes 3, a superintelligent AI.".to_string()),
+                name: None,
+            }];
+
+            let prompt = messages::messages_to_hermes3_prompt(&messages);
+            let expected =
+                "<|im_start|>system\nYou are Hermes 3, a superintelligent AI.\n<|im_end|>\n";
+            assert_eq!(prompt, expected);
+        }
+
+        #[test]
+        fn test_user_message() {
+            let messages = vec![Message::User {
+                content: Some("Hello, who are you?".to_string()),
+                name: None,
+            }];
+
+            let prompt = messages::messages_to_hermes3_prompt(&messages);
+            let expected = "<|im_start|>user\nHello, who are you?\n<|im_end|>\n";
+            assert_eq!(prompt, expected);
+        }
+
+        #[test]
+        fn test_assistant_message() {
+            let messages = vec![Message::Assistant {
+                content: Some("I am Hermes 3, a superintelligent AI.".to_string()),
+                name: None,
+                tool_calls: vec![],
+            }];
+
+            let prompt = messages::messages_to_hermes3_prompt(&messages);
+            let expected =
+                "<|im_start|>assistant\nI am Hermes 3, a superintelligent AI.\n<|im_end|>\n";
+            assert_eq!(prompt, expected);
+        }
+
+        #[test]
+        fn test_tool_message() {
+            let messages = vec![Message::Tool {
+                content: Some("Tool response here.".to_string()),
+                tool_call_id: "tool_call_id".to_string(),
+            }];
+
+            let prompt = messages::messages_to_hermes3_prompt(&messages);
+            let expected = "<|im_start|>tool\nTool response here.\n<|im_end|>\n";
+            assert_eq!(prompt, expected);
+        }
+
+        #[test]
+        fn test_tool_call_in_assistant_message() {
+            let tool_call = ToolCall {
+                name: "get_stock_fundamentals".to_string(),
+                arguments: serde_json::json!({"symbol": "TSLA"}),
+            };
+
+            let messages = vec![Message::Assistant {
+                content: None,
+                name: None,
+                tool_calls: vec![tool_call],
+            }];
+
+            let prompt = messages::messages_to_hermes3_prompt(&messages);
+            let expected = "<|im_start|>assistant\n<tool_call>{\"arguments\": {\"symbol\": \"TSLA\"}, \"name\": \"get_stock_fundamentals\"}</tool_call>\n<|im_end|>\n";
+            assert_eq!(prompt, expected);
+        }
+
+        #[test]
+        fn test_mixed_messages() {
+            let messages = vec![
+                Message::System {
+                    content: Some("You are Hermes 3, a superintelligent AI.".to_string()),
+                    name: None,
+                },
+                Message::User {
+                    content: Some("Fetch stock data for TSLA.".to_string()),
+                    name: None,
+                },
+                Message::Assistant {
+                    content: Some("Fetching stock data...".to_string()),
+                    name: None,
+                    tool_calls: vec![],
+                },
+            ];
+
+            let prompt = messages::messages_to_hermes3_prompt(&messages);
+            let expected = concat!(
+                "<|im_start|>system\nYou are Hermes 3, a superintelligent AI.\n<|im_end|>\n",
+                "<|im_start|>user\nFetch stock data for TSLA.\n<|im_end|>\n",
+                "<|im_start|>assistant\nFetching stock data...\n<|im_end|>\n"
+            );
+            assert_eq!(prompt, expected);
+        }
+
+        #[test]
+        fn test_hermes3_empty_messages() {
+            let messages: Vec<Message> = vec![];
+
+            let prompt = messages::messages_to_hermes3_prompt(&messages);
+            let expected = ""; // Empty messages should result in an empty prompt
+            assert_eq!(prompt, expected);
+        }
+
+        #[test]
+        fn test_hermes3_missing_content_in_message() {
+            let messages = vec![Message::User {
+                content: None,
+                name: None,
+            }];
+
+            let prompt = messages::messages_to_hermes3_prompt(&messages);
+            let expected = "<|im_start|>user\n\n<|im_end|>\n"; // Handle missing content as an empty string
+            assert_eq!(prompt, expected);
+        }
+
+        #[test]
+        fn test_hermes3_multiple_tool_calls() {
+            let tool_call1 = ToolCall {
+                name: "get_stock_fundamentals".to_string(),
+                arguments: serde_json::json!({"symbol": "TSLA"}),
+            };
+
+            let tool_call2 = ToolCall {
+                name: "get_crypto_data".to_string(),
+                arguments: serde_json::json!({"symbol": "BTC"}),
+            };
+
+            let messages = vec![Message::Assistant {
+                content: None,
+                name: None,
+                tool_calls: vec![tool_call1, tool_call2],
+            }];
+
+            let prompt = messages::messages_to_hermes3_prompt(&messages);
+            let expected = "<|im_start|>assistant\n<tool_call>{\"arguments\": {\"symbol\": \"TSLA\"}, \"name\": \"get_stock_fundamentals\"}, {\"arguments\": {\"symbol\": \"BTC\"}, \"name\": \"get_crypto_data\"}</tool_call>\n<|im_end|>\n";
+            assert_eq!(prompt, expected);
+        }
+
+        #[test]
+        fn test_hermes3_tool_message_with_tool_call_id() {
+            let messages = vec![Message::Tool {
+                content: Some("Stock data for TSLA".to_string()),
+                tool_call_id: "123".to_string(),
+            }];
+
+            let prompt = messages::messages_to_hermes3_prompt(&messages);
+            let expected = "<|im_start|>tool\nStock data for TSLA\n<|im_end|>\n";
+            assert_eq!(prompt, expected);
+        }
+
+        #[test]
+        fn test_hermes3_system_and_user_message_no_content() {
+            let messages = vec![
+                Message::System {
+                    content: None,
+                    name: None,
+                },
+                Message::User {
+                    content: None,
+                    name: None,
+                },
+            ];
+
+            let prompt = messages::messages_to_hermes3_prompt(&messages);
+            let expected = "<|im_start|>system\n\n<|im_end|>\n<|im_start|>user\n\n<|im_end|>\n";
+            assert_eq!(prompt, expected);
+        }
     }
 
     #[test]
