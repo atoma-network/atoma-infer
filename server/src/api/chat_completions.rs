@@ -567,45 +567,72 @@ pub struct ToolCall {
 }
 
 impl ToolCall {
-    pub fn function_call_string(&self) -> String {
-        // Check if arguments is a JSON object
-        if let Some(args) = self.function.arguments.as_object() {
-            let params_str = args
-                .iter()
-                .map(|(k, v)| match v {
-                    serde_json::Value::String(s) => format!("{}='{}'", k, s),
-                    serde_json::Value::Number(n) => format!("{}={}", k, n),
-                    serde_json::Value::Bool(b) => format!("{}={}", k, b),
-                    _ => format!("{}={}", k, v),
-                })
-                .collect::<Vec<_>>()
-                .join(", ");
-            format!("{}({})", self.function.name, params_str)
-        }
-        // Check if arguments is a string (e.g., serialized JSON)
-        else if let Some(args_str) = self.function.arguments.as_str() {
-            // Attempt to parse the string as JSON
-            if let Ok(serde_json::Value::Object(args)) =
-                serde_json::from_str::<serde_json::Value>(args_str)
-            {
-                let params_str = args
-                    .iter()
-                    .map(|(k, v)| match v {
-                        serde_json::Value::String(s) => format!("{}='{}'", k, s),
-                        serde_json::Value::Number(n) => format!("{}={}", k, n),
-                        serde_json::Value::Bool(b) => format!("{}={}", k, b),
-                        _ => format!("{}={}", k, v),
-                    })
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                format!("{}({})", self.function.name, params_str)
-            } else {
-                // If parsing fails, include arguments as-is
-                format!("{}({})", self.function.name, args_str)
+    pub fn function_call_string(&self, model: Model) -> String {
+        match model {
+            Model::HermesLlama318b | Model::HermesLlama3170b | Model::HermesLlama31405b => {
+                format!(
+                    "{{\"arguments\": {}, \"name\": \"{}\"}}",
+                    self.function.arguments.to_string(),
+                    self.function.name
+                )
             }
-        } else {
-            // If arguments is neither an object nor a string, include function name only
-            format!("{}()", self.function.name)
+            Model::Llama38b
+            | Model::Llama38bInstruct
+            | Model::Llama370b
+            | Model::Llama370bInstruct
+            | Model::Llama31405b
+            | Model::Llama31405bInstruct
+            | Model::Llama318b
+            | Model::Llama318bInstruct
+            | Model::Llama3170b
+            | Model::Llama3170bInstruct
+            | Model::Llama321b
+            | Model::Llama321bInstruct
+            | Model::Llama323b
+            | Model::Llama323bInstruct => {
+                // Check if arguments is a JSON object
+                if let Some(args) = self.function.arguments.as_object() {
+                    let params_str = args
+                        .iter()
+                        .map(|(k, v)| match v {
+                            serde_json::Value::String(s) => format!("{}='{}'", k, s),
+                            serde_json::Value::Number(n) => format!("{}={}", k, n),
+                            serde_json::Value::Bool(b) => format!("{}={}", k, b),
+                            _ => format!("{}={}", k, v),
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    format!("{}({})", self.function.name, params_str)
+                }
+                // Check if arguments is a string (e.g., serialized JSON)
+                else if let Some(args_str) = self.function.arguments.as_str() {
+                    // Attempt to parse the string as JSON
+                    if let Ok(serde_json::Value::Object(args)) =
+                        serde_json::from_str::<serde_json::Value>(args_str)
+                    {
+                        let params_str = args
+                            .iter()
+                            .map(|(k, v)| match v {
+                                serde_json::Value::String(s) => format!("{}='{}'", k, s),
+                                serde_json::Value::Number(n) => format!("{}={}", k, n),
+                                serde_json::Value::Bool(b) => format!("{}={}", k, b),
+                                _ => format!("{}={}", k, v),
+                            })
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        format!("{}({})", self.function.name, params_str)
+                    } else {
+                        // If parsing fails, include arguments as-is
+                        format!("{}({})", self.function.name, args_str)
+                    }
+                } else {
+                    // If arguments is neither an object nor a string, include function name only
+                    format!("{}()", self.function.name)
+                }
+            }
+            Model::Llama27b | Model::Llama27bChatHf | Model::Llama270b => {
+                format!("{}", self.function.name)
+            }
         }
     }
 }
@@ -1592,7 +1619,9 @@ pub mod json_schema_tests {
         #[test]
         fn test_assistant_message() {
             let messages = vec![Message::Assistant {
-                content: Some(MessageContent::Text("I am Hermes 3, a superintelligent AI.".to_string())),
+                content: Some(MessageContent::Text(
+                    "I am Hermes 3, a superintelligent AI.".to_string(),
+                )),
                 name: None,
                 refusal: None,
                 tool_calls: vec![],
@@ -1643,11 +1672,15 @@ pub mod json_schema_tests {
         fn test_mixed_messages() {
             let messages = vec![
                 Message::System {
-                    content: Some(MessageContent::Text("You are Hermes 3, a superintelligent AI.".to_string())),
+                    content: Some(MessageContent::Text(
+                        "You are Hermes 3, a superintelligent AI.".to_string(),
+                    )),
                     name: None,
                 },
                 Message::User {
-                    content: Some(MessageContent::Text("Fetch stock data for TSLA.".to_string())),
+                    content: Some(MessageContent::Text(
+                        "Fetch stock data for TSLA.".to_string(),
+                    )),
                     name: None,
                 },
                 Message::Assistant {
