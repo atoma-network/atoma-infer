@@ -32,13 +32,15 @@ use utoipa_swagger_ui::SwaggerUi;
 use crate::{
     api::{
         chat_completions::{ChatCompletionResponse, RequestBody},
-        validate_schema::validate_with_schema,
+        validate_schema::validate_with_schema, ModelInfo,
     },
     stream::Streamer,
 };
 
 /// The URL path to POST JSON for model chat completions.
 pub const CHAT_COMPLETIONS_PATH: &str = "/v1/chat/completions";
+/// The URL path to GET JSON for model information.
+pub const MODEL_INFO_PATH: &str = "/v1/models";
 pub const AUTH_BEARER_PREFIX: &str = "Bearer ";
 
 /// Represents the shared state of the application.
@@ -56,6 +58,8 @@ pub struct AppState {
     /// This channel is used to send generate requests to the LLM service and receive
     /// the output through a oneshot channel.
     pub llm_service_sender: UnboundedSender<ServiceRequest>,
+    /// The name of the model.
+    pub model_name: String,
     /// A sender for the shutdown signal.
     ///
     /// This channel is used to send a shutdown signal to gracefully stop the server.
@@ -79,9 +83,10 @@ pub struct AppState {
 #[openapi(
     paths(
         completion_handler,
-        validate_completion_handler
+        validate_completion_handler,
+        model_handler
     ),
-    components(schemas(ChatCompletionResponse, RequestBody)),
+    components(schemas(ChatCompletionResponse, RequestBody, ModelInfo)),
     tags(
         (name = "Atoma's Chat Completions", description = "Atoma's Chat completion API")
     )
@@ -129,6 +134,7 @@ pub async fn run_server(
             &format!("{CHAT_COMPLETIONS_PATH}/validate"),
             post(validate_completion_handler),
         )
+        .route(MODEL_INFO_PATH, get(model_handler))
         .with_state(app_state)
         .merge(SwaggerUi::new("/docs").url("/api-docs/openapi.json", ApiDoc::openapi()));
 
@@ -302,6 +308,26 @@ pub async fn validate_completion_handler(
         return Json(json!(errors));
     }
     Json(json!({"status": "success"}))
+}
+
+#[utoipa::path(
+    get,
+    path = MODEL_INFO_PATH,
+    responses(
+        (status = 200, description = "Model information", body = ModelInfo)
+    )
+)]
+pub async fn model_handler(app_state: State<AppState>) -> impl IntoResponse {
+    let model_info = ModelInfo {
+        created: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("Time went backwards")
+            .as_secs(),
+        name: app_state.model_name.clone(),
+        object: "model".to_string(),
+        owned_by: "system".to_string(),
+    };
+    Json(model_info)
 }
 
 /// Handles a generate request by sending it to the LLM service and processing the response.
