@@ -26,6 +26,21 @@ use serde_json::Value;
 #[serde(rename(serialize = "model", deserialize = "model"))]
 pub enum Model {
     #[serde(rename(
+        serialize = "meta-llama/Meta-Llama-2-7b",
+        deserialize = "meta-llama/Meta-Llama-2-7b"
+    ))]
+    Llama27b,
+    #[serde(rename(
+        serialize = "meta-llama/Llama-2-7b-chat-hf",
+        deserialize = "meta-llama/Llama-2-7b-chat-hf"
+    ))]
+    Llama27bChatHf,
+    #[serde(rename(
+        serialize = "meta-llama/Llama-2-70b-hf",
+        deserialize = "meta-llama/Llama-2-70b-hf"
+    ))]
+    Llama270b,
+    #[serde(rename(
         serialize = "meta-llama/Meta-Llama-3-8B",
         deserialize = "meta-llama/Meta-Llama-3-8B"
     ))]
@@ -100,6 +115,9 @@ pub enum Model {
 impl std::fmt::Display for Model {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Model::Llama27b => write!(f, "meta-llama/Meta-Llama-2-7b"),
+            Model::Llama27bChatHf => write!(f, "meta-llama/Llama-2-7b-chat-hf"),
+            Model::Llama270b => write!(f, "meta-llama/Llama-2-70b-hf"),
             Model::Llama38b => write!(f, "meta-llama/Meta-Llama-3-8B"),
             Model::Llama38bInstruct => write!(f, "meta-llama/Meta-Llama-3-8B-Instruct"),
             Model::Llama370b => write!(f, "meta-llama/Meta-Llama-3-70B"),
@@ -114,6 +132,19 @@ impl std::fmt::Display for Model {
             Model::Llama321bInstruct => write!(f, "meta-llama/Llama-3.2-1B-Instruct"),
             Model::Llama323b => write!(f, "meta-llama/Llama-3.2-3B"),
             Model::Llama323bInstruct => write!(f, "meta-llama/Llama-3.2-3B-Instruct"),
+        }
+    }
+}
+
+impl Model {
+    pub fn messages_to_prompt(&self, messages: &[Message]) -> String {
+        use Model::*;
+        match self {
+            Llama27b | Llama27bChatHf | Llama270b => messages::messages_to_llama2_prompt(messages),
+            Llama38b | Llama38bInstruct | Llama370b | Llama370bInstruct | Llama318b
+            | Llama318bInstruct | Llama3170b | Llama3170bInstruct | Llama31405b
+            | Llama31405bInstruct | Llama321b | Llama321bInstruct | Llama323b
+            | Llama323bInstruct => messages::messages_to_llama3_prompt(messages),
         }
     }
 }
@@ -168,76 +199,169 @@ pub enum Message {
 }
 
 impl Message {
+    /// Converts a message to its string representation in the prompt.
     pub fn to_prompt_string(&self) -> String {
         match self {
-            Message::System { content, name } => {
-                let role = "System";
-                messages::format_message(role, content, name)
+            Message::System { content, name: _ } => {
+                let content_str = content.as_ref().map(|s| s.to_string()).unwrap_or_default();
+                content_str
             }
-            Message::User { content, name } => {
-                let role = "User";
-                messages::format_message(role, content, name)
+            Message::User { content, name: _ } => {
+                let content_str = content.as_ref().map(|s| s.to_string()).unwrap_or_default();
+                content_str
             }
             Message::Assistant {
                 content,
-                name,
-                refusal,
-                tool_calls,
+                name: _,
+                refusal: _,
+                tool_calls: _,
             } => {
-                let role = "Assistant";
-                let mut prompt = messages::format_message(role, content, name);
-                if let Some(refusal_message) = refusal {
-                    prompt.push_str(&format!("\nRefusal: {}", refusal_message));
-                }
-                if !tool_calls.is_empty() {
-                    prompt.push_str(&format!("\nTool Calls: {:?}", tool_calls));
-                }
-                prompt
+                let content_str = content.as_ref().map(|s| s.to_string()).unwrap_or_default();
+                content_str
             }
             Message::Tool {
                 content,
-                tool_call_id,
+                tool_call_id: _,
             } => {
-                let role = "Tool";
-                let mut prompt = messages::format_message(role, content, &None);
-                prompt.push_str(&format!("\nTool Call ID: {}", tool_call_id));
-                prompt
+                let content_str = content.as_ref().map(|s| s.to_string()).unwrap_or_default();
+                content_str
             }
         }
     }
 }
 
 pub(crate) mod messages {
-    use super::{Message, MessageContent};
+    use super::Message;
+    use tracing::warn;
 
-    /// Helper function to format a message
-    pub(crate) fn format_message(
-        role: &str,
-        content: &Option<MessageContent>,
-        name: &Option<String>,
-    ) -> String {
-        let name_str = if let Some(name) = name {
-            format!(" ({})", name)
-        } else {
-            String::new()
-        };
+    /// Function to convert a list of messages to a prompt string in Llama2 format.
+    pub(crate) fn messages_to_llama2_prompt(messages: &[Message]) -> String {
+        let mut prompt = String::new();
+        let mut i = 0;
+        prompt.push_str("<s>");
 
-        let content_str = if let Some(content) = content {
-            format!("{}", content)
-        } else {
-            String::new()
-        };
+        // Check if the first message is a system message
+        if i < messages.len() && matches!(messages[i], Message::System { .. }) {
+            // Start the initial [INST] block with the system prompt
+            prompt.push_str("[INST] <<SYS>>\n");
+            prompt.push_str(&messages[i].to_prompt_string());
+            prompt.push_str("\n<</SYS>>\n\n");
 
-        format!("{}{}: {}", role, name_str, content_str)
+            i += 1;
+
+            // Check if the next message is a user message
+            if i < messages.len() && matches!(messages[i], Message::User { .. }) {
+                // Add the user's message and close the [INST] block
+                prompt.push_str(&messages[i].to_prompt_string());
+                prompt.push_str(" [/INST]\n");
+
+                i += 1;
+            } else {
+                // No user message after system prompt, close the [INST] block
+                prompt.push_str("[/INST]\n");
+            }
+        }
+
+        // Process the rest of the messages
+        while i < messages.len() {
+            match &messages[i] {
+                Message::User { .. } => {
+                    // Start a new [INST] block for each user message
+                    prompt.push_str("[INST] ");
+                    prompt.push_str(&messages[i].to_prompt_string());
+                    prompt.push_str(" [/INST]\n");
+                    i += 1;
+
+                    // Add the assistant's response if it exists
+                    if i < messages.len() && matches!(messages[i], Message::Assistant { .. }) {
+                        prompt.push_str(&messages[i].to_prompt_string());
+                        prompt.push('\n');
+                        i += 1;
+                    }
+                }
+                Message::Assistant { .. } => {
+                    // Assistant's response without preceding user message
+                    prompt.push_str(&messages[i].to_prompt_string());
+                    prompt.push('\n');
+                    i += 1;
+                }
+                _ => {
+                    warn!("Unsupported message type: {:?}", messages[i]);
+                    i += 1;
+                }
+            }
+        }
+
+        prompt
     }
 
-    /// Function to convert a list of messages to a prompt string
-    pub(crate) fn messages_to_prompt(messages: &[Message]) -> String {
-        messages
-            .iter()
-            .map(|message| message.to_prompt_string())
-            .collect::<Vec<_>>()
-            .join("\n\n") // Separate each message by two newlines
+    /// Function to convert a list of messages to a prompt string in Llama3 format.
+    pub(crate) fn messages_to_llama3_prompt(messages: &[Message]) -> String {
+        let mut prompt = String::new();
+        prompt.push_str("<|begin_of_text|>");
+
+        for message in messages {
+            match message {
+                Message::System { content, name } => {
+                    prompt.push_str("<|start_header_id|>");
+                    prompt.push_str(name.as_deref().unwrap_or("system"));
+                    prompt.push_str("<|end_header_id|>\n\n");
+                    if let Some(content) = content {
+                        prompt.push_str(&content.to_string());
+                    }
+                    prompt.push_str("<|eot_id|>");
+                }
+                Message::User { content, name } => {
+                    prompt.push_str("<|start_header_id|>");
+                    prompt.push_str(name.as_deref().unwrap_or("user"));
+                    prompt.push_str("<|end_header_id|>\n\n");
+                    if let Some(content) = content {
+                        prompt.push_str(&content.to_string());
+                    }
+                    prompt.push_str("<|eot_id|>");
+                }
+                Message::Assistant {
+                    content,
+                    name,
+                    tool_calls,
+                    ..
+                } => {
+                    prompt.push_str("<|start_header_id|>");
+                    prompt.push_str(name.as_deref().unwrap_or("assistant"));
+                    prompt.push_str("<|end_header_id|>\n\n");
+                    if !tool_calls.is_empty() {
+                        prompt.push_str("<|python_tag|>[");
+                        let tool_calls_str = tool_calls
+                            .iter()
+                            .map(|tc| tc.function_call_string())
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        prompt.push_str(&tool_calls_str);
+                        prompt.push_str("]<|eot_id|>");
+                    } else if let Some(content) = content {
+                        prompt.push_str(&content.to_string());
+                        prompt.push_str("<|eot_id|>");
+                    } else {
+                        // If both content and tool_calls are empty, just add <|eot_id|>
+                        prompt.push_str("<|eot_id|>");
+                    }
+                }
+                Message::Tool {
+                    content,
+                    tool_call_id: _,
+                } => {
+                    prompt.push_str("<|start_header_id|>");
+                    prompt.push_str("ipython");
+                    prompt.push_str("<|end_header_id|>\n\n");
+                    if let Some(content) = content {
+                        prompt.push_str(&content.to_string());
+                    }
+                    prompt.push_str("<|eot_id|>");
+                }
+            }
+        }
+
+        prompt
     }
 }
 
@@ -347,6 +471,16 @@ impl std::fmt::Display for MessageContentPartImageUrl {
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ToolCallFunction {
+    /// The name of the function to call.
+    name: String,
+    /// The arguments to call the function with, as generated by the model in JSON format.
+    /// Note that the model does not always generate valid JSON, and may hallucinate parameters not defined by your function schema.
+    /// Validate the arguments in your code before calling your function.
+    arguments: Value,
+}
+
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename(serialize = "tool_call", deserialize = "tool_call"))]
 pub struct ToolCall {
     /// The ID of the tool call.
@@ -358,14 +492,48 @@ pub struct ToolCall {
     function: ToolCallFunction,
 }
 
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct ToolCallFunction {
-    /// The name of the function to call.
-    name: String,
-    /// The arguments to call the function with, as generated by the model in JSON format.
-    /// Note that the model does not always generate valid JSON, and may hallucinate parameters not defined by your function schema.
-    /// Validate the arguments in your code before calling your function.
-    arguments: Value,
+impl ToolCall {
+    pub fn function_call_string(&self) -> String {
+        // Check if arguments is a JSON object
+        if let Some(args) = self.function.arguments.as_object() {
+            let params_str = args
+                .iter()
+                .map(|(k, v)| match v {
+                    serde_json::Value::String(s) => format!("{}='{}'", k, s),
+                    serde_json::Value::Number(n) => format!("{}={}", k, n),
+                    serde_json::Value::Bool(b) => format!("{}={}", k, b),
+                    _ => format!("{}={}", k, v),
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("{}({})", self.function.name, params_str)
+        }
+        // Check if arguments is a string (e.g., serialized JSON)
+        else if let Some(args_str) = self.function.arguments.as_str() {
+            // Attempt to parse the string as JSON
+            if let Ok(serde_json::Value::Object(args)) =
+                serde_json::from_str::<serde_json::Value>(args_str)
+            {
+                let params_str = args
+                    .iter()
+                    .map(|(k, v)| match v {
+                        serde_json::Value::String(s) => format!("{}='{}'", k, s),
+                        serde_json::Value::Number(n) => format!("{}={}", k, n),
+                        serde_json::Value::Bool(b) => format!("{}={}", k, b),
+                        _ => format!("{}={}", k, v),
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("{}({})", self.function.name, params_str)
+            } else {
+                // If parsing fails, include arguments as-is
+                format!("{}({})", self.function.name, args_str)
+            }
+        } else {
+            // If arguments is neither an object nor a string, include function name only
+            format!("{}()", self.function.name)
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -600,7 +768,8 @@ impl RequestBody {
 
 impl RequestBody {
     pub fn to_generate_request(self, request_id: String) -> GenerateRequest {
-        let inputs = messages::messages_to_prompt(self.messages());
+        let model = self.model();
+        let inputs = model.messages_to_prompt(self.messages());
         let frequency_penalty = self.frequency_penalty();
         let max_new_tokens = self.max_completion_tokens();
         let decoder_input_details = self.logprobs().unwrap_or_default();
@@ -852,8 +1021,8 @@ pub mod json_schema_tests {
 
     use super::{
         messages, ChatCompletionChunk, ChatCompletionResponse, Choice, Delta, FinishReason,
-        Message, MessageContent, MessageContentPart, MessageContentPartImageUrl, RequestBody,
-        StreamChoice, ToolCall, ToolCallFunction, Usage,
+        Message, MessageContent, MessageContentPart, MessageContentPartImageUrl, Model,
+        RequestBody, StreamChoice, ToolCall, ToolCallFunction, Usage,
     };
     use crate::api::validate_with_schema;
 
@@ -1079,8 +1248,140 @@ pub mod json_schema_tests {
     }
 
     #[test]
-    fn test_messages_to_prompt() {
-        // Create some sample messages
+    fn test_empty_prompt() {
+        let messages: Vec<Message> = vec![];
+        let result = messages::messages_to_llama3_prompt(&messages);
+        assert_eq!(result, "<|begin_of_text|>");
+    }
+
+    #[test]
+    fn test_system_message_only() {
+        let messages = vec![Message::System {
+            content: Some(MessageContent::Text(
+                "You are a helpful assistant.".to_string(),
+            )),
+            name: None,
+        }];
+        let result = messages::messages_to_llama3_prompt(&messages);
+        let expected = "<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\nYou are a helpful assistant.<|eot_id|>";
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_user_message_only() {
+        let messages = vec![Message::User {
+            content: Some(MessageContent::Text("Hello, who are you?".to_string())),
+            name: None,
+        }];
+        let result = messages::messages_to_llama3_prompt(&messages);
+        let expected = "<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\nHello, who are you?<|eot_id|>";
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_assistant_message_only() {
+        let messages = vec![Message::Assistant {
+            content: Some(MessageContent::Text("I am an AI assistant.".to_string())),
+            name: None,
+            refusal: None,
+            tool_calls: vec![],
+        }];
+        let result = messages::messages_to_llama3_prompt(&messages);
+        let expected = "<|begin_of_text|><|start_header_id|>assistant<|end_header_id|>\n\nI am an AI assistant.<|eot_id|>";
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_tool_message_only() {
+        let messages = vec![Message::Tool {
+            content: Some(MessageContent::Text("25 C".to_string())),
+            tool_call_id: "get_weather".to_string(),
+        }];
+        let result = messages::messages_to_llama3_prompt(&messages);
+        let expected =
+            "<|begin_of_text|><|start_header_id|>ipython<|end_header_id|>\n\n25 C<|eot_id|>";
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_system_and_user() {
+        let messages = vec![
+            Message::System {
+                content: Some(MessageContent::Text(
+                    "You are a helpful assistant.".to_string(),
+                )),
+                name: None,
+            },
+            Message::User {
+                content: Some(MessageContent::Text("Hello, who are you?".to_string())),
+                name: None,
+            },
+        ];
+        let result = messages::messages_to_llama3_prompt(&messages);
+        let expected = concat!(
+            "<|begin_of_text|>",
+            "<|start_header_id|>system<|end_header_id|>\n\n",
+            "You are a helpful assistant.<|eot_id|>",
+            "<|start_header_id|>user<|end_header_id|>\n\n",
+            "Hello, who are you?<|eot_id|>",
+        );
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_system_and_assistant() {
+        let messages = vec![
+            Message::System {
+                content: Some(MessageContent::Text(
+                    "You are a helpful assistant.".to_string(),
+                )),
+                name: None,
+            },
+            Message::Assistant {
+                content: Some(MessageContent::Text("I am an AI assistant.".to_string())),
+                name: None,
+                refusal: None,
+                tool_calls: vec![],
+            },
+        ];
+        let result = messages::messages_to_llama3_prompt(&messages);
+        let expected = concat!(
+            "<|begin_of_text|>",
+            "<|start_header_id|>system<|end_header_id|>\n\n",
+            "You are a helpful assistant.<|eot_id|>",
+            "<|start_header_id|>assistant<|end_header_id|>\n\n",
+            "I am an AI assistant.<|eot_id|>",
+        );
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_user_and_assistant() {
+        let messages = vec![
+            Message::User {
+                content: Some(MessageContent::Text("Hello, who are you?".to_string())),
+                name: None,
+            },
+            Message::Assistant {
+                content: Some(MessageContent::Text("I am an AI assistant.".to_string())),
+                name: None,
+                refusal: None,
+                tool_calls: vec![],
+            },
+        ];
+        let result = messages::messages_to_llama3_prompt(&messages);
+        let expected = concat!(
+            "<|begin_of_text|>",
+            "<|start_header_id|>user<|end_header_id|>\n\n",
+            "Hello, who are you?<|eot_id|>",
+            "<|start_header_id|>assistant<|end_header_id|>\n\n",
+            "I am an AI assistant.<|eot_id|>",
+        );
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_system_user_assistant() {
         let messages = vec![
             Message::System {
                 content: Some(MessageContent::Text(
@@ -1090,113 +1391,279 @@ pub mod json_schema_tests {
             },
             Message::User {
                 content: Some(MessageContent::Text(
-                    "What is the capital of France?".to_string(),
-                )),
-                name: Some("User1".to_string()),
-            },
-            Message::Assistant {
-                content: Some(MessageContent::Text(
-                    "The capital of France is Paris.".to_string(),
+                    "What is the weather in SF?".to_string(),
                 )),
                 name: None,
-                refusal: None,
-                tool_calls: vec![],
             },
-        ];
-
-        let expected_prompt = "\
-            System: You are a helpful assistant.\n\n\
-            User (User1): What is the capital of France?\n\n\
-            Assistant: The capital of France is Paris.";
-
-        let prompt = messages::messages_to_prompt(&messages);
-        assert_eq!(prompt, expected_prompt);
-    }
-
-    #[test]
-    fn test_empty_messages() {
-        let messages: Vec<Message> = vec![];
-        let expected_prompt = "";
-
-        let prompt = messages::messages_to_prompt(&messages);
-        assert_eq!(prompt, expected_prompt);
-    }
-
-    #[test]
-    fn test_message_with_no_content() {
-        let messages = vec![
-            Message::System {
+            Message::Assistant {
                 content: None,
                 name: None,
+                refusal: None,
+                tool_calls: vec![ToolCall {
+                    id: "get_weather".to_string(),
+                    r#type: "function".to_string(),
+                    function: ToolCallFunction {
+                        name: "get_weather".to_string(),
+                        arguments: json!({
+                            "city": "San Francisco",
+                            "metric": "celsius"
+                        }),
+                    },
+                }],
             },
-            Message::User {
-                content: Some(MessageContent::Text("What is 2 + 2?".to_string())),
-                name: None,
+            Message::Tool {
+                content: Some(MessageContent::Text("\"25 C\"".to_string())),
+                tool_call_id: "get_weather".to_string(),
             },
             Message::Assistant {
-                content: Some(MessageContent::Text("2 + 2 is 4.".to_string())),
+                content: Some(MessageContent::Text(
+                    "The weather in San Francisco is 25 C.".to_string(),
+                )),
                 name: None,
                 refusal: None,
                 tool_calls: vec![],
             },
         ];
-
-        let expected_prompt = "\
-            System: \n\n\
-            User: What is 2 + 2?\n\n\
-            Assistant: 2 + 2 is 4.";
-
-        let prompt = messages::messages_to_prompt(&messages);
-        assert_eq!(prompt, expected_prompt);
+        let result = messages::messages_to_llama3_prompt(&messages);
+        let expected = concat!(
+            "<|begin_of_text|>",
+            // System message
+            "<|start_header_id|>system<|end_header_id|>\n\n",
+            "You are a helpful assistant.<|eot_id|>",
+            // User message
+            "<|start_header_id|>user<|end_header_id|>\n\n",
+            "What is the weather in SF?<|eot_id|>",
+            // Assistant message with tool call
+            "<|start_header_id|>assistant<|end_header_id|>\n\n",
+            "<|python_tag|>[get_weather(city='San Francisco', metric='celsius')]<|eot_id|>",
+            // Tool response
+            "<|start_header_id|>ipython<|end_header_id|>\n\n",
+            "\"25 C\"<|eot_id|>",
+            // Assistant's final response
+            "<|start_header_id|>assistant<|end_header_id|>\n\n",
+            "The weather in San Francisco is 25 C.<|eot_id|>",
+        );
+        assert_eq!(result, expected);
     }
 
     #[test]
-    fn test_message_to_prompt_without_sytem() {
-        let messages = vec![
-            Message::User {
-                content: Some(MessageContent::Text("What is 2 + 2?".to_string())),
-                name: None,
-            },
-            Message::Assistant {
-                content: Some(MessageContent::Text("2 + 2 is 4.".to_string())),
-                name: None,
-                refusal: None,
-                tool_calls: vec![],
-            },
-        ];
-
-        let expected_prompt = "\
-            User: What is 2 + 2?\n\n\
-            Assistant: 2 + 2 is 4.";
-
-        let prompt = messages::messages_to_prompt(&messages);
-        assert_eq!(prompt, expected_prompt);
+    fn test_tool_call_with_multiple_functions() {
+        let messages = vec![Message::Assistant {
+            content: None,
+            name: None,
+            refusal: None,
+            tool_calls: vec![
+                ToolCall {
+                    id: "1".to_string(),
+                    r#type: "function".to_string(),
+                    function: ToolCallFunction {
+                        name: "func1".to_string(),
+                        arguments: json!({
+                            "param1": "value1"
+                        }),
+                    },
+                },
+                ToolCall {
+                    id: "2".to_string(),
+                    r#type: "function".to_string(),
+                    function: ToolCallFunction {
+                        name: "func2".to_string(),
+                        arguments: json!({
+                            "param2": "value2"
+                        }),
+                    },
+                },
+            ],
+        }];
+        let result = messages::messages_to_llama3_prompt(&messages);
+        let expected = concat!(
+            "<|begin_of_text|>",
+            "<|start_header_id|>assistant<|end_header_id|>\n\n",
+            "<|python_tag|>[func1(param1='value1'), func2(param2='value2')]<|eot_id|>",
+        );
+        assert_eq!(result, expected);
     }
 
     #[test]
-    fn test_message_to_prompt_without_user() {
+    fn test_messages_to_llama2_prompt() {
         let messages = vec![
             Message::System {
                 content: Some(MessageContent::Text(
                     "You are a helpful assistant.".to_string(),
                 )),
-                name: Some("Me".to_string()),
+                name: None,
+            },
+            Message::User {
+                content: Some(MessageContent::Text("Hello, how are you?".to_string())),
+                name: None,
             },
             Message::Assistant {
                 content: Some(MessageContent::Text(
-                    "The capital of France is Paris.".to_string(),
+                    "I'm doing well, thank you! How can I assist you today?".to_string(),
                 )),
                 name: None,
                 refusal: None,
-                tool_calls: vec![],
+                tool_calls: Vec::new(),
+            },
+            Message::User {
+                content: Some(MessageContent::Text("Can you tell me a joke?".to_string())),
+                name: None,
+            },
+            Message::Assistant {
+                content: Some(MessageContent::Text(
+                    "Sure! Why did the computer show up at work late? Because it had a hard drive!"
+                        .to_string(),
+                )),
+                name: None,
+                refusal: None,
+                tool_calls: Vec::new(),
             },
         ];
 
-        let expected_prompt = "\
-            System (Me): You are a helpful assistant.\n\n\
-            Assistant: The capital of France is Paris.";
+        let model = Model::Llama27b;
 
-        let prompt = messages::messages_to_prompt(&messages);
+        let prompt = model.messages_to_prompt(&messages);
+
+        let expected_prompt = "<s>[INST] <<SYS>>\nYou are a helpful assistant.\n<</SYS>>\n\nHello, how are you? [/INST]\nI'm doing well, thank you! How can I assist you today?\n[INST] Can you tell me a joke? [/INST]\nSure! Why did the computer show up at work late? Because it had a hard drive!\n";
+
+        assert_eq!(prompt, expected_prompt);
+    }
+
+    #[test]
+    fn test_empty_string_message() {
+        let messages = vec![
+            Message::System {
+                content: Some(MessageContent::Text("".to_string())),
+                name: None,
+            },
+            Message::User {
+                content: Some(MessageContent::Text("".to_string())),
+                name: None,
+            },
+            Message::Assistant {
+                content: Some(MessageContent::Text("".to_string())),
+                name: None,
+                refusal: None,
+                tool_calls: Vec::new(),
+            },
+        ];
+
+        let model = Model::Llama27b;
+
+        let prompt = model.messages_to_prompt(&messages);
+
+        let expected_prompt = "<s>[INST] <<SYS>>\n\n<</SYS>>\n\n [/INST]\n\n";
+
+        assert_eq!(prompt, expected_prompt);
+    }
+
+    #[test]
+    fn test_no_system_message() {
+        let messages = vec![
+            Message::User {
+                content: Some(MessageContent::Text(
+                    "What is the weather like?".to_string(),
+                )),
+                name: None,
+            },
+            Message::Assistant {
+                content: Some(MessageContent::Text(
+                    "The weather is sunny today.".to_string(),
+                )),
+                name: None,
+                refusal: None,
+                tool_calls: Vec::new(),
+            },
+        ];
+
+        let model = Model::Llama27b;
+
+        let prompt = model.messages_to_prompt(&messages);
+
+        let expected_prompt =
+            "<s>[INST] What is the weather like? [/INST]\nThe weather is sunny today.\n";
+
+        assert_eq!(prompt, expected_prompt);
+    }
+
+    #[test]
+    fn test_only_system_and_assistant_messages() {
+        let messages = vec![
+            Message::System {
+                content: Some(MessageContent::Text("You are an AI assistant.".to_string())),
+                name: None,
+            },
+            Message::Assistant {
+                content: Some(MessageContent::Text(
+                    "Hello, how can I assist you today?".to_string(),
+                )),
+                name: None,
+                refusal: None,
+                tool_calls: Vec::new(),
+            },
+        ];
+
+        let model = Model::Llama27b;
+
+        let prompt = model.messages_to_prompt(&messages);
+
+        let expected_prompt = "<s>[INST] <<SYS>>\nYou are an AI assistant.\n<</SYS>>\n\n[/INST]\nHello, how can I assist you today?\n";
+
+        assert_eq!(prompt, expected_prompt);
+    }
+
+    #[test]
+    fn test_only_user_message() {
+        let messages = vec![Message::User {
+            content: Some(MessageContent::Text("Is the sky blue?".to_string())),
+            name: None,
+        }];
+
+        let model = Model::Llama27b;
+
+        let prompt = model.messages_to_prompt(&messages);
+
+        let expected_prompt = "<s>[INST] Is the sky blue? [/INST]\n";
+
+        assert_eq!(prompt, expected_prompt);
+    }
+
+    #[test]
+    fn test_only_system_message() {
+        let messages = vec![Message::System {
+            content: Some(MessageContent::Text(
+                "You are a helpful AI assistant.".to_string(),
+            )),
+            name: None,
+        }];
+
+        let model = Model::Llama27b;
+
+        let prompt = model.messages_to_prompt(&messages);
+
+        let expected_prompt =
+            "<s>[INST] <<SYS>>\nYou are a helpful AI assistant.\n<</SYS>>\n\n[/INST]\n";
+
+        assert_eq!(prompt, expected_prompt);
+    }
+
+    #[test]
+    fn test_only_assistant_message() {
+        let messages = vec![Message::Assistant {
+            content: Some(MessageContent::Text(
+                "You are a helpful AI assistant.".to_string(),
+            )),
+            name: None,
+            refusal: None,
+            tool_calls: Vec::new(),
+        }];
+
+        let model = Model::Llama27b;
+
+        let prompt = model.messages_to_prompt(&messages);
+
+        let expected_prompt = "<s>You are a helpful AI assistant.\n";
+
         assert_eq!(prompt, expected_prompt);
     }
 

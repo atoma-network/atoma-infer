@@ -412,6 +412,9 @@
       "description": "ID of the model to use.",
       "type": "string",
       "enum": [
+        "meta-llama/Meta-Llama-2-7b",
+        "meta-llama/Llama-2-7b-chat-hf",
+        "meta-llama/Llama-2-70b-hf",
         "meta-llama/Meta-Llama-3-8B",
         "meta-llama/Meta-Llama-3-8B-Instruct",
         "meta-llama/Meta-Llama-3-70B",
