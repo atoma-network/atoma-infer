@@ -170,19 +170,6 @@ impl Model {
     }
 }
 
-impl Model {
-    pub fn messages_to_prompt(&self, messages: &[Message]) -> String {
-        use Model::*;
-        match self {
-            Llama27b | Llama27bChatHf | Llama270b => messages::messages_to_llama2_prompt(messages),
-            Llama38b | Llama38bInstruct | Llama370b | Llama370bInstruct | Llama318b
-            | Llama318bInstruct | Llama3170b | Llama3170bInstruct | Llama31405b
-            | Llama31405bInstruct | Llama321b | Llama321bInstruct | Llama323b
-            | Llama323bInstruct => messages::messages_to_llama3_prompt(messages),
-        }
-    }
-}
-
 /// A message that is part of a conversation which is based on the role
 /// of the author of the message.
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
