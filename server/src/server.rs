@@ -184,6 +184,25 @@ impl IntoResponse for ChatResponse {
     }
 }
 
+/// Handles health check requests.
+///
+/// This endpoint allows external services to check if the server is up and running.
+/// It always returns a 200 OK status with a simple JSON message.
+///
+/// # Returns
+///
+/// Returns a JSON response with a "status" field set to "ok".
+#[utoipa::path(
+    get,
+    path = "/healthz",
+    responses(
+        (status = 200, description = "Server is healthy", body = serde_json::Value)
+    )
+)]
+async fn healthz() -> impl IntoResponse {
+    Json(json!({"status": "ok"}))
+}
+
 /// Handles chat completion requests by processing the input, sending it to the LLM service,
 /// and returning the generated response.
 ///
