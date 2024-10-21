@@ -50,6 +50,7 @@ async fn main() -> anyhow::Result<()> {
     .await
     .map_err(|e| anyhow::anyhow!("Failed to start `LlmService`, with error: {e}"))?;
 
+    let model_name = llm_service.model();
     let join_handle = tokio::spawn(async move {
         llm_service
             .run()
@@ -60,6 +61,7 @@ async fn main() -> anyhow::Result<()> {
     let app_state = AppState {
         request_counter: Arc::new(AtomicU64::new(0)),
         llm_service_sender,
+        model_name,
         shutdown_signal_sender,
         streaming_interval_in_millis: env::var("STREAMING_INTERVAL_IN_MILLIS")
             .ok()

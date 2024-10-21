@@ -396,6 +396,11 @@ impl LlmService {
         Ok(self.validation_service.validate(request).await?)
     }
 
+    /// Returns the model name
+    pub fn model(&self) -> String {
+        self.model_config.model_name.clone()
+    }
+
     /// Stops the running instance
     #[instrument(skip(self))]
     pub async fn stop(self) -> Result<(), LlmServiceError> {
