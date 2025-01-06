@@ -1,8 +1,8 @@
-# Atoma Paged Attention
+# Atoma Infer
 
-<img src="https://github.com/atoma-network/atoma-node-inference/blob/readm-updates/assets/atoma-pfp.jpg" alt="Logo" height="500"/>
+<img src="https://github.com/atoma-network/atoma-node/blob/main/atoma-assets/atoma-banner.png" alt="Logo"/>
 
-The Atoma Node Inference repository is a collection of optimized infrastructure for Large Language Models (LLMs) compute. We rely on highly optimized KV cache memory management software, through block pagination, such as 
+The Atoma Infer repository is a collection of optimized infrastructure for serving Large Language Models (LLMs) compute. We rely on highly optimized KV cache memory management software, through block pagination, such as 
 [PagedAttention](https://github.com/vllm-project/vllm) and [FlashAttention2](https://github.com/Dao-AILab/flash-attention). The codebase is mostly written in the Rust programming language, which leads to safe and highly optimized inference request scheduling, enhancing LLM inference serving.
 
 ## Features
