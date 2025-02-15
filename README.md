@@ -10,7 +10,7 @@ The Atoma Infer repository is a collection of optimized infrastructure for servi
 - Fully compatible OpenAI API, providing a seamless experience for developers to serve open source LLM models.
 - Supports Paged Attention for efficient KV cache management (see [paper](https://arxiv.org/pdf/2309.06180)).
 - Supports FlashAttention2 for efficient attention computation, by minimizing HBM writes (see [paper](https://arxiv.org/abs/2307.08691)).
-- Supports Llama3.1 and Llama3.2 models text generation models.
+- Supports Llama3.1 and Llama3.2 text generation models.
 - Optimized for serverless inference serving.
 - Supports multi-GPU Tensor parallelism inference, using multiple NVIDIA's GPU devices, by leveraging Cuda's NCCL library. This allows for running any LLM, provided the user's machine has enough GPU cards.
 - The repository is mainly written in Rust and it integrates with the Candle ML framework for high-performance Rust-based LLM inference, making it ideal to deploy in serverless environments.
