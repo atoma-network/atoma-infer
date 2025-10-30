@@ -1,6 +1,6 @@
 # Atoma Infer
 
-<img src="https://github.com/atoma-network/atoma-node/blob/main/atoma-assets/atoma-banner.png" alt="Logo"/>
+<img src="assets/atoma-cover.png" alt="Atoma Logo"/>
 
 The atoma-infer repository is a collection of optimized infrastructure for serving Large Language Models (LLMs) compute. We rely on highly optimized KV cache memory management software, through block pagination, such as 
 [PagedAttention](https://github.com/vllm-project/vllm) and [FlashAttention2](https://github.com/Dao-AILab/flash-attention). The codebase is mostly written in the Rust programming language, which leads to safe and highly optimized inference request scheduling, enhancing LLM inference serving.
