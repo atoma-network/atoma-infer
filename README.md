@@ -1,9 +1,11 @@
-# Atoma Infer
+# atoma-infer
 
-<img src="https://github.com/atoma-network/atoma-node/blob/main/atoma-assets/atoma-banner.png" alt="Logo"/>
+<img src="assets/atoma-cover.png" alt="Atoma Logo" width="800"/>
 
-The Atoma Infer repository is a collection of optimized infrastructure for serving Large Language Models (LLMs) compute. We rely on highly optimized KV cache memory management software, through block pagination, such as 
+The atoma-infer repository is a collection of optimized infrastructure for serving Large Language Models (LLMs) compute. We rely on highly optimized KV cache memory management software, through block pagination, such as 
 [PagedAttention](https://github.com/vllm-project/vllm) and [FlashAttention2](https://github.com/Dao-AILab/flash-attention). The codebase is mostly written in the Rust programming language, which leads to safe and highly optimized inference request scheduling, enhancing LLM inference serving.
+
+> **Learn more about Atoma**: Visit [atoma.ai](https://atoma.ai/) to explore our secure AI infrastructure platform powered by Confidential Computing.
 
 ## Features
 
@@ -39,6 +41,19 @@ This project is currently in the early stages of development. We are looking for
 - [ ] - Speculative decoding.
 - [ ] - Parallel sampling for multiple completions.
 - [ ] - Support for asymmetric signature server authentication.
+
+## Roadmap
+
+We're actively working on improving and expanding atoma-infer. Here are our current priorities:
+
+1. **Improve OpenAI API server** - Enhance compatibility, performance, and feature completeness of our OpenAI-compatible API server.
+2. **Fix the CI** - Strengthen our continuous integration pipeline for better reliability and faster feedback.
+3. **Fully benchmark atoma-infer vs vLLM vs SGLang** - Conduct comprehensive performance benchmarks comparing atoma-infer against vLLM and SGLang in identical environments to provide transparent performance metrics.
+4. **Add Python bindings (with PyO3)** - Enable Python developers to use atoma-infer directly from Python with high-performance bindings.
+5. **Add support for FlashAttention v3** - Integrate the latest FlashAttention3 for even better attention computation performance.
+6. **Add support for MoE architectures** - Extend support to Mixture of Experts (MoE) models for serving advanced architectures like Mixtral and others.
+
+Want to contribute to any of these goals? Check out our [Contributing](#contributing) section below!
 
 ## Getting Started
 
@@ -79,7 +94,6 @@ max_num_sequences = 32 # Maximum number of batched sequences that the vLLM sched
 max_model_len = 1024 # Maximum length of a model sequence can have to use for the vLLM scheduler
 delay_factor = 0.0 # Delay factor to use for the vLLM scheduler
 enable_chunked_prefill = false # Whether to use the chunked prefill feature for the vLLM scheduler
-block_size = 16 # Block size to use for the vLLM cache memory management
 
 [validation]
 best_of = 1 # Best of n value to use for the vLLM scheduler
