@@ -1,4 +1,4 @@
-# Atoma Infer
+# atoma-infer
 
 <img src="assets/atoma-cover.png" alt="Atoma Logo"/>
 
