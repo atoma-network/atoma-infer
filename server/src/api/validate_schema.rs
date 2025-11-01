@@ -1,8 +1,9 @@
 use jsonschema::{error::ValidationErrorKind, ValidationError};
 use serde::{Deserialize, Serialize};
 
-/// Given some `serde_json::Value` schema, construct a validator for some JSON instance returning a detailed error message upon failure.
-/// This can be used for testing but also for users who may need to debug their request body.
+/// Given some `serde_json::Value` schema, construct a validator for some JSON instance returning a
+/// detailed error message upon failure. This can be used for testing but also for users who may
+/// need to debug their request body.
 pub fn validate_with_schema(
     validator: jsonschema::Validator,
     instance: serde_json::Value,

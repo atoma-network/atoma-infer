@@ -136,7 +136,8 @@ impl LlmService {
 
         // 1. Initialize the `ModelThreadDispatcher`'s. We need to communicate with the background
         // task in order to know when the model is loaded for each GPU device. This is necessary
-        // to then compute the total number of blocks that can be used for the KV cache, per each GPU device.
+        // to then compute the total number of blocks that can be used for the KV cache, per each
+        // GPU device.
 
         // 2. We create oneshot channels to communicate with the `ModelThreadDispatcher`'s
         // corresponding GPU device background threads.
@@ -180,9 +181,11 @@ impl LlmService {
             now.elapsed().as_secs_f32()
         );
 
-        // 6. Compute the cache and scheduler configs and send them to all the model thread dispatchers, now
-        // that the model weights are loaded in each GPU device memory, so we can properly compute the total
-        // number of blocks that are available for the KV cache, per each GPU device.
+        // 6. Compute the cache and scheduler configs and send them to all the model thread
+        //    dispatchers, now
+        // that the model weights are loaded in each GPU device memory, so we can properly compute
+        // the total number of blocks that are available for the KV cache, per each GPU
+        // device.
         let cache_config = CacheConfig::from_file_path(
             config_path.as_ref(),
             num_kv_heads,

@@ -59,10 +59,11 @@ impl LogProb {
 /// `Waiting:` The sequence is waiting to be processed.
 /// `Running:` The sequence is currently being processed.
 /// `Swapped:` The sequence has been temporarily swapped out of memory.
-/// `FinishedStopped:` The sequence has finished processing generation due to meeting a stopping criterion.
-/// `FinishedLengthCapped:` The sequence has finished generation due to reaching the maximum length.
-/// `FinishedAborted:` The sequence has been aborted due to an error or user intervention.
-/// `FinishedIgnored:` The sequence has been ignored and will not be processed further.
+/// `FinishedStopped:` The sequence has finished processing generation due to meeting a stopping
+/// criterion. `FinishedLengthCapped:` The sequence has finished generation due to reaching the
+/// maximum length. `FinishedAborted:` The sequence has been aborted due to an error or user
+/// intervention. `FinishedIgnored:` The sequence has been ignored and will not be processed
+/// further.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SequenceStatus {
     Waiting,
@@ -77,8 +78,9 @@ pub enum SequenceStatus {
 impl SequenceStatus {
     /// Checks if the sequence has finished processing.
     ///
-    /// Returns `true` if the sequence has reached a terminal state (aborted, ignored, length capped, or stopped),
-    /// and `false` if it's still in progress (waiting, running, or swapped).
+    /// Returns `true` if the sequence has reached a terminal state (aborted, ignored, length
+    /// capped, or stopped), and `false` if it's still in progress (waiting, running, or
+    /// swapped).
     ///
     /// # Examples
     ///
@@ -101,7 +103,8 @@ impl SequenceStatus {
     /// Returns the reason why the sequence finished, if applicable.
     ///
     /// # Returns
-    /// - `Some(String)`: A string describing the reason for finishing, if the sequence has finished.
+    /// - `Some(String)`: A string describing the reason for finishing, if the sequence has
+    ///   finished.
     /// - `None`: If the sequence has not finished (i.e., it's still waiting, running, or swapped).
     ///
     /// # Examples
@@ -266,7 +269,8 @@ impl SequenceData {
     ///
     /// # Returns
     ///
-    /// * `Vec<u32>` - A vector containing all token ids, with prompt tokens followed by output tokens.
+    /// * `Vec<u32>` - A vector containing all token ids, with prompt tokens followed by output
+    ///   tokens.
     pub fn get_token_ids(&self) -> Vec<u32> {
         let mut output = Vec::with_capacity(self.length());
         output.extend(&self.prompt_token_ids);
@@ -355,12 +359,14 @@ impl SequenceData {
     ///
     /// # Arguments
     ///
-    /// * `num_new_computed_tokens` - The number of new tokens that have been computed in the current batch.
+    /// * `num_new_computed_tokens` - The number of new tokens that have been computed in the
+    ///   current batch.
     ///
     /// # Returns
     ///
     /// * `Ok(())` if the update was successful.
-    /// * `Err(SequenceError::InvalidNumberGeneratedTokens)` if the update would result in more computed tokens than the total sequence length.
+    /// * `Err(SequenceError::InvalidNumberGeneratedTokens)` if the update would result in more
+    ///   computed tokens than the total sequence length.
     ///
     /// # Effects
     ///
@@ -394,7 +400,8 @@ impl SequenceData {
         self.num_computed_tokens += num_new_computed_tokens;
         if self.num_computed_tokens <= self.length() {
             if self.get_num_uncomputed_tokens() == 0 {
-                // Prompt tokens attention layers have been now computed, so sequence transits to decode stage
+                // Prompt tokens attention layers have been now computed, so sequence transits to
+                // decode stage
                 self.stage = SequenceStage::Decode;
             }
             return Ok(());
@@ -454,7 +461,8 @@ impl SequenceData {
     }
 }
 
-/// `Sequence` - Represents a single sequence in the generation process, storing its data, status, and block information.
+/// `Sequence` - Represents a single sequence in the generation process, storing its data, status,
+/// and block information.
 #[derive(Clone, Debug)]
 pub struct Sequence {
     /// Unique identifier for the sequence.
@@ -465,7 +473,8 @@ pub struct Sequence {
     pub prompt_token_ids: Vec<u32>,
     /// Detailed data about the sequence's tokens and processing state.
     pub sequence_data: SequenceData,
-    /// Size of each logical token block. Should match the block size used by the block manager and cache engine.
+    /// Size of each logical token block. Should match the block size used by the block manager and
+    /// cache engine.
     block_size: usize,
     /// Vector of logical token blocks representing the sequence's tokens.
     pub logical_token_blocks: Vec<LogicalTokenBlock>,
@@ -541,8 +550,9 @@ impl Sequence {
 
     /// Computes the hash of a block given its logical index.
     ///
-    /// This function calculates a hash based on the prefix tokens up to the given logical block index.
-    /// The hash is used to uniquely identify the content of a block for caching purposes.
+    /// This function calculates a hash based on the prefix tokens up to the given logical block
+    /// index. The hash is used to uniquely identify the content of a block for caching
+    /// purposes.
     ///
     /// # Arguments
     ///
@@ -554,8 +564,8 @@ impl Sequence {
     ///
     /// # Note
     ///
-    /// This implementation may produce incorrect hashes when the block size is greater than the prompt size.
-    /// A more robust implementation should be considered for such cases.
+    /// This implementation may produce incorrect hashes when the block size is greater than the
+    /// prompt size. A more robust implementation should be considered for such cases.
     ///
     /// NOTE: This is especially relevant for prefix caching
     pub fn hash_of_block(&self, logical_idx: usize) -> u64 {
@@ -596,12 +606,13 @@ impl Sequence {
 
     /// Appends a new logical block to the sequence.
     ///
-    /// This method creates a new `LogicalTokenBlock` and adds it to the `logical_token_blocks` vector.
-    /// It's used when the sequence needs to expand to accommodate more tokens.
+    /// This method creates a new `LogicalTokenBlock` and adds it to the `logical_token_blocks`
+    /// vector. It's used when the sequence needs to expand to accommodate more tokens.
     ///
     /// # Effects
     ///
-    /// * Creates a new `LogicalTokenBlock` with the next available index and the sequence's block size.
+    /// * Creates a new `LogicalTokenBlock` with the next available index and the sequence's block
+    ///   size.
     /// * Appends the new block to the `logical_token_blocks` vector.
     fn append_logical_block(&mut self) {
         let block = LogicalTokenBlock::new(self.logical_token_blocks.len(), self.block_size);
@@ -625,16 +636,15 @@ impl Sequence {
     /// # Algorithm
     ///
     /// 1. Initialize a cursor at the start of `token_ids`.
-    /// 2. While there are tokens to process:
-    ///    a. If there are no logical blocks, create a new one.
-    ///    b. Get the last block (creating a new one if the last is full).
-    ///    c. Determine how many tokens can fit in the current block.
-    ///    d. Append as many tokens as possible to the current block.
-    ///    e. Move the cursor forward.
+    /// 2. While there are tokens to process: a. If there are no logical blocks, create a new one.
+    ///    b. Get the last block (creating a new one if the last is full). c. Determine how many
+    ///    tokens can fit in the current block. d. Append as many tokens as possible to the current
+    ///    block. e. Move the cursor forward.
     ///
     /// # Note
     ///
-    /// This method ensures that all tokens are appended, even if multiple new blocks need to be created.
+    /// This method ensures that all tokens are appended, even if multiple new blocks need to be
+    /// created.
     fn append_tokens_to_blocks(&mut self, token_ids: &[u32]) -> Result<(), SequenceError> {
         let mut cursor = 0;
         while cursor < token_ids.len() {
@@ -644,10 +654,12 @@ impl Sequence {
 
             let last_block = if self.is_last_block_full() {
                 self.append_logical_block();
-                // DON'T PANIC: at this point in the logic, we already checked that `self.logical_token_blocks` is not empty
+                // DON'T PANIC: at this point in the logic, we already checked that
+                // `self.logical_token_blocks` is not empty
                 self.logical_token_blocks.last_mut().unwrap()
             } else {
-                // DON'T PANIC: at this point in the logic, we already checked that `self.logical_token_blocks` is not empty
+                // DON'T PANIC: at this point in the logic, we already checked that
+                // `self.logical_token_blocks` is not empty
                 self.logical_token_blocks.last_mut().unwrap()
             };
 
@@ -697,7 +709,8 @@ impl Sequence {
     /// # Arguments
     ///
     /// * `token_id` - The ID of the token to be added
-    /// * `logprobs` - A HashMap containing log probabilities for tokens, where the key is the token ID
+    /// * `logprobs` - A HashMap containing log probabilities for tokens, where the key is the token
+    ///   ID
     ///
     /// # Returns
     ///
@@ -775,7 +788,8 @@ impl Sequence {
 
     /// Retrieves the ID of the last token in the sequence.
     ///
-    /// This method returns the ID of the most recently generated token, or the last token of the prompt if no tokens have been generated yet.
+    /// This method returns the ID of the most recently generated token, or the last token of the
+    /// prompt if no tokens have been generated yet.
     ///
     /// # Returns
     ///
@@ -1187,7 +1201,8 @@ impl SequenceGroup {
     /// Calculates the latency since the last token generation and updates the last token time.
     ///
     /// This method performs two main tasks:
-    /// 1. It calculates the duration between the current time (`now`) and the last token generation time.
+    /// 1. It calculates the duration between the current time (`now`) and the last token generation
+    ///    time.
     /// 2. It updates the `last_token_time` in the sequence group's metrics to the current time.
     ///
     /// # Arguments
@@ -1243,12 +1258,11 @@ impl SequenceGroup {
     /// # Behavior
     ///
     /// - If the first token time has already been set, this function does nothing.
-    /// - If the output length of the first sequence is exactly 1 (indicating the first
-    ///   token has just been generated), it sets the first token time.
-    /// - In cases where a sequence group is swapped and recomputed, the time between
-    ///   iterations is counted in the total processing time, rather than recalculating
-    ///   the time to first token. This is because from the user's perspective, there
-    ///   is simply a longer generation delay.
+    /// - If the output length of the first sequence is exactly 1 (indicating the first token has
+    ///   just been generated), it sets the first token time.
+    /// - In cases where a sequence group is swapped and recomputed, the time between iterations is
+    ///   counted in the total processing time, rather than recalculating the time to first token.
+    ///   This is because from the user's perspective, there is simply a longer generation delay.
     ///
     /// # Note
     ///
@@ -1274,7 +1288,8 @@ impl SequenceGroup {
         }
     }
 
-    /// Sets the first scheduled time and calculates the time spent in queue for request-level timings.
+    /// Sets the first scheduled time and calculates the time spent in queue for request-level
+    /// timings.
     ///
     /// This method updates the request metrics with the time when the request was first scheduled
     /// for processing and calculates how long the request spent waiting in the queue.
@@ -1291,7 +1306,8 @@ impl SequenceGroup {
     ///
     /// # Thread Safety
     ///
-    /// This method uses a write lock on the metrics. Ensure proper synchronization when used in a multi-threaded context.
+    /// This method uses a write lock on the metrics. Ensure proper synchronization when used in a
+    /// multi-threaded context.
     ///
     /// # Note
     ///
@@ -1345,10 +1361,11 @@ impl SequenceGroup {
 
     /// Returns the maximum number of sequences that could be running in parallel for this request.
     ///
-    /// This method determines the upper bound of concurrent sequences based on the generation parameters:
+    /// This method determines the upper bound of concurrent sequences based on the generation
+    /// parameters:
     ///
-    /// - For beam search (when `best_of` > 1), it returns the `best_of` value, as this is the maximum
-    ///   number of beam candidates that could be explored simultaneously.
+    /// - For beam search (when `best_of` > 1), it returns the `best_of` value, as this is the
+    ///   maximum number of beam candidates that could be explored simultaneously.
     /// - For other sampling methods, it returns the current number of unfinished sequences, as this
     ///   represents the actual number of sequences that still need processing.
     ///
@@ -1516,8 +1533,8 @@ impl SequenceGroup {
     ///
     /// # Returns
     ///
-    /// * `Option<&Arc<RwLock<Sequence>>>` - A reference to the matching sequence if found,
-    ///   or `None` if no sequence with the given ID exists in the group.
+    /// * `Option<&Arc<RwLock<Sequence>>>` - A reference to the matching sequence if found, or
+    ///   `None` if no sequence with the given ID exists in the group.
     ///
     /// # Thread Safety
     ///
@@ -1559,8 +1576,8 @@ impl SequenceGroup {
     /// # Performance Considerations
     ///
     /// - This method clones `Arc` pointers, which is a relatively cheap operation.
-    /// - However, it does iterate over all sequences in the group, which could be
-    ///   expensive for very large sequence groups.
+    /// - However, it does iterate over all sequences in the group, which could be expensive for
+    ///   very large sequence groups.
     ///
     /// # Example
     ///
@@ -1595,8 +1612,8 @@ impl SequenceGroup {
     /// # Performance Considerations
     ///
     /// - This method clones `Arc` pointers, which is a relatively cheap operation.
-    /// - However, it does iterate over all sequences in the group, which could be
-    ///   expensive for very large sequence groups.
+    /// - However, it does iterate over all sequences in the group, which could be expensive for
+    ///   very large sequence groups.
     ///
     /// # Example
     ///
@@ -1620,8 +1637,8 @@ impl SequenceGroup {
     ///
     /// # Arguments
     ///
-    /// * `num_new_computed_tokens` - The number of new tokens that have been computed
-    ///   in the current batch.
+    /// * `num_new_computed_tokens` - The number of new tokens that have been computed in the
+    ///   current batch.
     ///
     /// # Returns
     ///
@@ -1659,7 +1676,8 @@ impl SequenceGroup {
         Ok(())
     }
 
-    /// Calculates the total number of uncomputed tokens across all unfinished sequences in the group.
+    /// Calculates the total number of uncomputed tokens across all unfinished sequences in the
+    /// group.
     ///
     /// This method iterates through all sequences in the group, and for each unfinished sequence,
     /// it sums up the number of uncomputed tokens. This is useful for determining how much
@@ -1676,10 +1694,10 @@ impl SequenceGroup {
     ///
     /// # Performance Considerations
     ///
-    /// - This method iterates over all sequences in the group, which could be expensive
-    ///   for very large sequence groups.
-    /// - It acquires and releases a read lock for each sequence, which may impact
-    ///   performance in high-contention scenarios.
+    /// - This method iterates over all sequences in the group, which could be expensive for very
+    ///   large sequence groups.
+    /// - It acquires and releases a read lock for each sequence, which may impact performance in
+    ///   high-contention scenarios.
     ///
     /// # Example
     ///
@@ -1710,7 +1728,8 @@ impl SequenceGroup {
     ///
     /// # Returns
     ///
-    /// * `usize` - The number of sequences matching the given status, or the total number of sequences if no status is specified.
+    /// * `usize` - The number of sequences matching the given status, or the total number of
+    ///   sequences if no status is specified.
     ///
     /// # Examples
     ///
@@ -1763,7 +1782,8 @@ impl SequenceGroup {
     /// synchronization when used in a multi-threaded context.
     pub fn get_num_total_logical_token_blocks(&self, status: SequenceStatus) -> Option<usize> {
         // NOTE: All `Sequence`s in `SequenceGroup` share the same initial prompt, therefore
-        // it is sufficient to check how many logical token blocks are contained in the first `Sequence` with `status`
+        // it is sufficient to check how many logical token blocks are contained in the first
+        // `Sequence` with `status`
         for sequence in self.sequences.values() {
             if sequence.read().unwrap().sequence_status == status {
                 return Some(
@@ -1942,7 +1962,8 @@ impl std::fmt::Debug for SequenceGroup {
 pub struct SequenceGroupMetadata {
     /// Unique identifier for the request associated with this sequence group.
     pub request_id: String,
-    /// Indicates whether the current processing stage is for the initial prompt (true) or for token generation (false).
+    /// Indicates whether the current processing stage is for the initial prompt (true) or for
+    /// token generation (false).
     pub is_prompt: bool,
     /// Parameters controlling the selection of the next token in the sequence.
     pub next_token_chooser_params: NextTokenChooserParameters,

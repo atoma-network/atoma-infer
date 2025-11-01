@@ -49,14 +49,16 @@ pub enum StreamStatus {
     Completed,
     /// Indicates that the streaming process has failed, with an associated error message.
     ///
-    /// This state is used when an error occurs during streaming, providing context about the failure.
+    /// This state is used when an error occurs during streaming, providing context about the
+    /// failure.
     Failed {
         /// A descriptive error message explaining the reason for the failure.
         error: String,
     },
     /// Indicates that the streaming process was interrupted before completion.
     ///
-    /// This state is used when the stream is stopped prematurely, either by user action or system events.
+    /// This state is used when the stream is stopped prematurely, either by user action or system
+    /// events.
     Interrupted {
         /// A description of why the stream was interrupted.
         reason: String,

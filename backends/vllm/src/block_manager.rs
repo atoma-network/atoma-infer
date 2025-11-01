@@ -19,11 +19,10 @@ use tracing::{error, info, instrument, trace, warn};
 /// Represents the status of a potential block allocation for a sequence group.
 ///
 /// - `Ok`: The sequence group can be allocated immediately.
-/// - `Later`: The sequence group cannot be allocated now, but may be allocated later.
-///     This occurs when the allocator's capacity is sufficient,
-///     but most of the blocks are currently in use.
-/// - `Never`: The sequence group can never be allocated because it requires more blocks
-///     than the GPU's total capacity.
+/// - `Later`: The sequence group cannot be allocated now, but may be allocated later. This occurs
+///   when the allocator's capacity is sufficient, but most of the blocks are currently in use.
+/// - `Never`: The sequence group can never be allocated because it requires more blocks than the
+///   GPU's total capacity.
 /// - `Nothing`: There are no sequences in the group awaiting allocation.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AllocationStatus {
@@ -159,28 +158,28 @@ impl BlockSpaceManager {
     /// * `Err(BlockSpaceManagerError)` if an error occurred during allocation.
     ///
     /// # Important Notes and Limitations
-    /// 1. This method creates a new block table each time it's called, regardless of any
-    ///    existing allocations for the `SequenceGroup`.
-    /// 2. Calling this method multiple times for the same `SequenceGroup` will overwrite
-    ///    any previously allocated blocks, potentially causing data loss or inconsistencies.
-    /// 3. This implementation is not suitable for incrementally allocating additional blocks
-    ///    to an existing `SequenceGroup`. It's designed for initial allocation only.
+    /// 1. This method creates a new block table each time it's called, regardless of any existing
+    ///    allocations for the `SequenceGroup`.
+    /// 2. Calling this method multiple times for the same `SequenceGroup` will overwrite any
+    ///    previously allocated blocks, potentially causing data loss or inconsistencies.
+    /// 3. This implementation is not suitable for incrementally allocating additional blocks to an
+    ///    existing `SequenceGroup`. It's designed for initial allocation only.
     ///
     /// # Behavior
     /// - For each waiting sequence in the `SequenceGroup`:
     ///   - Calculates the number of logical blocks needed.
     ///   - Allocates physical blocks from the GPU allocator.
-    ///   - If a sliding window is configured, it reuses blocks for logical indices beyond
-    ///     the sliding window size.
+    ///   - If a sliding window is configured, it reuses blocks for logical indices beyond the
+    ///     sliding window size.
     ///   - Sets the reference count for each block based on the number of waiting sequences.
     /// - Assigns the created block table to each waiting sequence in the `SequenceGroup`.
     ///
     /// # Usage Considerations
     /// - Only use this method for initial block allocation for a `SequenceGroup`.
-    /// - Ensure that this method is called only once per `SequenceGroup` to avoid
-    ///   overwriting existing allocations.
-    /// - For adding blocks to existing allocations or handling dynamic growth, a different
-    ///   method or a modified version of this method would be necessary.
+    /// - Ensure that this method is called only once per `SequenceGroup` to avoid overwriting
+    ///   existing allocations.
+    /// - For adding blocks to existing allocations or handling dynamic growth, a different method
+    ///   or a modified version of this method would be necessary.
     ///
     /// # Future Improvements
     /// - Implement a check for existing allocations to prevent accidental overwrites.
@@ -277,7 +276,8 @@ impl BlockSpaceManager {
     /// # Behavior
     /// 1. If the sequence is empty, returns an error.
     /// 2. If a new physical block needs to be allocated:
-    ///    - With sliding window: Reuses an existing block if possible, otherwise allocates a new one.
+    ///    - With sliding window: Reuses an existing block if possible, otherwise allocates a new
+    ///      one.
     ///    - Without sliding window: Always allocates a new block.
     /// 3. If the last block is shared (ref_count > 1), performs CoW:
     ///    - Allocates a new block.
@@ -287,7 +287,8 @@ impl BlockSpaceManager {
     ///
     /// # Errors
     /// - Returns `BlockSpaceManagerError::EmptySequence` if the sequence has no blocks.
-    /// - Returns `BlockSpaceManagerError::AppendSlotError` if trying to allocate more than one block at a time.
+    /// - Returns `BlockSpaceManagerError::AppendSlotError` if trying to allocate more than one
+    ///   block at a time.
     /// - Propagates errors from block allocation, freeing, or lock operations.
     #[instrument(skip_all)]
     pub fn append_slots(
@@ -319,8 +320,9 @@ impl BlockSpaceManager {
                 match self.block_sliding_window {
                     Some(bsw) => {
                         if block_table.len() >= bsw {
-                            // Block table has more than `block_sliding_window` blocks, so we might as well
-                            // reuse a block prior to beginning of `block_table.len() - block_sliding_window`
+                            // Block table has more than `block_sliding_window` blocks, so we might
+                            // as well reuse a block prior to beginning
+                            // of `block_table.len() - block_sliding_window`
                             block_table.push(
                                 block_table
                                     .get(block_table.len() % self.block_sliding_window.unwrap())
@@ -328,8 +330,9 @@ impl BlockSpaceManager {
                                     .clone(),
                             );
                         } else {
-                            // In this case, the sequence already has a new logical block to be appended
-                            // we need to allocate a new physical block
+                            // In this case, the sequence already has a new logical block to be
+                            // appended we need to allocate a new
+                            // physical block
                             let new_block = self.gpu_allocator.allocate()?;
                             block_table.push(new_block);
 
@@ -356,8 +359,8 @@ impl BlockSpaceManager {
                 }
             }
 
-            // At this point, the block is shared with other sequences, so we perform Copy on Write (CoW)
-            // CoW: Allocate a new block and copy the tokens
+            // At this point, the block is shared with other sequences, so we perform Copy on Write
+            // (CoW) CoW: Allocate a new block and copy the tokens
             let new_block = self.gpu_allocator.allocate()?;
             self.gpu_allocator.free(last_block.clone())?;
             let (last_block_number, new_block_number) = {
@@ -385,7 +388,8 @@ impl BlockSpaceManager {
     ///
     /// # Returns
     /// * `Ok(())` if the fork operation was successful.
-    /// * `Err(BlockSpaceManagerError::MissingSequence)` if the parent sequence is not found in the block tables.
+    /// * `Err(BlockSpaceManagerError::MissingSequence)` if the parent sequence is not found in the
+    ///   block tables.
     ///
     /// # Behavior
     /// 1. Checks if the parent sequence exists in the block tables.
@@ -498,14 +502,16 @@ impl BlockSpaceManager {
     /// # Returns
     /// A `Result` containing an `AllocationStatus` enum indicating the swap-in possibility:
     /// * `Ok(AllocationStatus::Ok)` - Enough free blocks are available for immediate swap-in.
-    /// * `Ok(AllocationStatus::Later)` - Not enough free blocks now, but swap-in may be possible later.
+    /// * `Ok(AllocationStatus::Later)` - Not enough free blocks now, but swap-in may be possible
+    ///   later.
     /// * `Ok(AllocationStatus::Never)` - The required blocks exceed the total GPU capacity.
     /// * `Err(BlockSpaceManagerError)` - If an error occurred during the check.
     ///
     /// # Behavior
     /// 1. Calculates the total number of physical blocks used by the sequence group.
     /// 2. Counts the number of sequences in the group with `Swapped` status.
-    /// 3. Determines the number of required blocks, including one additional block per swapped sequence.
+    /// 3. Determines the number of required blocks, including one additional block per swapped
+    ///    sequence.
     /// 4. Compares available free GPU blocks with the required blocks.
     /// 5. Returns the appropriate `AllocationStatus` based on the comparison.
     ///
@@ -547,7 +553,8 @@ impl BlockSpaceManager {
     /// * `seq_group` - A mutable reference to the SequenceGroup to swap in.
     ///
     /// # Returns
-    /// * `Ok(HashMap<u32, u32>)` - A mapping of CPU block numbers to their corresponding GPU block numbers.
+    /// * `Ok(HashMap<u32, u32>)` - A mapping of CPU block numbers to their corresponding GPU block
+    ///   numbers.
     /// * `Err(BlockSpaceManagerError)` - If an error occurs during the swap-in process.
     ///
     /// # Behavior
@@ -653,8 +660,9 @@ impl BlockSpaceManager {
     /// 3. Returns true if there are enough free CPU blocks, false otherwise.
     ///
     /// # Note
-    /// This method only checks for space availability and does not perform the actual swap-out operation.
-    /// It's typically used to determine if a swap-out operation can be initiated safely.
+    /// This method only checks for space availability and does not perform the actual swap-out
+    /// operation. It's typically used to determine if a swap-out operation can be initiated
+    /// safely.
     #[instrument(skip_all)]
     pub fn can_swap_out(&self, seq_group: &SequenceGroup) -> Result<bool, BlockSpaceManagerError> {
         trace!(
@@ -674,7 +682,8 @@ impl BlockSpaceManager {
     /// * `seq_group` - A mutable reference to the SequenceGroup to swap out.
     ///
     /// # Returns
-    /// * `Ok(HashMap<u32, u32>)` - A mapping of GPU block numbers to their corresponding CPU block numbers.
+    /// * `Ok(HashMap<u32, u32>)` - A mapping of GPU block numbers to their corresponding CPU block
+    ///   numbers.
     /// * `Err(BlockSpaceManagerError)` - If an error occurs during the swap-out process.
     ///
     /// # Behavior
@@ -747,8 +756,10 @@ impl BlockSpaceManager {
                 }
                 self.block_tables.insert(*sequence_id, new_block_table);
             }
-            // NOTE: we update the status of the `Sequence` right after the previous check, and not on the scheduler logic
-            let sequence = seq_group.get_sequence_from_id(*sequence_id).unwrap(); // DON'T PANIC: we already checked that `SequenceGroup` contains `Sequence` with `sequence_id`
+            // NOTE: we update the status of the `Sequence` right after the previous check, and not
+            // on the scheduler logic
+            let sequence = seq_group.get_sequence_from_id(*sequence_id).unwrap(); // DON'T PANIC: we already checked that `SequenceGroup` contains `Sequence` with
+                                                                                  // `sequence_id`
             {
                 sequence
                     .write_lock()?
@@ -778,7 +789,8 @@ impl BlockSpaceManager {
     ///    - Only frees blocks beyond the sliding window size to avoid freeing reused blocks.
     /// 2. If no sliding window is used:
     ///    - Frees all blocks in the table.
-    /// 3. Ensures each unique block is freed only once, even if it appears multiple times in the table.
+    /// 3. Ensures each unique block is freed only once, even if it appears multiple times in the
+    ///    table.
     /// 4. Frees blocks using the appropriate allocator (CPU or GPU) based on the block's device.
     ///
     /// # Note
@@ -842,7 +854,8 @@ impl BlockSpaceManager {
     ///
     /// # Notes
     /// - This method is idempotent: calling it multiple times on the same `sequence_id` is safe.
-    /// - It's important to call this method when a sequence is no longer needed to prevent memory leaks.
+    /// - It's important to call this method when a sequence is no longer needed to prevent memory
+    ///   leaks.
     ///
     /// # Errors
     /// Returns a `BlockSpaceManagerError` if:
@@ -858,7 +871,8 @@ impl BlockSpaceManager {
         trace!("Freeing blocks for sequence with id = {}", sequence_id);
 
         if !self.block_tables.contains_key(&sequence_id) {
-            // NOTE: Either `Sequence`'s blocks have been freed already, or haven't been scheduled yet
+            // NOTE: Either `Sequence`'s blocks have been freed already, or haven't been scheduled
+            // yet
             info!(
                 "Sequence's blocks already freed or haven't been scheduled yet, sequence's id = {}",
                 sequence_id
@@ -934,7 +948,8 @@ impl BlockSpaceManager {
     /// * `sequence_id` - The ID of the sequence to retrieve block IDs for.
     ///
     /// # Returns
-    /// * `Some(Vec<u32>)` - A vector of block IDs if the sequence exists and all locks can be acquired.
+    /// * `Some(Vec<u32>)` - A vector of block IDs if the sequence exists and all locks can be
+    ///   acquired.
     /// * `None` - If the sequence doesn't exist or if there's an error acquiring any lock.
     ///
     /// # Note
@@ -1021,7 +1036,8 @@ impl BlockSpaceManager {
     /// 2. Calculates the number of full blocks in the sequence.
     /// 3. Iterates through the full blocks in reverse order:
     ///    - If a block is not yet computed, it marks it as computed.
-    ///    - If a block is already computed, it stops the iteration (assuming previous blocks are also computed).
+    ///    - If a block is already computed, it stops the iteration (assuming previous blocks are
+    ///      also computed).
     ///
     /// # Note
     /// This function is useful for optimizing performance by avoiding recomputation of blocks
@@ -1056,7 +1072,8 @@ impl BlockSpaceManager {
         Ok(())
     }
 
-    /// Retrieves the block numbers of all computed blocks for a given sequence, excluding the last block.
+    /// Retrieves the block numbers of all computed blocks for a given sequence, excluding the last
+    /// block.
     ///
     /// # Arguments
     /// * `sequence` - The `Sequence` for which to retrieve computed block numbers.
@@ -1240,7 +1257,8 @@ pub(crate) mod tests {
         let prompt = Sequence::new(0, "one two three".into(), vec![1, 2, 3], BLOCK_SIZE, false)
             .expect("Failed to build prompt sequence");
 
-        // Fork the `Sequence` (increase `ref_count` by one) so that CoW will be required when we append a new `token_id`
+        // Fork the `Sequence` (increase `ref_count` by one) so that CoW will be required when we
+        // append a new `token_id`
         let child = prompt.fork(2);
 
         // Allocate space for `SequenceGroup`

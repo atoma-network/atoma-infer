@@ -191,8 +191,8 @@ pub trait ModelExecutor: ModelLoader {
         let mut sequence_group_outputs = Vec::with_capacity(sequence_groups_metadata.len());
         let mut logits_idx = 0;
         for sequence_group_metadata in sequence_groups_metadata.iter() {
-            // 2. Retrieve the next token chooser and stopping criteria parameters,
-            //    from the `SequenceGroupMetadata`, to be used for sampling
+            // 2. Retrieve the next token chooser and stopping criteria parameters, from the
+            //    `SequenceGroupMetadata`, to be used for sampling
             let NextTokenChooserParameters {
                 repetition_penalty,
                 repeat_last_n,
@@ -203,8 +203,8 @@ pub trait ModelExecutor: ModelLoader {
             let mut sequence_outputs =
                 HashMap::with_capacity(sequence_group_metadata.sequence_data.len());
 
-            // 4. Iterate over each `SequenceData` in the `SequenceGroupMetadata`,
-            //    to sample next tokens for each sequence
+            // 4. Iterate over each `SequenceData` in the `SequenceGroupMetadata`, to sample next
+            //    tokens for each sequence
             for (sequence_id, sequence_data) in sequence_group_metadata.sequence_data.iter() {
                 // 5. Select the given sequence logits, and apply a
                 // repetition penalty if necessary
@@ -341,7 +341,9 @@ where
                 for o in output.iter_mut() {
                     o.sequence_group_metrics = SequenceGroupMetrics {
                         time_to_generate: Some(execution_elapsed_time),
-                        num_tokens_generated: 1, // NOTE: without speculative decoding, we generate one token at a time for both prefill and decode sequences
+                        num_tokens_generated: 1, /* NOTE: without speculative decoding, we
+                                                  * generate one token at a time for both prefill
+                                                  * and decode sequences */
                     };
                 }
 
@@ -419,17 +421,18 @@ impl ModelThreadDispatcher {
                 let file_paths_clone = file_paths.clone();
                 let config_clone = config.clone();
                 let (to_workers_sender, worker_receiver) = mpsc::unbounded_channel();
-                // 3. Spawn a new blocking task, for each GPU device, to load the model weights
-                //    and send a signal to the main thread, so it can proceed to compute the cache
-                //    and scheduler configs, to be sent to all the model thread dispatchers, now
-                //    that the model weights are loaded in each GPU device memory.
+                // 3. Spawn a new blocking task, for each GPU device, to load the model weights and
+                //    send a signal to the main thread, so it can proceed to compute the cache and
+                //    scheduler configs, to be sent to all the model thread dispatchers, now that
+                //    the model weights are loaded in each GPU device memory.
                 let join_handle = tokio::task::spawn_blocking(move || {
                     #[cfg(feature = "nccl")]
                     let cuda_device = CudaDevice::new(device_id)?;
-                    // Initialize the Communicator from Nvidia Collective Communication Library. This is for the inter gpu communication.
-                    // For more information visit https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/overview.html
+                    // Initialize the Communicator from Nvidia Collective Communication Library.
+                    // This is for the inter gpu communication. For more information visit https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/overview.html
                     #[cfg(feature = "nccl")]
-                    // 4. Create a new communicator for each GPU device, to be used for inter-GPU communication
+                    // 4. Create a new communicator for each GPU device, to be used for inter-GPU
+                    //    communication
                     let comm = Rc::new(
                         Comm::from_rank(cuda_device, rank, num_shards, id)
                             .map_err(ModelThreadError::NcclError)?,
@@ -513,7 +516,8 @@ impl ModelThreadDispatcher {
     /// * Adds a receiver to the `responses` queue.
     ///
     /// # Errors
-    /// * Logs an error if the command cannot be sent, which may indicate that the model thread is shutting down.
+    /// * Logs an error if the command cannot be sent, which may indicate that the model thread is
+    ///   shutting down.
     #[instrument(skip_all)]
     pub fn send(&self, request: ExecuteModelRequest) {
         trace!("Sending new `ExecuteModelRequest` to model executor task");

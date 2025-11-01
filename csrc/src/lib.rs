@@ -54,7 +54,8 @@ impl FlashAttention {
             candle_core::bail!("query and value must have the same dtype");
         }
 
-        // Faster to transpose q from (b, 1, (nheads_kv ngroups), d) to (b, ngroups, nheads_kv, d) in this case
+        // Faster to transpose q from (b, 1, (nheads_kv ngroups), d) to (b, ngroups, nheads_kv, d)
+        // in this case
         let q = q.as_cuda_slice::<T>()?;
         let k = k.as_cuda_slice::<T>()?;
         let v = v.as_cuda_slice::<T>()?;
@@ -71,7 +72,8 @@ impl FlashAttention {
             && self.window_size_right.is_none()
             && head_size_og % 8 == 0
             && self.alibi_slopes.is_none();
-        // Faster to transpose q from (b, 1, (nheads_kv ngroups), d) to (b, ngroups, nheads_kv, d) in this case
+        // Faster to transpose q from (b, 1, (nheads_kv ngroups), d) to (b, ngroups, nheads_kv, d)
+        // in this case
         let (q_l, out_l, out_shape, seqlen_q, num_heads) = if seqlenq_ngroups_swapped {
             let ngroups = num_heads / num_heads_k;
             let new_shape = Shape::from((b_sz, ngroups, num_heads_k, head_size_og));
@@ -293,21 +295,21 @@ impl FlashAttention {
                 /* v_batch_stride */ v_stride[0] as u32,
                 /* o_batch_stride */ o_batch_stride,
                 /* alibi_slopes_batch_stride */ alibi_slopes_batch_stride as u32,
-                /* q_row_stride   */ q_stride[q_rank - 3] as u32,
-                /* k_row_stride   */ k_stride[k_rank - 3] as u32,
-                /* v_row_stride   */ v_stride[v_rank - 3] as u32,
-                /* o_row_stride   */ o_stride[o_rank - 3] as u32,
-                /* q_head_stride  */ q_stride[q_rank - 2] as u32,
-                /* k_head_stride  */ k_stride[k_rank - 2] as u32,
-                /* v_head_stride  */ v_stride[v_rank - 2] as u32,
-                /* o_head_stride  */ o_stride[o_rank - 2] as u32,
+                /* q_row_stride */ q_stride[q_rank - 3] as u32,
+                /* k_row_stride */ k_stride[k_rank - 3] as u32,
+                /* v_row_stride */ v_stride[v_rank - 3] as u32,
+                /* o_row_stride */ o_stride[o_rank - 3] as u32,
+                /* q_head_stride */ q_stride[q_rank - 2] as u32,
+                /* k_head_stride */ k_stride[k_rank - 2] as u32,
+                /* v_head_stride */ v_stride[v_rank - 2] as u32,
+                /* o_head_stride */ o_stride[o_rank - 2] as u32,
                 /* num_splits */ num_splits,
                 /* b */ b_sz as u32,
                 /* h */ num_heads as u32,
                 /* h_k */ num_heads_k as u32,
                 /* d */ head_size as u32,
                 /* d_rounded */ head_size_rounded as u32,
-                /* softmax_scale*/ softmax_scale,
+                /* softmax_scale */ softmax_scale,
                 /* scale_softmax_log2 */ scale_softmatx_log2,
                 /* block_table */ std::ptr::null(),
                 /* block_table_batch_stride */ 0,
@@ -542,8 +544,8 @@ pub fn flash_attn_alibi_windowed(
 ///
 /// # Softcap
 ///
-/// `softcap` is applied to the softmax output. Softcap is a multiplicative factor that is applied to the
-/// softmax output before the softmax is applied. Softcap is used in Grok and Gemma2 models.
+/// `softcap` is applied to the softmax output. Softcap is a multiplicative factor that is applied
+/// to the softmax output before the softmax is applied. Softcap is used in Grok and Gemma2 models.
 ///
 /// The resulting tensor has dimensions `(batch, seq_len_q, num_heads_q, head_size)`.
 #[allow(clippy::too_many_arguments)]
@@ -609,9 +611,13 @@ impl FlashAttentionVarLen {
         q: &candle_core::CudaStorage,
         q_l: &Layout, // shape: `[total_q,  num_heads, head_size]`, total_q := \sum_{i=0}^{b} s_i
         k: &candle_core::CudaStorage,
-        k_l: &Layout, // shape: `[total_k, num_heads_k, head_size]`, total_k := \sum_{i=0}^{b} s_i or `[num_blocks, page_block_size, num_heads_k, head_size]` if `self.block_table.is_some()`.
+        k_l: &Layout, /* shape: `[total_k, num_heads_k, head_size]`, total_k := \sum_{i=0}^{b}
+                       * s_i or `[num_blocks, page_block_size, num_heads_k, head_size]` if
+                       * `self.block_table.is_some()`. */
         v: &candle_core::CudaStorage,
-        v_l: &Layout, // shape: `[total_k, num_heads_k, head_size]`, total_k := \sum_{i=0}^{b} s_i or `[num_blocks, page_block_size, num_heads_k, head_size]` if `self.block_table.is_some()`.
+        v_l: &Layout, /* shape: `[total_k, num_heads_k, head_size]`, total_k := \sum_{i=0}^{b}
+                       * s_i or `[num_blocks, page_block_size, num_heads_k, head_size]` if
+                       * `self.block_table.is_some()`. */
         is_bf16: bool,
     ) -> Result<(candle_core::CudaStorage, Shape)> {
         // https://github.com/Dao-AILab/flash-attention/blob/7551202cb2dd245432bc878447e19015c0af3c22/csrc/flash_attn/flash_api.cpp#L528
@@ -693,7 +699,8 @@ impl FlashAttentionVarLen {
             && self.window_size_right.is_none()
             && head_size_og % 8 == 0
             && self.alibi_slopes.is_none();
-        // Faster to transpose q from (b, 1, (nheads_kv ngroups), d) to (b, ngroups, nheads_kv, d) in this case
+        // Faster to transpose q from (b, 1, (nheads_kv ngroups), d) to (b, ngroups, nheads_kv, d)
+        // in this case
         let (q_l, out_l, out_shape, max_seqlen_q, num_heads) = if seqlenq_ngroups_swapped {
             let ngroups = num_heads / num_heads_k;
             let new_shape = Shape::from((batch_size, ngroups, num_heads_k, head_size_og));
@@ -1048,21 +1055,21 @@ impl FlashAttentionVarLen {
                 /* v_batch_stride */ v_batch_stride,
                 /* o_batch_stride */ o_batch_stride,
                 /* alibi_slopes_batch_stride */ alibi_slopes_batch_stride as u32,
-                /* q_row_stride   */ q_stride[q_rank - 3] as u32,
-                /* k_row_stride   */ k_stride[k_rank - 3] as u32,
-                /* v_row_stride   */ v_stride[v_rank - 3] as u32,
-                /* o_row_stride   */ o_stride[o_rank - 3] as u32,
-                /* q_head_stride  */ q_stride[q_rank - 2] as u32,
-                /* k_head_stride  */ k_stride[k_rank - 2] as u32,
-                /* v_head_stride  */ v_stride[v_rank - 2] as u32,
-                /* o_head_stride  */ o_stride[o_rank - 2] as u32,
+                /* q_row_stride */ q_stride[q_rank - 3] as u32,
+                /* k_row_stride */ k_stride[k_rank - 3] as u32,
+                /* v_row_stride */ v_stride[v_rank - 3] as u32,
+                /* o_row_stride */ o_stride[o_rank - 3] as u32,
+                /* q_head_stride */ q_stride[q_rank - 2] as u32,
+                /* k_head_stride */ k_stride[k_rank - 2] as u32,
+                /* v_head_stride */ v_stride[v_rank - 2] as u32,
+                /* o_head_stride */ o_stride[o_rank - 2] as u32,
                 /* num_splits */ num_splits,
                 /* b */ batch_size as u32,
                 /* h */ num_heads as u32,
                 /* h_k */ num_heads_k as u32,
                 /* d */ head_size as u32,
                 /* d_rounded */ head_size_rounded as u32,
-                /* softmax_scale*/ softmax_scale,
+                /* softmax_scale */ softmax_scale,
                 /* scale_softmatx_log2 */ scale_softmatx_log2,
                 /* block_table */ block_table_ptr,
                 /* block_table_batch_stride */ block_table_batch_stride,
@@ -1379,9 +1386,9 @@ pub fn flash_attn_varlen_alibi_windowed(
 ///
 /// # Block table
 ///
-/// Enables the paged attention algorithm. The block table is a tensor of shape `[batch_size, max_num_block_per_sequence]`
-/// that contains the block table for each sequence in the batch. The block table is used to determine the
-/// the number of blocks per sequence.
+/// Enables the paged attention algorithm. The block table is a tensor of shape `[batch_size,
+/// max_num_block_per_sequence]` that contains the block table for each sequence in the batch. The
+/// block table is used to determine the the number of blocks per sequence.
 pub fn flash_attn_varlen_with_block_table(
     q: &Tensor,
     k: &Tensor,
@@ -1444,14 +1451,14 @@ pub fn flash_attn_varlen_with_block_table(
 ///
 /// # Block table
 ///
-/// Enables the paged attention algorithm. The block table is a tensor of shape `[batch_size, max_num_block_per_sequence]`
-/// that contains the block table for each sequence in the batch. The block table is used to determine the
-/// the number of blocks per sequence.
+/// Enables the paged attention algorithm. The block table is a tensor of shape `[batch_size,
+/// max_num_block_per_sequence]` that contains the block table for each sequence in the batch. The
+/// block table is used to determine the the number of blocks per sequence.
 ///
 /// # Softcap
 ///
-/// `softcap` is applied to the softmax output. Softcap is a multiplicative factor that is applied to the
-/// softmax output before the softmax is applied. Softcap is used in Grok and Gemma2 models.
+/// `softcap` is applied to the softmax output. Softcap is a multiplicative factor that is applied
+/// to the softmax output before the softmax is applied. Softcap is used in Grok and Gemma2 models.
 ///
 /// The resulting tensor has dimensions `(batch, seq_len_q, num_heads_q, head_size)`.
 pub fn flash_attn_varlen_full(
@@ -1519,11 +1526,16 @@ impl FlashAttentionKvCache {
     >(
         &self,
         q: &candle_core::CudaStorage,
-        q_l: &Layout, // shape: `[batch_size, seqlen_q, num_heads, head_size]`, total_q := \sum_{i=0}^{b} s_i
+        q_l: &Layout, /* shape: `[batch_size, seqlen_q, num_heads, head_size]`, total_q :=
+                       * \sum_{i=0}^{b} s_i */
         kc: &candle_core::CudaStorage,
-        kc_l: &Layout, // shape: `[batch_size_cache, seqlen_k, num_heads_k, head_size]`, or `[num_blocks, page_block_size, num_heads_k, head_size]` if `self.block_table.is_some()`.
+        kc_l: &Layout, /* shape: `[batch_size_cache, seqlen_k, num_heads_k, head_size]`, or
+                        * `[num_blocks, page_block_size, num_heads_k, head_size]` if
+                        * `self.block_table.is_some()`. */
         vc: &candle_core::CudaStorage,
-        vc_l: &Layout, // shape: `[batch_size_cache, seqlen_k, num_heads_k, head_size]`, or `[num_blocks, page_block_size, num_heads_k, head_size]` if `self.block_table.is_some()`.
+        vc_l: &Layout, /* shape: `[batch_size_cache, seqlen_k, num_heads_k, head_size]`, or
+                        * `[num_blocks, page_block_size, num_heads_k, head_size]` if
+                        * `self.block_table.is_some()`. */
         is_bf16: bool,
     ) -> Result<(candle_core::CudaStorage, Shape)> {
         // https://github.com/Dao-AILab/flash-attention/blob/7551202cb2dd245432bc878447e19015c0af3c22/csrc/flash_attn/flash_api.cpp#L1284
@@ -1802,13 +1814,13 @@ impl FlashAttentionKvCache {
                 /* o_batch_stride */ o_stride[0] as u32,
                 /* alibi_slopes_batch_stride */ alibi_slopes_batch_stride as u32,
                 /* q_row_stride */ q_stride[q_rank - 3] as u32,
-                /* k_row_stride   */ kc_stride[kc_rank - 3] as u32,
-                /* v_row_stride   */ vc_stride[vc_rank - 3] as u32,
-                /* o_row_stride   */ o_stride[o_rank - 3] as u32,
-                /* q_head_stride  */ q_stride[q_rank - 2] as u32,
-                /* k_head_stride  */ kc_stride[kc_rank - 2] as u32,
-                /* v_head_stride  */ vc_stride[vc_rank - 2] as u32,
-                /* o_head_stride  */ o_stride[o_rank - 2] as u32,
+                /* k_row_stride */ kc_stride[kc_rank - 3] as u32,
+                /* v_row_stride */ vc_stride[vc_rank - 3] as u32,
+                /* o_row_stride */ o_stride[o_rank - 3] as u32,
+                /* q_head_stride */ q_stride[q_rank - 2] as u32,
+                /* k_head_stride */ kc_stride[kc_rank - 2] as u32,
+                /* v_head_stride */ vc_stride[vc_rank - 2] as u32,
+                /* o_head_stride */ o_stride[o_rank - 2] as u32,
                 /* num_splits */ num_splits,
                 /* b */ batch_size as u32,
                 /* h */ num_heads as u32,
@@ -1886,8 +1898,10 @@ impl candle_core::CustomOp3 for FlashAttentionKvCache {
 /// # Arguments
 ///
 /// * `q` - Query tensor with shape `[batch_size, seqlen_q, num_heads, head_size]`.
-/// * `k` - Key tensor with shape `[batch_size_cache, seqlen_k, num_heads_k, head_size]` or `[num_blocks, page_block_size, num_heads_k, head_size]` if block_table.is_some().
-/// * `v` - Value tensor with shape `[batch_size_cache, seqlen_k, num_heads_k, head_size]` or `[num_blocks, page_block_size, num_heads_k, head_size]` if block_table.is_some().
+/// * `k` - Key tensor with shape `[batch_size_cache, seqlen_k, num_heads_k, head_size]` or
+///   `[num_blocks, page_block_size, num_heads_k, head_size]` if block_table.is_some().
+/// * `v` - Value tensor with shape `[batch_size_cache, seqlen_k, num_heads_k, head_size]` or
+///   `[num_blocks, page_block_size, num_heads_k, head_size]` if block_table.is_some().
 ///
 /// The resulting tensor has dimensions `[batch_size, seqlen_q, num_heads, head_size]`.
 pub fn flash_attn_kv_cache(
@@ -1921,8 +1935,10 @@ pub fn flash_attn_kv_cache(
 /// # Arguments
 ///
 /// * `q` - Query tensor with shape `[batch_size, seqlen_q, num_heads, head_size]`.
-/// * `k` - Key tensor with shape `[batch_size_cache, seqlen_k, num_heads_k, head_size]` or `[num_blocks, page_block_size, num_heads_k, head_size]` if block_table.is_some().
-/// * `v` - Value tensor with shape `[batch_size_cache, seqlen_k, num_heads_k, head_size]` or `[num_blocks, page_block_size, num_heads_k, head_size]` if block_table.is_some().
+/// * `k` - Key tensor with shape `[batch_size_cache, seqlen_k, num_heads_k, head_size]` or
+///   `[num_blocks, page_block_size, num_heads_k, head_size]` if block_table.is_some().
+/// * `v` - Value tensor with shape `[batch_size_cache, seqlen_k, num_heads_k, head_size]` or
+///   `[num_blocks, page_block_size, num_heads_k, head_size]` if block_table.is_some().
 ///
 /// The resulting tensor has dimensions `[batch_size, seqlen_q, num_heads, head_size]`.
 ///
@@ -1960,8 +1976,10 @@ pub fn flash_attn_kv_cache_windowed(
 /// # Arguments
 ///
 /// * `q` - Query tensor with shape `[batch_size, seqlen_q, num_heads, head_size]`.
-/// * `k` - Key tensor with shape `[batch_size_cache, seqlen_k, num_heads_k, head_size]` or `[num_blocks, page_block_size, num_heads_k, head_size]` if block_table.is_some().
-/// * `v` - Value tensor with shape `[batch_size_cache, seqlen_k, num_heads_k, head_size]` or `[num_blocks, page_block_size, num_heads_k, head_size]` if block_table.is_some().
+/// * `k` - Key tensor with shape `[batch_size_cache, seqlen_k, num_heads_k, head_size]` or
+///   `[num_blocks, page_block_size, num_heads_k, head_size]` if block_table.is_some().
+/// * `v` - Value tensor with shape `[batch_size_cache, seqlen_k, num_heads_k, head_size]` or
+///   `[num_blocks, page_block_size, num_heads_k, head_size]` if block_table.is_some().
 /// * `alibi_slopes` - Alibi slopes tensor with shape `(num_heads_q)`.
 ///
 /// `seqlens_q` and `seqlens_k` contain `batch_size + 1` elements, typically `0`, `seqlen_1`,
@@ -2001,8 +2019,10 @@ pub fn flash_attn_kv_cache_alibi(
 /// # Arguments
 ///
 /// * `q` - Query tensor with shape `[batch_size, seqlen_q, num_heads, head_size]`.
-/// * `k` - Key tensor with shape `[batch_size_cache, seqlen_k, num_heads_k, head_size]` or `[num_blocks, page_block_size, num_heads_k, head_size]` if block_table.is_some().
-/// * `v` - Value tensor with shape `[batch_size_cache, seqlen_k, num_heads_k, head_size]` or `[num_blocks, page_block_size, num_heads_k, head_size]` if block_table.is_some().
+/// * `k` - Key tensor with shape `[batch_size_cache, seqlen_k, num_heads_k, head_size]` or
+///   `[num_blocks, page_block_size, num_heads_k, head_size]` if block_table.is_some().
+/// * `v` - Value tensor with shape `[batch_size_cache, seqlen_k, num_heads_k, head_size]` or
+///   `[num_blocks, page_block_size, num_heads_k, head_size]` if block_table.is_some().
 /// * `alibi_slopes` - Alibi slopes tensor with shape `(num_heads_q)`.
 /// * `window_size_left` - Limit left attention to value tokens.
 /// * `window_size_right` - Limit right attention to value tokens.
@@ -2043,8 +2063,10 @@ pub fn flash_attn_kv_cache_alibi_windowed(
 /// # Arguments
 ///
 /// * `q` - Query tensor with shape `[batch_size, seqlen_q, num_heads, head_size]`.
-/// * `k` - Key tensor with shape `[batch_size_cache, seqlen_k, num_heads_k, head_size]` or `[num_blocks, page_block_size, num_heads_k, head_size]` if block_table.is_some().
-/// * `v` - Value tensor with shape `[batch_size_cache, seqlen_k, num_heads_k, head_size]` or `[num_blocks, page_block_size, num_heads_k, head_size]` if block_table.is_some().
+/// * `k` - Key tensor with shape `[batch_size_cache, seqlen_k, num_heads_k, head_size]` or
+///   `[num_blocks, page_block_size, num_heads_k, head_size]` if block_table.is_some().
+/// * `v` - Value tensor with shape `[batch_size_cache, seqlen_k, num_heads_k, head_size]` or
+///   `[num_blocks, page_block_size, num_heads_k, head_size]` if block_table.is_some().
 /// * `alibi_slopes` - Alibi slopes tensor with shape `(num_heads_q)`.
 /// * `window_size_left` - Limit left attention to value tokens.
 /// * `window_size_right` - Limit right attention to value tokens.

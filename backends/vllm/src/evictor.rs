@@ -50,15 +50,18 @@ pub trait Evictor {
     fn num_blocks(&self) -> usize;
 }
 
-/// The `LRUEvictor` struct implements an eviction policy based on the Least Recently Used (LRU) algorithm.
-/// It maintains a cache of blocks, where each block has a `last_accessed` timestamp indicating the last time it was accessed.
+/// The `LRUEvictor` struct implements an eviction policy based on the Least Recently Used (LRU)
+/// algorithm. It maintains a cache of blocks, where each block has a `last_accessed` timestamp
+/// indicating the last time it was accessed.
 ///
-/// When the cache needs to evict a block, the block with the oldest `last_accessed` timestamp is chosen.
-/// If there are multiple blocks with the same `last_accessed` timestamp, the block with the highest `num_hashed_tokens` is evicted.
-/// If multiple blocks have the same `last_accessed` timestamp and the highest `num_hashed_tokens` value, one of them is chosen arbitrarily.
+/// When the cache needs to evict a block, the block with the oldest `last_accessed` timestamp is
+/// chosen. If there are multiple blocks with the same `last_accessed` timestamp, the block with the
+/// highest `num_hashed_tokens` is evicted. If multiple blocks have the same `last_accessed`
+/// timestamp and the highest `num_hashed_tokens` value, one of them is chosen arbitrarily.
 #[derive(Debug)]
 pub struct LRUEvictor {
-    /// An `IndexMap` that stores the cached blocks, where the key is the block number and the value is the `PhysicalTokenBlock`.
+    /// An `IndexMap` that stores the cached blocks, where the key is the block number and the
+    /// value is the `PhysicalTokenBlock`.
     pub free_table: IndexMap<u32, PhysicalTokenBlock>,
 }
 
