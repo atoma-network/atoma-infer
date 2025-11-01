@@ -139,8 +139,8 @@ pub fn swap_blocks(
 ///  * `key_caches` - A vector of `Tensor`s to copy the blocks to.
 ///  * `value_caches` - A vector of `Tensor`s to copy the blocks to.
 ///  * `block_mapping` - A `Tensor` of shape `[num_pairs, 2]` that maps the block indices
-///  *  to be copied, where `num_pairs` is the number of block pairs to be copied.
-///      The `block_mapping` tensor if of dtype `u32`.
+///  * to be copied, where `num_pairs` is the number of block pairs to be copied. The
+///    `block_mapping` tensor if of dtype `u32`.
 ///
 /// # Safety
 ///

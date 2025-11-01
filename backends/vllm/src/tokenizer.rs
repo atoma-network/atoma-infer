@@ -138,7 +138,8 @@ fn start_tokenizer_task(
 /// The function runs in an infinite loop, cycling through the list of senders. For each sender:
 /// 1. It attempts to receive a request from the central receiver.
 /// 2. If a request is received, it's forwarded to the current worker.
-/// 3. If `None` is received (indicating the channel was closed), the function logs an error and exits.
+/// 3. If `None` is received (indicating the channel was closed), the function logs an error and
+///    exits.
 ///
 /// This ensures that requests are distributed evenly among all available workers.
 ///

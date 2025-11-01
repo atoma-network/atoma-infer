@@ -70,7 +70,8 @@ pub struct FlashAttentionMetadata {
     pub context_lengths: Option<Tensor>,
     /// Slot mapping, maps each token (or element in the input sequence) to a specific slot
     /// or segment in the cached memory. This allows for efficient access and organization
-    /// of attention computations over large sequences. Of shape `[num_prefill_tokens + num_decoding_tokens,]`
+    /// of attention computations over large sequences. Of shape `[num_prefill_tokens +
+    /// num_decoding_tokens,]`
     pub slot_mapping: Tensor,
     /// Flash attention decoding metadata
     pub decoding_metadata: Option<FlashAttentionDecodingMetadata>,
@@ -311,7 +312,8 @@ impl FlashAttention {
     /// * `q` - Query tensor with shape `[num_tokens, num_heads * head_size]`
     /// * `k` - Key tensor with shape `[num_tokens, num_kv_heads * head_size]`
     /// * `v` - Value tensor with shape `[num_tokens, num_kv_heads * head_size]`
-    /// * `kv_cache` - KV cache tensor with shape `[2, num_blocks, block_size, num_kv_heads, head_size]`
+    /// * `kv_cache` - KV cache tensor with shape `[2, num_blocks, block_size, num_kv_heads,
+    ///   head_size]`
     /// * `attention_metadata` - Metadata for flash attention
     ///
     /// # Returns

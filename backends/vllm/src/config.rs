@@ -144,9 +144,11 @@ pub struct CacheConfig {
     /// Fraction of free system memory to use for swap space, this value is
     /// used to calculate the swap space in bytes if the latter is not specified
     pub(crate) swap_space_fraction: Option<f32>,
-    /// Size of the CPU swap space per GPU, in bytes, filled using system profiling if not specified
+    /// Size of the CPU swap space per GPU, in bytes, filled using system profiling if not
+    /// specified
     pub(crate) swap_space_bytes: Option<usize>,
-    /// Number of GPU blocks to use. This value overrides the profiled `num_gpu_blocks`, if specified
+    /// Number of GPU blocks to use. This value overrides the profiled `num_gpu_blocks`, if
+    /// specified
     num_gpu_blocks_override: Option<usize>,
     /// Total number of GPU blocks to use, filled using system profiling if not specified
     num_gpu_blocks: Option<usize>,
@@ -489,7 +491,8 @@ pub(crate) mod utils {
     use super::*;
     use cuda_runtime_sys::*;
 
-    /// Calculate the swap space in bytes based on the available system memory and the specified fraction.
+    /// Calculate the swap space in bytes based on the available system memory and the specified
+    /// fraction.
     ///
     /// This function determines the amount of memory to allocate for the swap space, which is used
     /// for storing parts of the KV cache that don't fit in GPU memory.
@@ -497,12 +500,13 @@ pub(crate) mod utils {
     /// # Arguments
     ///
     /// * `fraction` - A float between 0.0 and 1.0 representing the fraction of free system memory
-    ///                to use for the swap space.
+    ///   to use for the swap space.
     ///
     /// # Returns
     ///
     /// * `Ok(usize)` - The calculated swap space size in bytes.
-    /// * `Err(CacheConfigError)` - If there's an error in the calculation or if the input is invalid.
+    /// * `Err(CacheConfigError)` - If there's an error in the calculation or if the input is
+    ///   invalid.
     ///
     /// # Errors
     ///
@@ -516,7 +520,6 @@ pub(crate) mod utils {
     /// * The function will log a warning if the swap space is between 40% and 70% of free memory.
     /// * The calculation is based on the currently available free system memory.
     /// * The result is in bytes, converted from the system's reporting in kilobytes.
-    ///
     pub(crate) fn calculate_swap_space(fraction: f32) -> Result<usize, CacheConfigError> {
         if fraction <= 0.0 || fraction > 1.0 {
             return Err(CacheConfigError::InvalidSwapSpaceFraction(fraction));
@@ -545,15 +548,18 @@ pub(crate) mod utils {
         Ok(swap_space_bytes)
     }
 
-    /// Calculates the number of GPU blocks that can be used for the KV cache based on available GPU memory.
+    /// Calculates the number of GPU blocks that can be used for the KV cache based on available GPU
+    /// memory.
     ///
-    /// This function determines the number of blocks that can be allocated on the GPU for the key-value cache,
-    /// taking into account the GPU memory utilization rate, model architecture, and data type.
+    /// This function determines the number of blocks that can be allocated on the GPU for the
+    /// key-value cache, taking into account the GPU memory utilization rate, model
+    /// architecture, and data type.
     ///
     /// # Arguments
     ///
     /// * `block_size` - The size of each block in number of tokens.
-    /// * `gpu_memory_utilization` - The fraction of free GPU memory to be used for the KV cache (0.0 to 1.0).
+    /// * `gpu_memory_utilization` - The fraction of free GPU memory to be used for the KV cache
+    ///   (0.0 to 1.0).
     /// * `num_hidden_layers` - The number of hidden layers in the model.
     /// * `num_kv_heads` - The number of key-value attention heads.
     /// * `hidden_dim` - The dimension of the hidden layers.
@@ -567,7 +573,8 @@ pub(crate) mod utils {
     /// # Errors
     ///
     /// This function can return the following errors:
-    /// - `CacheConfigError::GpuMemoryQueryError` if there's a failure in querying GPU information or memory.
+    /// - `CacheConfigError::GpuMemoryQueryError` if there's a failure in querying GPU information
+    ///   or memory.
     ///
     /// # Safety
     ///
@@ -576,8 +583,10 @@ pub(crate) mod utils {
     /// # Note
     ///
     /// - This function assumes that the model weights have already been loaded into GPU memory.
-    /// - It calculates based on the GPU with the least available memory to ensure consistency across all devices.
-    /// - The actual number of blocks is determined by the available free memory and the specified utilization rate.
+    /// - It calculates based on the GPU with the least available memory to ensure consistency
+    ///   across all devices.
+    /// - The actual number of blocks is determined by the available free memory and the specified
+    ///   utilization rate.
     pub(crate) fn calculate_num_gpu_blocks(
         block_size: usize,
         gpu_memory_utilization: f32,
@@ -677,7 +686,8 @@ pub(crate) mod utils {
     /// Computes the total memory required for a single block in the KV cache.
     ///
     /// This function calculates the total memory needed for both Key and Value tensors
-    /// in a single block of the KV cache, based on the model's architecture and the chosen data type.
+    /// in a single block of the KV cache, based on the model's architecture and the chosen data
+    /// type.
     ///
     /// # Arguments
     ///
@@ -685,7 +695,8 @@ pub(crate) mod utils {
     /// * `num_hidden_layers` - The number of hidden layers in the model.
     /// * `num_kv_heads` - The number of key-value attention heads.
     /// * `hidden_dim` - The dimension of the hidden layers.
-    /// * `dtype` - The data type used for the tensors, which determines the size in bytes for each element.
+    /// * `dtype` - The data type used for the tensors, which determines the size in bytes for each
+    ///   element.
     ///
     /// # Returns
     ///

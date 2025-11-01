@@ -421,9 +421,11 @@ pub struct NextTokenChooserParameters {
     pub temperature: f32,
     /// Limits sampling to the k most likely next tokens
     pub top_k: u32,
-    /// Limits sampling to the smallest set of most probable tokens with probabilities that add up to top_p or higher
+    /// Limits sampling to the smallest set of most probable tokens with probabilities that add up
+    /// to top_p or higher
     pub top_p: f32,
-    /// Selects tokens whose probability is close to the expected probability of tokens in a uniform distribution
+    /// Selects tokens whose probability is close to the expected probability of tokens in a
+    /// uniform distribution
     pub typical_p: f32,
     /// Whether to use sampling instead of greedy selection
     pub do_sample: bool,

@@ -18,11 +18,10 @@ use tracing::{debug, error, instrument, trace, warn};
 
 /// Preemption modes.
 ///
-/// 1. `Swapping`: Swap out the blocks of the preempted sequences to CPU memory
-///     and swap them back in when the sequences are resumed.
-/// 2. `Recomputation`: Discard the blocks of the preempted sequences and
-///     recompute them when the sequences are resumed, treating the sequences as
-///     new prompts.
+/// 1. `Swapping`: Swap out the blocks of the preempted sequences to CPU memory and swap them back
+///    in when the sequences are resumed.
+/// 2. `Recomputation`: Discard the blocks of the preempted sequences and recompute them when the
+///    sequences are resumed, treating the sequences as new prompts.
 #[derive(Debug, PartialEq, Eq)]
 pub enum PreemptionMode {
     Swap,
@@ -54,7 +53,8 @@ struct SchedulingBudget {
 }
 
 impl SchedulingBudget {
-    /// Creates a new `SchedulingBudget` with the specified token budget and maximum number of sequences.
+    /// Creates a new `SchedulingBudget` with the specified token budget and maximum number of
+    /// sequences.
     pub fn new(token_budget: usize, max_num_sequences: usize) -> Self {
         Self {
             token_budget,
@@ -366,8 +366,7 @@ impl<P> Scheduler<P> {
     /// (waiting, running, and swapped). If found:
     ///
     /// 1. It removes the sequence group from its current queue.
-    /// 2. For any unfinished sequences in the group, it:
-    ///    a. Sets their status to `FinishedAborted`.
+    /// 2. For any unfinished sequences in the group, it: a. Sets their status to `FinishedAborted`.
     ///    b. Frees the associated resources.
     ///
     /// If no matching sequence group is found, this method does nothing.
@@ -451,7 +450,7 @@ impl<P> Scheduler<P> {
     /// # Arguments
     ///
     /// * `request_ids` - An iterator of String values, where each string is a request ID
-    ///                   corresponding to a sequence group to be aborted.
+    ///   corresponding to a sequence group to be aborted.
     ///
     /// # Returns
     ///
@@ -483,17 +482,20 @@ impl<P> Scheduler<P> {
         Ok(())
     }
 
-    /// Frees blocks associated with sequences in a given `SequenceGroup` and removes the group from its current queue.
+    /// Frees blocks associated with sequences in a given `SequenceGroup` and removes the group from
+    /// its current queue.
     ///
     /// # Arguments
     ///
     /// * `request_id` - The ID of the `SequenceGroup` to free.
     /// * `sequences_ids` - A slice of sequence IDs within the group to free blocks for.
-    /// * `sequence_status` - The current status of the `SequenceGroup`, determining which queue to remove it from.
+    /// * `sequence_status` - The current status of the `SequenceGroup`, determining which queue to
+    ///   remove it from.
     ///
     /// # Returns
     ///
-    /// Returns `Ok(())` if successful, or a `SchedulerError` if there was an issue freeing the blocks.
+    /// Returns `Ok(())` if successful, or a `SchedulerError` if there was an issue freeing the
+    /// blocks.
     ///
     /// # Errors
     ///
@@ -575,15 +577,18 @@ impl<P: Policy> Scheduler<P> {
 
     /// Schedules sequence groups that are currently running.
     ///
-    /// This method processes the running queue, which includes both decode and chunked prefill requests.
-    /// It handles scheduling, preemption, and swapping of sequence groups based on available resources.
+    /// This method processes the running queue, which includes both decode and chunked prefill
+    /// requests. It handles scheduling, preemption, and swapping of sequence groups based on
+    /// available resources.
     ///
     /// # Arguments
     ///
-    /// * `running_queue` - A queue containing running requests (e.g., decodes). This argument is not modified in-place.
+    /// * `running_queue` - A queue containing running requests (e.g., decodes). This argument is
+    ///   not modified in-place.
     /// * `budget` - The scheduling budget, which is updated in-place when decodes are preempted.
-    /// * `enable_chunking` - If true, allows sequence groups to be chunked. Only a portion of tokens will be scheduled
-    ///                       if the budget's `num_batched_tokens` doesn't have enough capacity for all tokens.
+    /// * `enable_chunking` - If true, allows sequence groups to be chunked. Only a portion of
+    ///   tokens will be scheduled if the budget's `num_batched_tokens` doesn't have enough capacity
+    ///   for all tokens.
     ///
     /// # Returns
     ///
@@ -656,7 +661,8 @@ impl<P: Policy> Scheduler<P> {
 
                     if let Some(mut victim_sequence_group) = running_queue.pop_back() {
                         // Preempt the lowest-priority sequence groups first
-                        // victim lies at the end of `runnning_queue`, as it is was last in, last out
+                        // victim lies at the end of `runnning_queue`, as it is was last in, last
+                        // out
                         let preempted_mode = self.preempt(
                             &mut victim_sequence_group,
                             &mut blocks_to_swap_out,
@@ -739,10 +745,10 @@ impl<P: Policy> Scheduler<P> {
     /// # Arguments
     ///
     /// * `swapped_queue` - A queue of sequence groups that are currently swapped out to CPU memory.
-    ///                     This queue is not modified in-place.
+    ///   This queue is not modified in-place.
     /// * `budget` - The current scheduling budget, which is updated as sequences are scheduled.
-    /// * `enable_chunking` - If true, allows scheduling partial prefill computations when the budget
-    ///                       doesn't have enough capacity for all tokens in a sequence group.
+    /// * `enable_chunking` - If true, allows scheduling partial prefill computations when the
+    ///   budget doesn't have enough capacity for all tokens in a sequence group.
     ///
     /// # Returns
     ///
@@ -856,10 +862,11 @@ impl<P: Policy> Scheduler<P> {
     ///
     /// # Arguments
     ///
-    /// * `waiting_queue` - A queue containing prefill requests. This argument is not modified in-place.
+    /// * `waiting_queue` - A queue containing prefill requests. This argument is not modified
+    ///   in-place.
     /// * `budget` - The scheduling budget, which is updated in-place when requests are scheduled.
-    /// * `enable_chunking` - If true, allows sequence groups to be chunked. Only a portion of tokens
-    ///                       will be scheduled if the budget's capacity is insufficient for all tokens.
+    /// * `enable_chunking` - If true, allows sequence groups to be chunked. Only a portion of
+    ///   tokens will be scheduled if the budget's capacity is insufficient for all tokens.
     ///
     /// # Returns
     ///
@@ -935,7 +942,8 @@ impl<P: Policy> Scheduler<P> {
             }
 
             if !enable_chunking {
-                // DON'T PANIC: by previous error check, we are guaranteed that `waiting_sequences` is non-empty
+                // DON'T PANIC: by previous error check, we are guaranteed that `waiting_sequences`
+                // is non-empty
                 let num_prompt_tokens = waiting_sequences.first().unwrap().read().unwrap().length();
                 if num_prompt_tokens != num_new_tokens {
                     error!("Invalid number of new tokens, got `{num_new_tokens}`, but it should be `{num_prompt_tokens}`");
@@ -1112,8 +1120,8 @@ impl<P: Policy> Scheduler<P> {
 
         // Update waiting requests
         self.waiting = remaining_waiting;
-        // NOTE: need to reverse order of preempted sequence groups to preserve order once you push these
-        // to the left on the `self.waiting` queue.
+        // NOTE: need to reverse order of preempted sequence groups to preserve order once you push
+        // these to the left on the `self.waiting` queue.
         // NOTE: Preempted running scheduled means there was not enough block space to be run on the
         // current inference loop, so these requests should have priority regarding newly received
         // requests.
@@ -1290,8 +1298,8 @@ impl<P: Policy> Scheduler<P> {
 
         // Update waiting queue
         self.waiting = remaining_waiting;
-        // NOTE: need to reverse order of preempted sequence groups to preserve order once you push these
-        // to the left on the `self.waiting` queue.
+        // NOTE: need to reverse order of preempted sequence groups to preserve order once you push
+        // these to the left on the `self.waiting` queue.
         // NOTE: Preempted running scheduled means there was not enough block space to be run on the
         // current inference loop, so these requests should have priority regarding newly received
         // requests.
@@ -1383,18 +1391,24 @@ impl<P: Policy> Scheduler<P> {
     /// This method chooses between two scheduling algorithms:
     ///
     /// 1. If chunked prefill is enabled (via `scheduler_config.enable_chunked_prefill()`):
-    ///    - Calls `self.schedule_chunked_prefill()`, which allows batching prefill and decode requests together.
+    ///    - Calls `self.schedule_chunked_prefill()`, which allows batching prefill and decode
+    ///      requests together.
     ///    - This can improve GPU utilization for long prompts by processing them in chunks.
     ///
     /// 2. Otherwise:
-    ///    - Calls `self.schedule_default()`, which prioritizes completing full prefills before scheduling decodes.
-    ///    - This approach may be more suitable for shorter prompts or when strict ordering is required.
+    ///    - Calls `self.schedule_default()`, which prioritizes completing full prefills before
+    ///      scheduling decodes.
+    ///    - This approach may be more suitable for shorter prompts or when strict ordering is
+    ///      required.
     ///
     /// # Notes
     ///
-    /// - The choice between chunked and default scheduling can significantly impact performance and latency.
-    /// - Chunked prefill is generally more efficient for longer prompts or when dealing with a mix of long and short requests.
-    /// - The default scheduling may be preferable for simpler workloads or when you need to ensure all prefills complete before any decoding starts.
+    /// - The choice between chunked and default scheduling can significantly impact performance and
+    ///   latency.
+    /// - Chunked prefill is generally more efficient for longer prompts or when dealing with a mix
+    ///   of long and short requests.
+    /// - The default scheduling may be preferable for simpler workloads or when you need to ensure
+    ///   all prefills complete before any decoding starts.
     #[instrument(skip_all)]
     fn schedule_(&mut self) -> Result<SchedulerOutputs, SchedulerError> {
         if self.scheduler_config.enable_chunked_prefill() {
@@ -1548,8 +1562,10 @@ impl<P: Debug> Scheduler<P> {
     ///
     /// * `sequence_group` - The sequence group to evaluate.
     /// * `sequence_status` - The status of sequences to consider (e.g., Running, Waiting).
-    /// * `enable_chunking` - If true, allows processing a subset of available tokens to fit within budget.
-    /// * `budget` - The current scheduling budget, used to limit token processing when chunking is enabled.
+    /// * `enable_chunking` - If true, allows processing a subset of available tokens to fit within
+    ///   budget.
+    /// * `budget` - The current scheduling budget, used to limit token processing when chunking is
+    ///   enabled.
     ///
     /// # Returns
     ///
@@ -1606,7 +1622,8 @@ impl<P: Debug> Scheduler<P> {
         Ok(num_new_tokens)
     }
 
-    /// Checks if there is sufficient space in the KV cache to continue generation for the given sequence group.
+    /// Checks if there is sufficient space in the KV cache to continue generation for the given
+    /// sequence group.
     ///
     /// This method delegates to the `BlockManager` to determine if there are enough
     /// free blocks available to accommodate the next token for all running sequences
@@ -1643,12 +1660,13 @@ impl<P: Debug> Scheduler<P> {
     /// # Arguments
     ///
     /// * `sequence_group` - The sequence group containing the sequences to append slots to.
-    /// * `blocks_to_copy` - A mutable map that will be updated with any new copy-on-write operations.
-    ///                      Keys are source block indices, values are destination block indices.
+    /// * `blocks_to_copy` - A mutable map that will be updated with any new copy-on-write
+    ///   operations. Keys are source block indices, values are destination block indices.
     ///
     /// # Returns
     ///
-    /// Returns `Ok(())` if slots were successfully appended, or a `SchedulerError` if an error occurred.
+    /// Returns `Ok(())` if slots were successfully appended, or a `SchedulerError` if an error
+    /// occurred.
     ///
     /// # Effects
     ///
@@ -1732,7 +1750,8 @@ impl<P: Debug> Scheduler<P> {
     ///
     /// * `sequence_group` - The sequence group to preempt.
     /// * `blocks_to_swap_out` - A map to track blocks that need to be swapped out.
-    /// * `preemption_mode` - Optional preemption mode. If None, the mode is determined automatically.
+    /// * `preemption_mode` - Optional preemption mode. If None, the mode is determined
+    ///   automatically.
     ///
     /// # Returns
     ///
@@ -1742,17 +1761,19 @@ impl<P: Debug> Scheduler<P> {
     ///
     /// If preemption mode is not specified, it is determined as follows:
     /// - Recomputation is used by default for single-sequence groups, as it has lower overhead.
-    /// - Swapping is used for multi-sequence groups (e.g., beam search), as recomputation is not currently supported.
+    /// - Swapping is used for multi-sequence groups (e.g., beam search), as recomputation is not
+    ///   currently supported.
     ///
     /// # Notes
     ///
-    /// - FIXME: The current policy implicitly prioritizes multi-sequence groups over single-sequence groups,
-    ///   as swapped sequences are prioritized over waiting sequences.
+    /// - FIXME: The current policy implicitly prioritizes multi-sequence groups over
+    ///   single-sequence groups, as swapped sequences are prioritized over waiting sequences.
     /// - TODO: Implement recomputation support for multi-sequence groups.
     ///
     /// # Warnings
     ///
-    /// Logs a warning every 50 preemptions about potential performance impact and suggests solutions.
+    /// Logs a warning every 50 preemptions about potential performance impact and suggests
+    /// solutions.
     #[instrument(skip_all)]
     fn preempt(
         &mut self,
@@ -1821,7 +1842,8 @@ impl<P: Debug> Scheduler<P> {
     /// # Errors
     ///
     /// This function will return an error if:
-    /// - There is not exactly one running sequence in the group (only single sequences can be recomputed).
+    /// - There is not exactly one running sequence in the group (only single sequences can be
+    ///   recomputed).
     /// - There are issues accessing or modifying sequence data.
     ///
     /// # Effects
@@ -1881,9 +1903,9 @@ impl<P: Debug> Scheduler<P> {
     /// # Arguments
     ///
     /// * `sequence_group` - A mutable reference to the `SequenceGroup` to be preempted.
-    /// * `blocks_to_swap_out` - A mutable reference to a HashMap that will be updated
-    ///   with the blocks that need to be swapped out. Keys are the GPU block IDs,
-    ///   and values are the corresponding CPU block IDs.
+    /// * `blocks_to_swap_out` - A mutable reference to a HashMap that will be updated with the
+    ///   blocks that need to be swapped out. Keys are the GPU block IDs, and values are the
+    ///   corresponding CPU block IDs.
     ///
     /// # Returns
     ///
@@ -1932,8 +1954,8 @@ impl<P: Debug> Scheduler<P> {
     /// # Arguments
     ///
     /// * `sequence_group` - The sequence group to swap out.
-    /// * `blocks_to_swap_out` - A mutable map that will be updated with the block mappings
-    ///                          from GPU to CPU. Keys are GPU block IDs, values are CPU block IDs.
+    /// * `blocks_to_swap_out` - A mutable map that will be updated with the block mappings from GPU
+    ///   to CPU. Keys are GPU block IDs, values are CPU block IDs.
     ///
     /// # Returns
     ///
@@ -1987,8 +2009,8 @@ impl<P: Debug> Scheduler<P> {
     /// # Arguments
     ///
     /// * `sequence_group` - The sequence group to swap in.
-    /// * `blocks_to_swap_in` - A mutable map that will be updated with the block mappings
-    ///                         from CPU to GPU. Keys are CPU block IDs, values are GPU block IDs.
+    /// * `blocks_to_swap_in` - A mutable map that will be updated with the block mappings from CPU
+    ///   to GPU. Keys are CPU block IDs, values are GPU block IDs.
     ///
     /// # Returns
     ///
@@ -2048,9 +2070,8 @@ impl<P: Debug> Scheduler<P> {
     /// 2. Always updates the previous time and resets the prompt flag.
     /// 3. If delay factor is set and there are waiting requests:
     ///    - Calculates the earliest arrival time of waiting requests.
-    ///    - Returns true if either:
-    ///      a) The time since the earliest arrival exceeds the delay factor * last prompt latency.
-    ///      b) There are no currently running requests.
+    ///    - Returns true if either: a) The time since the earliest arrival exceeds the delay factor
+    ///      * last prompt latency. b) There are no currently running requests.
     /// 4. If delay factor is not set or there are no waiting requests, always returns true.
     #[instrument(skip_all)]
     fn passed_delay(&mut self, now: Instant) -> bool {
@@ -2080,18 +2101,22 @@ impl<P: Debug> Scheduler<P> {
     /// # Returns
     ///
     /// - If chunked prefill is enabled: Returns `max_model_len`.
-    /// - If chunked prefill is disabled: Returns the minimum of `max_model_len` and `max_num_batched_tokens`.
+    /// - If chunked prefill is disabled: Returns the minimum of `max_model_len` and
+    ///   `max_num_batched_tokens`.
     ///
     /// # Behavior
     ///
     /// This function helps enforce limits on prompt lengths to ensure efficient scheduling:
     ///
-    /// - With chunked prefill: Allows longer prompts up to the model's maximum length, as they can be processed in chunks.
-    /// - Without chunked prefill: Restricts prompts to fit within a single batch, balancing between model capacity and scheduling efficiency.
+    /// - With chunked prefill: Allows longer prompts up to the model's maximum length, as they can
+    ///   be processed in chunks.
+    /// - Without chunked prefill: Restricts prompts to fit within a single batch, balancing between
+    ///   model capacity and scheduling efficiency.
     ///
     /// # Note
     ///
-    /// The returned limit affects how prompts are handled during scheduling, potentially leading to truncation or rejection of overly long prompts.
+    /// The returned limit affects how prompts are handled during scheduling, potentially leading to
+    /// truncation or rejection of overly long prompts.
     fn get_prompt_limit(&self) -> usize {
         if self.scheduler_config.enable_chunked_prefill() {
             self.scheduler_config.max_model_len()
@@ -2114,7 +2139,8 @@ impl<P: Debug> Scheduler<P> {
     ///
     /// # Returns
     ///
-    /// Returns `Ok(())` if the allocation and status update are successful, or a `SchedulerError` if there's an issue with block allocation.
+    /// Returns `Ok(())` if the allocation and status update are successful, or a `SchedulerError`
+    /// if there's an issue with block allocation.
     ///
     /// # Errors
     ///
@@ -2166,8 +2192,8 @@ impl<P: Debug> Scheduler<P> {
     /// # Effects
     ///
     /// - Modifies `self.running` to only contain unfinished sequence groups.
-    /// - Does not directly free block table resources; this should be handled
-    ///   separately by the block manager.
+    /// - Does not directly free block table resources; this should be handled separately by the
+    ///   block manager.
     ///
     /// # Note
     ///
@@ -2993,8 +3019,8 @@ mod tests {
     //     const BLOCK_SIZE: usize = 4;
     //     let scheduler_config = SchedulerConfig::new(1000, 1000, 1000, 0.0, false)
     //         .expect("Failed to get scheduler config");
-    //     let cache_config = CacheConfig::new_from_blocks(BLOCK_SIZE, 1.0, 1, "auto".into(), None, None, 8, 8)
-    //         .expect("Failed to get cache config");
+    //     let cache_config = CacheConfig::new_from_blocks(BLOCK_SIZE, 1.0, 1, "auto".into(), None,
+    // None, 8, 8)         .expect("Failed to get cache config");
     //     let mut scheduler = Scheduler::<FcfsPolicy>::new(cache_config, scheduler_config)
     //         .expect("Failed to get scheduler");
 
@@ -3737,7 +3763,8 @@ mod tests {
                 }
 
                 if !enable_chunking {
-                    // DON'T PANIC: by previous error check, we are guaranteed that `waiting_sequences` is non-empty
+                    // DON'T PANIC: by previous error check, we are guaranteed that
+                    // `waiting_sequences` is non-empty
                     let num_prompt_tokens =
                         waiting_sequences.first().unwrap().read().unwrap().length();
                     if num_prompt_tokens != num_new_tokens {
@@ -3869,7 +3896,8 @@ mod tests {
 
                         if let Some(mut victim_sequence_group) = running_queue.pop_back() {
                             // Preempt the lowest-priority sequence groups first
-                            // victim lies at the end of `runnning_queue`, as it is was last in, last out
+                            // victim lies at the end of `runnning_queue`, as it is was last in,
+                            // last out
                             let preempted_mode = self.preempt(
                                 &mut victim_sequence_group,
                                 &mut blocks_to_swap_out,

@@ -277,14 +277,14 @@ impl Llama {
     ///
     /// # Arguments
     ///
-    /// * `x` - Input tensor of shape `[1, num_total_tokens]`,
-    ///     where `num_total_tokens = num_prefill_tokens + num_decode_tokens`
-    /// * `input_positions` - Input positions tensor of shape `[1, num_total_tokens]`,
-    ///     where `num_total_tokens = num_prefill_tokens + num_decode_tokens`.
-    ///     it contains all input positions, so that rotary embeddings can be applied correctly
+    /// * `x` - Input tensor of shape `[1, num_total_tokens]`, where `num_total_tokens =
+    ///   num_prefill_tokens + num_decode_tokens`
+    /// * `input_positions` - Input positions tensor of shape `[1, num_total_tokens]`, where
+    ///   `num_total_tokens = num_prefill_tokens + num_decode_tokens`. it contains all input
+    ///   positions, so that rotary embeddings can be applied correctly
     /// * `selected_token_indices` - Selected token indices tensor of shape `[1, num_decode_tokens]`
-    /// * `kv_caches` - KV caches with paged block arrangement for each model layer. Each tensor is of
-    ///      shape `[num_blocks, block_size, num_heads, head_dim]`
+    /// * `kv_caches` - KV caches with paged block arrangement for each model layer. Each tensor is
+    ///   of shape `[num_blocks, block_size, num_heads, head_dim]`
     /// * `attention_metadata` - Flash attention metadata, that
     pub fn forward(
         &mut self,

@@ -220,7 +220,6 @@ where
     ///
     /// - input_tokens.i(..num_prefill_tokens) contains prefill tokens.
     /// - input_tokens.i(num_prefill_tokens..) contains decode tokens.
-    ///
     #[instrument(skip_all)]
     pub fn prepare_input_tensors(
         &self,
@@ -341,8 +340,8 @@ where
                 input_tokens.extend(tokens);
                 input_positions.extend((context_length as i64)..(sequence_length as i64));
 
-                // 9. Update intermediate states depending on the type of the sequence
-                //    (prompt or decode)
+                // 9. Update intermediate states depending on the type of the sequence (prompt or
+                //    decode)
                 if is_prompt {
                     debug_assert_eq!(
                         sequence_group_metadata.sequence_data.len(),
@@ -586,7 +585,8 @@ impl CacheEngine {
         let kv_cache_shape = FlashAttention::get_kv_cache_shape(
             num_blocks,
             self.get_block_size(),
-            self.attention.num_kv_heads / world_size, // tensor parallelism across kv heads dimension
+            self.attention.num_kv_heads / world_size, /* tensor parallelism across kv heads
+                                                       * dimension */
             self.attention.head_dim,
         );
         let mut kv_caches = Vec::with_capacity(self.num_hidden_layers);

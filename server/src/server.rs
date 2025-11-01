@@ -208,7 +208,8 @@ async fn healthz() -> impl IntoResponse {
 ///
 /// # Arguments
 ///
-/// * `app_state` - The shared application state containing the request counter and LLM service sender.
+/// * `app_state` - The shared application state containing the request counter and LLM service
+///   sender.
 /// * `headers` - The HTTP headers of the incoming request.
 /// * `request` - The deserialized JSON request body containing the chat completion parameters.
 ///
@@ -216,7 +217,8 @@ async fn healthz() -> impl IntoResponse {
 ///
 /// Returns a `Result` containing either:
 /// - `Ok(Json<ChatCompletionResponse>)`: The successful chat completion response.
-/// - `Err((StatusCode, Json<serde_json::Value>))`: An error response with appropriate status code and message.
+/// - `Err((StatusCode, Json<serde_json::Value>))`: An error response with appropriate status code
+///   and message.
 ///
 /// # Flow
 ///
@@ -414,7 +416,8 @@ async fn handle_generate_request(
     Ok(chat_response)
 }
 
-/// Handles a streaming generate request by sending it to the LLM service and processing the response.
+/// Handles a streaming generate request by sending it to the LLM service and processing the
+/// response.
 ///
 /// This function is responsible for:
 /// 1. Sending the generate stream request to the LLM service

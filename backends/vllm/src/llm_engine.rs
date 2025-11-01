@@ -81,8 +81,8 @@ impl LlmEngine {
     ///
     /// This loop performs the following tasks:
     /// 1. Listens for incoming `SequenceGroup` requests and adds them to the `Scheduler`.
-    /// 2. Waits for new outputs from the `ModelExecutor` service, processes these outputs,
-    ///    updates the states of the associated `SequenceGroup`s, and re-schedules new requests.
+    /// 2. Waits for new outputs from the `ModelExecutor` service, processes these outputs, updates
+    ///    the states of the associated `SequenceGroup`s, and re-schedules new requests.
     /// 3. Sends finished `SequenceGroup` outputs to the Atoma client service.
     ///
     /// The loop uses `tokio::select!` to concurrently handle incoming requests and model outputs.
@@ -146,13 +146,13 @@ impl LlmEngine {
     ///
     /// # Arguments
     ///
-    /// * `outputs` - A `Result` containing a vector of `SequenceGroupOutput` on success,
-    ///               or an `EngineError` on failure.
+    /// * `outputs` - A `Result` containing a vector of `SequenceGroupOutput` on success, or an
+    ///   `EngineError` on failure.
     ///
     /// # Returns
     ///
-    /// * `Result<(), EngineError>` - Returns `Ok(())` if the outputs are handled successfully,
-    ///                                or an `EngineError` if an error occurs.
+    /// * `Result<(), EngineError>` - Returns `Ok(())` if the outputs are handled successfully, or
+    ///   an `EngineError` if an error occurs.
     #[instrument(skip_all)]
     async fn handle_outputs(
         &mut self,
@@ -169,8 +169,8 @@ impl LlmEngine {
                 // 2. Schedules new requests
                 self.step()?;
 
-                // 3. After scheduling new requests to the `ModelExecutor`
-                //    we can send the finished outputs back to the OpenAI API service.
+                // 3. After scheduling new requests to the `ModelExecutor` we can send the finished
+                //    outputs back to the OpenAI API service.
                 // NOTE: This is after scheduling new sequences above,
                 //    we do so to optimize GPU utilization. This is
                 //    supposed to be safe
@@ -182,7 +182,8 @@ impl LlmEngine {
                         {
                             response_sender
                         } else {
-                            // NOTE: In this case, the request was streamed back to the OpenAI API service, already.
+                            // NOTE: In this case, the request was streamed back to the OpenAI API
+                            // service, already.
                             continue;
                         };
                         response_sender
@@ -206,8 +207,8 @@ impl LlmEngine {
     /// This method performs the following tasks:
     /// 1. Schedules new requests using the associated `Scheduler`.
     /// 2. Updates internal state with the new scheduling information.
-    /// 3. If there are scheduled requests, creates and sends a new `ExecuteModelRequest`
-    ///    to the `ModelExecutor`'s thread.
+    /// 3. If there are scheduled requests, creates and sends a new `ExecuteModelRequest` to the
+    ///    `ModelExecutor`'s thread.
     ///
     /// # Returns
     /// - `Ok(())` if the scheduling and request sending are successful.
@@ -224,8 +225,7 @@ impl LlmEngine {
         self.sequence_groups_metadata = sequence_groups_metadata.clone();
         self.scheduler_outputs = scheduler_outputs.clone();
 
-        // 3. If the scheduled data is empty, it means that
-        //     no new requests were received.
+        // 3. If the scheduled data is empty, it means that no new requests were received.
         if scheduler_outputs.is_empty() {
             return Ok(());
         }
@@ -280,7 +280,8 @@ impl LlmEngine {
             let stopping_criteria_params =
                 scheduled_sequence_group.scheduled_group.stopping_params();
 
-            // 2. Iterate over each `Sequence`s of `ScheduledSequenceGroup` and update its current state
+            // 2. Iterate over each `Sequence`s of `ScheduledSequenceGroup` and update its current
+            //    state
             // after the new LLM inference iteration has been performed
             for (sequence_id, sequence) in scheduled_sequence_group.scheduled_group.sequences.iter()
             {
@@ -342,7 +343,8 @@ impl LlmEngine {
 
     /// Updates the state of a `Sequence` after an LLM inference iteration
     ///
-    /// This method handles both the decoding phase (when generating new tokens) and the prefill phase.
+    /// This method handles both the decoding phase (when generating new tokens) and the prefill
+    /// phase.
     ///
     /// # Arguments
     /// * `sequence` - The `Sequence` to update
@@ -383,11 +385,10 @@ impl LlmEngine {
 
             // 2. Update the `Sequence`'s output log-probabilities.
             //
-            // 3. Update the `Sequence`'s `SequenceData` cumulative probabilities,
-            //    if we are in decoding phase.
+            // 3. Update the `Sequence`'s `SequenceData` cumulative probabilities, if we are in
+            //    decoding phase.
             //
-            // 4. Update the `Sequence`'s `SequenceData` output tokens,
-            //    if we are in decoding phase.
+            // 4. Update the `Sequence`'s `SequenceData` output tokens, if we are in decoding phase.
             sequence_guard_lock
                 .add_token_id(generated_token_id, sequence_output.logprob.clone())?;
 
@@ -398,8 +399,8 @@ impl LlmEngine {
                 .decode(&token_ids, true)
                 .map_err(|e| EngineError::TokenizerError(e.to_string()))?;
 
-            // 7. If the request is a streaming request, we need to send the generated token to the client
-            //    as soon as possible.
+            // 7. If the request is a streaming request, we need to send the generated token to the
+            //    client as soon as possible.
             if let Some(response_sender) = self
                 .response_streaming_senders
                 .get(&sequence_group_metadata.request_id)
@@ -422,8 +423,7 @@ impl LlmEngine {
                     .map_err(|e| EngineError::FlumeSendError(e.to_string()))?;
             }
 
-            // 8. Update the `output_text` with the newly generated token,
-            //    if in decoding phase.
+            // 8. Update the `output_text` with the newly generated token, if in decoding phase.
             let generated_token = if sequence_guard_lock.tokens.last().is_some() {
                 let start = sequence_guard_lock.output_text.chars().count();
                 generated_text.chars().skip(start).collect::<String>()
@@ -433,9 +433,8 @@ impl LlmEngine {
             };
             sequence_guard_lock.output_text.push_str(&generated_token);
 
-            // 9. Check if the last generated token is a stop token.
-            //    If so, update the `Sequence`'s `SequenceState` and
-            //    the `stop_reason`, as well.
+            // 9. Check if the last generated token is a stop token. If so, update the `Sequence`'s
+            //    `SequenceState` and the `stop_reason`, as well.
             if stopping_criteria_params
                 .stop_sequences
                 .contains(&generated_token)
@@ -471,9 +470,8 @@ impl LlmEngine {
                 sequence_guard_lock.set_sequence_status(SequenceStatus::FinishedStopped)
             }
 
-            // 11. Check if the `Sequence`'s length exceeds that of
-            //     `SchedulerConfig`'s. If so, update the `Sequence`'s
-            //     `SequenceStatus` to `FinishedLengthCapped`.
+            // 11. Check if the `Sequence`'s length exceeds that of `SchedulerConfig`'s. If so,
+            //     update the `Sequence`'s `SequenceStatus` to `FinishedLengthCapped`.
             let sequence_len = sequence_guard_lock.length();
             if sequence_len > self.scheduler.scheduler_config.max_model_len() {
                 if let Some(response_sender) = self
@@ -487,8 +485,8 @@ impl LlmEngine {
                 sequence_guard_lock.set_sequence_status(SequenceStatus::FinishedLengthCapped)
             }
 
-            // 12. Check if the `Sequence`'s output length exceeds that of
-            //     Request's `max_new_tokens`.
+            // 12. Check if the `Sequence`'s output length exceeds that of Request's
+            //     `max_new_tokens`.
             let sequence_output_len = sequence_guard_lock.get_output_len();
             if sequence_output_len >= stopping_criteria_params.max_new_tokens as usize {
                 if let Some(response_sender) = self
@@ -641,11 +639,13 @@ pub enum StreamResponse {
     Chunk(GenerateStreamingOutput),
     /// Represents an error that occurred during the streaming process.
     ///
-    /// This variant is used when an error is encountered, allowing for proper error handling and reporting.
+    /// This variant is used when an error is encountered, allowing for proper error handling and
+    /// reporting.
     Error(String),
     /// Indicates that the streaming process has finished successfully.
     ///
-    /// This variant is used to signal the end of the stream when all data has been processed without errors.
+    /// This variant is used to signal the end of the stream when all data has been processed
+    /// without errors.
     Finished,
 }
 
