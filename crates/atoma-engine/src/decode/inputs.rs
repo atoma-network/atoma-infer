@@ -201,8 +201,9 @@ pub struct DecodeInputs {
     ring: StagingRing<StagingFence>,
     /// One pinned block per staging entry, indexed by the staging entry.
     blocks: Vec<Pinned<u8>>,
-    /// Owned here so the address every view names stays allocated for as long as the views do.
-    _device: CudaSlice<u8>,
+    /// Owned here so the address every view names stays allocated for as long as the views do,
+    /// and read again for the debug check that the views still name it.
+    device: CudaSlice<u8>,
     device_address: u64,
 }
 
@@ -256,7 +257,7 @@ impl DecodeInputs {
             views,
             ring,
             blocks,
-            _device: device,
+            device,
             device_address,
         })
     }
@@ -264,6 +265,15 @@ impl DecodeInputs {
     #[must_use]
     pub fn shape(&self) -> StagingShape {
         self.packed.shape
+    }
+
+    /// The address of the device block, read from the block itself rather than from the copy
+    /// every view was minted at: what the debug check compares that copy against before each
+    /// step.
+    #[must_use]
+    pub fn device_block_address(&self, stream: &Arc<CudaStream>) -> u64 {
+        let (address, _reads) = self.device.device_ptr(stream);
+        address
     }
 
     /// The views `bucket`'s step reads the device block through.

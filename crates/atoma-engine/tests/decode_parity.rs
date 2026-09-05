@@ -552,7 +552,7 @@ fn the_two_forwards_agree_on_every_decode_and_the_step_records_under_capture() {
     if pool.is_none() {
         println!("pool: the device has no stream-ordered allocator to watch");
     }
-    let forward = CudaForward::new(allocated, decode_step, session);
+    let forward = CudaForward::new(allocated, decode_step, session).expect("the forward builds");
 
     let mut random = Lcg(0x5EED_2026_0903);
     let sequences = seed_sequences(&mut random, vocab);

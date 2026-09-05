@@ -195,5 +195,5 @@ fn open_forward(rank: Rank, ordinal: DeviceOrdinal, plan: &RankPlan) -> Result<C
         #[cfg(not(feature = "nccl"))]
         decode_step,
         session,
-    ))
+    )?)
 }

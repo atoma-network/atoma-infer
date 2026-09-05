@@ -6,6 +6,13 @@
 //! The logits path stays reachable as [`CudaForward::forward_logits`], which reads them back into
 //! a readback the caller owns: what the decode parity harness compares the two forwards through,
 //! and the only way logits reach the host.
+//!
+//! The step over runtime tensors and the sampler bake every address they read, and candle owns
+//! the weights and the cache among them. Building the forward reads every baked address by name,
+//! and a debug build reads them all again before each keyed step and panics naming the first that
+//! moved, before the step's own work is enqueued. Each address is re-read through its owner, and
+//! candle's tensors carry cudarc's event guard, so the reading enqueues a wait and a record for
+//! each weight and cache first. A release build carries no such list and reads nothing.
 
 use std::sync::Arc;
 
@@ -27,6 +34,8 @@ use atoma_core::dispatch::DispatchDecision;
 #[cfg(not(feature = "nccl"))]
 use tracing::debug;
 
+#[cfg(all(not(feature = "nccl"), debug_assertions))]
+use crate::decode::baked::{BakedAddress, BakedAddresses};
 #[cfg(not(feature = "nccl"))]
 use crate::decode::batch::{Checked, DecodeBatch};
 #[cfg(not(feature = "nccl"))]
@@ -78,6 +87,10 @@ pub struct CudaForward {
     allocated: Allocated,
     #[cfg(not(feature = "nccl"))]
     decode_step: DecodeStep,
+    /// Every address the decode step and the sampler bake, read when the forward was built; a
+    /// debug build reads them again before each keyed step, and a release build carries no list.
+    #[cfg(all(not(feature = "nccl"), debug_assertions))]
+    baked: BakedAddresses,
     /// Held for the process lifetime, which is what keeps the allocation from being reopened;
     /// under NCCL nothing is enqueued through it.
     #[cfg_attr(feature = "nccl", allow(dead_code))]
@@ -85,18 +98,40 @@ pub struct CudaForward {
 }
 
 impl CudaForward {
-    #[must_use]
+    /// Holds what the rank allocated and the step over runtime tensors for the Replay phase
+    /// `session`, and, in a debug build, bakes every address the step and the sampler read, by
+    /// name, to check before each keyed step.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CudaForwardError`] when an address the step baked cannot be read: a weight or a
+    /// cache that is not a bf16 tensor on the device.
     pub fn new(
         allocated: Allocated,
         #[cfg(not(feature = "nccl"))] decode_step: DecodeStep,
         session: Replay,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, CudaForwardError> {
+        #[cfg(all(not(feature = "nccl"), debug_assertions))]
+        let baked = BakedAddresses::bake(addresses(&allocated, &decode_step)?);
+        Ok(Self {
             allocated,
             #[cfg(not(feature = "nccl"))]
             decode_step,
+            #[cfg(all(not(feature = "nccl"), debug_assertions))]
+            baked,
             session,
-        }
+        })
+    }
+
+    /// Reads every baked address again and panics naming the first that moved, before the step's
+    /// own work is enqueued: what a debug build runs before each keyed step. Each address is read
+    /// through its owner, so the reading enqueues cudarc's event guard for each weight and cache
+    /// candle holds. A release build trusts the addresses and reads none.
+    #[cfg(all(not(feature = "nccl"), debug_assertions))]
+    fn assert_unmoved(&self) {
+        let current = addresses(&self.allocated, &self.decode_step)
+            .expect("every address the forward baked can be read again before a step");
+        self.baked.assert_unmoved(current);
     }
 
     /// Runs `layout` and reads the logits of the rows it selected into `readback`: one row per
@@ -114,9 +149,13 @@ impl CudaForward {
     ) -> Result<Logits<'a>, CudaForwardError> {
         #[cfg(not(feature = "nccl"))]
         if let Some(batch) = self.keyed_batch(layout)? {
+            #[cfg(debug_assertions)]
+            self.assert_unmoved();
             let Self {
                 allocated: _,
                 decode_step,
+                #[cfg(debug_assertions)]
+                    baked: _,
                 session,
             } = self;
             return Ok(decode_step.run_for_logits(session, layout, batch, readback)?);
@@ -161,9 +200,13 @@ impl CudaForward {
         layout: &BatchLayout,
         batch: DecodeBatch,
     ) -> Result<&[u32], CudaForwardError> {
+        #[cfg(debug_assertions)]
+        self.assert_unmoved();
         let Self {
             allocated,
             decode_step,
+            #[cfg(debug_assertions)]
+                baked: _,
             session,
         } = self;
         Ok(decode_step.run(session, layout, batch, allocated.sampler.as_mut())?)
@@ -256,6 +299,21 @@ impl CudaForward {
             metadata,
         })
     }
+}
+
+/// Every address the decode step and the sampler bake, read from the memory that holds each, in
+/// one fixed order: the step's, then the sampler's when this rank holds one.
+#[cfg(all(not(feature = "nccl"), debug_assertions))]
+fn addresses(
+    allocated: &Allocated,
+    decode_step: &DecodeStep,
+) -> Result<Vec<BakedAddress>, CudaForwardError> {
+    let stream = allocated.device.stream();
+    let mut addresses = decode_step.addresses(&allocated.weights, &allocated.kv_cache, stream)?;
+    if let Some(sampler) = &allocated.sampler {
+        addresses.extend(sampler.addresses(stream));
+    }
+    Ok(addresses)
 }
 
 /// One step's inputs on the device.

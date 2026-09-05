@@ -19,6 +19,11 @@
 //! rows: the bucket's logits and the sampler's row tokens are viewed once, at Allocation, over
 //! the step's fixed buffers, and a descriptor takes its address, its rows and its width off the
 //! view it is handed, so nothing sized by the batch is spelled out at the call.
+//!
+//! Every address the step bakes can be read again from the memory that holds it, by name, in one
+//! fixed order ([`DecodeStep::addresses`]): candle's weights and cache without minting a view, the
+//! step's own memory from the allocations it owns. The forward bakes that reading when it is
+//! built and a debug build compares a fresh one against it before each keyed step.
 
 use std::sync::Arc;
 
@@ -28,7 +33,7 @@ use atoma_models::attention::{block_table_columns, AttentionError, AttentionPlan
 use atoma_models::dims::{DimsError, Llama3RopeScaling, LlamaDims, RopeParams};
 use atoma_models::gemm::{GemmError, StepBlas, WORKSPACE_BYTES};
 use atoma_models::kernels::RotaryTensors;
-use atoma_models::layer::LLAMA_LAYER;
+use atoma_models::layer::{LayerWeight, LLAMA_LAYER};
 use atoma_models::llama::slots::{
     Bucket, BucketSlots, LayerWeights, LlamaCache, LlamaWeights, SlotError, SlotSources,
     StepStatics,
@@ -43,12 +48,13 @@ use candle_core::cuda::CudaStorageSlice;
 use candle_core::{DType, Storage, Tensor as CandleTensor};
 use cudarc::driver::sys::CUdevice_attribute;
 use cudarc::driver::{CudaEvent, CudaSlice, CudaStream, DevicePtr};
-use models::llama::{Config, Llama, Llama3RopeType};
+use models::llama::{Config, LayerTensors, Llama, Llama3RopeType};
 use thiserror::Error;
 use tracing::info;
 
 use crate::batch::BatchLayout;
 use crate::config::Dtype as ConfiguredDtype;
+use crate::decode::baked::{BakedAddress, BakedName};
 use crate::decode::batch::{Checked, DecodeBatch, DecodeBatchError, DecodeBuckets};
 use crate::decode::inputs::{DecodeInputs, InputsError, Upload, WaitEvent};
 use crate::decode::ring::{StagingDepth, StagingEntry};
@@ -128,14 +134,29 @@ pub struct DecodeStepPlan {
 }
 
 /// The step's outputs and workspace on the device, owned here for as long as the views over
-/// them are read.
+/// them are read, and read again for the debug check that the views still name them.
 struct Statics {
-    _logits: CudaSlice<u8>,
-    _softmax_lse: CudaSlice<u8>,
-    _lse_accum: CudaSlice<u8>,
-    _o_accum: CudaSlice<u8>,
-    _cos: CudaSlice<f32>,
-    _sin: CudaSlice<f32>,
+    logits: CudaSlice<u8>,
+    softmax_lse: CudaSlice<u8>,
+    lse_accum: CudaSlice<u8>,
+    o_accum: CudaSlice<u8>,
+    cos: CudaSlice<f32>,
+    sin: CudaSlice<f32>,
+}
+
+impl Statics {
+    /// Each static's address, read from the memory that holds it, by name in one fixed order.
+    fn addresses(&self, stream: &Arc<CudaStream>) -> [BakedAddress; 6] {
+        [
+            (BakedName::Logits, address(&self.logits, stream)),
+            (BakedName::LogSumExp, address(&self.softmax_lse, stream)),
+            (BakedName::SplitLogSumExp, address(&self.lse_accum, stream)),
+            (BakedName::SplitOutput, address(&self.o_accum, stream)),
+            (BakedName::CosineTable, address(&self.cos, stream)),
+            (BakedName::SineTable, address(&self.sin, stream)),
+        ]
+        .map(|(name, address)| BakedAddress { name, address })
+    }
 }
 
 /// The decode step over runtime-owned tensors, and everything it addresses.
@@ -146,8 +167,10 @@ pub struct DecodeStep {
     blas: StepBlas,
     /// Recorded on candle's stream after every candle forward; the step waits on it.
     candle_done: CudaEvent,
-    _arena: CudaSlice<u8>,
-    _statics: Statics,
+    /// The arena's memory, owned here for as long as the slot tables over it are read, and read
+    /// again for the debug check that they still name it.
+    arena: CudaSlice<u8>,
+    statics: Statics,
 }
 
 impl DecodeStep {
@@ -240,9 +263,38 @@ impl DecodeStep {
             decode,
             blas,
             candle_done,
-            _arena: arena_memory,
-            _statics: statics,
+            arena: arena_memory,
+            statics,
         })
+    }
+
+    /// Every address the step bakes, read from the memory that holds it, in one fixed order:
+    /// candle's embedding table, each layer's nine weights, the final norm gain and the head
+    /// projection, each layer's cache, then the input block, the arena and the statics. The
+    /// forward bakes this reading when it is built and a debug build reads it again before each
+    /// keyed step; candle's addresses are the ones that can move, and are read without minting
+    /// a view.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DecodeStepError`] when a weight or a cache is not a bf16 tensor on the device.
+    pub fn addresses(
+        &self,
+        weights: &Weights,
+        kv_cache: &KvCache,
+        stream: &Arc<CudaStream>,
+    ) -> Result<Vec<BakedAddress>, DecodeStepError> {
+        let mut addresses = candle_addresses(weights, kv_cache, stream)?;
+        addresses.push(BakedAddress {
+            name: BakedName::InputBlock,
+            address: self.inputs.device_block_address(stream),
+        });
+        addresses.push(BakedAddress {
+            name: BakedName::Arena,
+            address: address(&self.arena, stream),
+        });
+        addresses.extend(self.statics.addresses(stream));
+        Ok(addresses)
     }
 
     /// Checks a batch keyed by `key` against the shape the step bakes.
@@ -520,6 +572,32 @@ fn address<T>(slice: &CudaSlice<T>, stream: &Arc<CudaStream>) -> u64 {
     address
 }
 
+/// The device address of the bf16 tensor candle holds as `tensor`: where its storage is, plus
+/// where the tensor starts in it. What [`snapshot`] mints a view at, and what the debug check
+/// reads again without minting one.
+///
+/// Candle opens its own context with event tracking on, so unlike the runtime's own buffers its
+/// slices carry read and write events: this read waits `stream` on the slice's write event and
+/// records its read event when the guard drops.
+fn candle_address(
+    what: &'static str,
+    tensor: &CandleTensor,
+    stream: &Arc<CudaStream>,
+) -> Result<u64, DecodeStepError> {
+    let (storage, layout) = tensor.storage_and_layout();
+    let Storage::Cuda(storage) = &*storage else {
+        return Err(DecodeStepError::NotOnDevice { what });
+    };
+    let CudaStorageSlice::BF16(slice) = &storage.slice else {
+        return Err(DecodeStepError::WeightDtype {
+            what,
+            dtype: tensor.dtype(),
+        });
+    };
+    let start = layout.start_offset() * Dtype::Bf16.size_in_bytes();
+    Ok(address(slice, stream) + start as u64)
+}
+
 /// A view of `dims` over the bf16 device tensor candle holds as `tensor`.
 fn snapshot(
     allocation: &Allocation,
@@ -528,21 +606,12 @@ fn snapshot(
     dims: &[usize],
     stream: &Arc<CudaStream>,
 ) -> Result<Tensor, DecodeStepError> {
-    let (storage, layout) = tensor.storage_and_layout();
-    let Storage::Cuda(storage) = &*storage else {
-        return Err(DecodeStepError::NotOnDevice { what });
-    };
-    if !layout.is_contiguous() {
+    let address = candle_address(what, tensor, stream)?;
+    if !tensor.layout().is_contiguous() {
         return Err(DecodeStepError::NotContiguous { what });
     }
-    let CudaStorageSlice::BF16(slice) = &storage.slice else {
-        return Err(DecodeStepError::WeightDtype {
-            what,
-            dtype: tensor.dtype(),
-        });
-    };
     let expected: usize = dims.iter().product();
-    let held = layout.shape().elem_count();
+    let held = tensor.elem_count();
     if held != expected {
         return Err(DecodeStepError::ElementCount {
             what,
@@ -550,13 +619,94 @@ fn snapshot(
             expected,
         });
     }
-    let start = layout.start_offset() * Dtype::Bf16.size_in_bytes();
     let view = Layout::contiguous(dims, Dtype::Bf16)?;
-    Ok(Tensor::new(
-        allocation,
-        address(slice, stream) + start as u64,
-        view,
-    )?)
+    Ok(Tensor::new(allocation, address, view)?)
+}
+
+/// A layer's nine weights, in the order the step bakes them.
+const LAYER_WEIGHTS: [LayerWeight; 9] = [
+    LayerWeight::InputNorm,
+    LayerWeight::Q,
+    LayerWeight::K,
+    LayerWeight::V,
+    LayerWeight::O,
+    LayerWeight::PostAttentionNorm,
+    LayerWeight::Gate,
+    LayerWeight::Up,
+    LayerWeight::Down,
+];
+
+/// What a refusal calls `weight`.
+fn weight_what(weight: LayerWeight) -> &'static str {
+    match weight {
+        LayerWeight::InputNorm => "an input norm gain",
+        LayerWeight::Q => "a query projection",
+        LayerWeight::K => "a key projection",
+        LayerWeight::V => "a value projection",
+        LayerWeight::O => "an output projection",
+        LayerWeight::PostAttentionNorm => "a post-attention norm gain",
+        LayerWeight::Gate => "a gate projection",
+        LayerWeight::Up => "an up projection",
+        LayerWeight::Down => "a down projection",
+    }
+}
+
+/// `weight` of `layer`, as candle holds it.
+fn layer_tensor<'a>(layer: &LayerTensors<'a>, weight: LayerWeight) -> &'a CandleTensor {
+    match weight {
+        LayerWeight::InputNorm => layer.input_norm,
+        LayerWeight::Q => layer.q_proj,
+        LayerWeight::K => layer.k_proj,
+        LayerWeight::V => layer.v_proj,
+        LayerWeight::O => layer.o_proj,
+        LayerWeight::PostAttentionNorm => layer.post_attention_norm,
+        LayerWeight::Gate => layer.gate_proj,
+        LayerWeight::Up => layer.up_proj,
+        LayerWeight::Down => layer.down_proj,
+    }
+}
+
+/// Every address candle holds a weight or a cache at, by name, in the order the step bakes
+/// them: the embedding table, each layer's nine weights, the final norm gain, the head
+/// projection, then each layer's cache. Read from candle's tensors without minting a view.
+fn candle_addresses(
+    weights: &Weights,
+    kv_cache: &KvCache,
+    stream: &Arc<CudaStream>,
+) -> Result<Vec<BakedAddress>, DecodeStepError> {
+    let read = |name: BakedName, what: &'static str, tensor: &CandleTensor| {
+        candle_address(what, tensor, stream).map(|address| BakedAddress { name, address })
+    };
+    let llama = weights.llama();
+    let mut addresses = vec![read(
+        BakedName::EmbeddingTable,
+        "the embedding table",
+        llama.embeddings(),
+    )?];
+    for (layer, tensors) in llama.layer_weights().iter().enumerate() {
+        for weight in LAYER_WEIGHTS {
+            let name = BakedName::LayerWeight { layer, weight };
+            addresses.push(read(
+                name,
+                weight_what(weight),
+                layer_tensor(tensors, weight),
+            )?);
+        }
+    }
+    addresses.push(read(
+        BakedName::FinalNormGain,
+        "the final norm gain",
+        llama.final_norm(),
+    )?);
+    addresses.push(read(
+        BakedName::HeadProjection,
+        "the head projection",
+        llama.lm_head(),
+    )?);
+    for (layer, cache) in kv_cache.layers().iter().enumerate() {
+        addresses.push(read(BakedName::Cache { layer }, "a layer's cache", cache)?);
+    }
+    Ok(addresses)
 }
 
 /// Every weight of `llama`, viewed at the address candle loaded it to.
@@ -570,18 +720,20 @@ fn snapshot_weights(
     };
     let layers = llama
         .layer_weights()
-        .into_iter()
+        .iter()
         .map(|layer| {
+            let weight_view =
+                |weight: LayerWeight| view(weight_what(weight), layer_tensor(layer, weight));
             Ok(LayerWeights {
-                input_norm: view("an input norm gain", layer.input_norm)?,
-                q: view("a query projection", layer.q_proj)?,
-                k: view("a key projection", layer.k_proj)?,
-                v: view("a value projection", layer.v_proj)?,
-                o: view("an output projection", layer.o_proj)?,
-                post_attention_norm: view("a post-attention norm gain", layer.post_attention_norm)?,
-                gate: view("a gate projection", layer.gate_proj)?,
-                up: view("an up projection", layer.up_proj)?,
-                down: view("a down projection", layer.down_proj)?,
+                input_norm: weight_view(LayerWeight::InputNorm)?,
+                q: weight_view(LayerWeight::Q)?,
+                k: weight_view(LayerWeight::K)?,
+                v: weight_view(LayerWeight::V)?,
+                o: weight_view(LayerWeight::O)?,
+                post_attention_norm: weight_view(LayerWeight::PostAttentionNorm)?,
+                gate: weight_view(LayerWeight::Gate)?,
+                up: weight_view(LayerWeight::Up)?,
+                down: weight_view(LayerWeight::Down)?,
             })
         })
         .collect::<Result<Vec<_>, DecodeStepError>>()?;
@@ -651,12 +803,12 @@ fn allocate_statics(
 
     Ok((
         Statics {
-            _logits: logits_buffer,
-            _softmax_lse: softmax_lse_buffer,
-            _lse_accum: lse_accum_buffer,
-            _o_accum: o_accum_buffer,
-            _cos: cos_buffer,
-            _sin: sin_buffer,
+            logits: logits_buffer,
+            softmax_lse: softmax_lse_buffer,
+            lse_accum: lse_accum_buffer,
+            o_accum: o_accum_buffer,
+            cos: cos_buffer,
+            sin: sin_buffer,
         },
         StepStatics {
             logits,

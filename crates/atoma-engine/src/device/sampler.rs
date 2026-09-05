@@ -22,6 +22,11 @@
 //! pair and [`DeviceSampler::run_on`] uploads them there with the records; the host wait that
 //! ends every step, on either stream, is what orders the two streams' use of the sampler's
 //! device state.
+//!
+//! Every descriptor names the sampler's four device arrays by the addresses read once at
+//! Allocation. [`DeviceSampler::addresses`] reads them again from the arrays themselves, by name
+//! in one fixed order: what the forward bakes when it is built and a debug build compares a
+//! fresh reading against before each keyed step.
 
 use std::ffi::c_void;
 use std::fmt;
@@ -42,6 +47,7 @@ use thiserror::Error;
 use tracing::{info, warn};
 
 use crate::batch::BatchLayout;
+use crate::decode::baked::{BakedAddress, BakedName};
 use crate::decode::staging::{stage_sampler, SamplerArrays, StagingError};
 use crate::pinned::Pinned;
 use crate::readback::{Readback, ReadbackCopy, ReadbackError};
@@ -121,9 +127,9 @@ impl fmt::Display for ArraysIn {
 }
 
 /// A device array: the memory, owned here so the address stays allocated for as long as it is
-/// named, and the address itself.
+/// named and read again for the debug check, and the address itself, read once at Allocation.
 struct DeviceArray {
-    _memory: CudaSlice<u8>,
+    memory: CudaSlice<u8>,
     address: u64,
 }
 
@@ -134,10 +140,7 @@ impl DeviceArray {
             .alloc_zeros::<u8>(bytes)
             .map_err(RuntimeError::from)?;
         let address = address(&memory, stream);
-        Ok(Self {
-            _memory: memory,
-            address,
-        })
+        Ok(Self { memory, address })
     }
 }
 
@@ -145,7 +148,7 @@ impl DeviceArray {
 /// array, owned so the address the view names stays allocated for as long as the view is read.
 struct DeviceTensor {
     view: Tensor,
-    _array: DeviceArray,
+    array: DeviceArray,
 }
 
 impl DeviceTensor {
@@ -157,10 +160,7 @@ impl DeviceTensor {
     ) -> Result<Self, SamplerError> {
         let array = DeviceArray::zeroed(stream, layout.extent_bytes())?;
         let view = Tensor::new(allocation, array.address, layout)?;
-        Ok(Self {
-            view,
-            _array: array,
-        })
+        Ok(Self { view, array })
     }
 }
 
@@ -271,6 +271,24 @@ impl DeviceSampler {
         };
         info!(slots, max_rows, vocab, "device sampler allocated");
         Ok(sampler)
+    }
+
+    /// Every address the sampler's descriptors bake, read from the array that holds it, by name
+    /// in one fixed order: the sampling records, the sampled tokens, the sampler's own row slots
+    /// and the row tokens. The forward bakes this reading when it is built and a debug build
+    /// reads it again before each keyed step.
+    #[must_use]
+    pub fn addresses(&self, stream: &Arc<CudaStream>) -> [BakedAddress; 4] {
+        [
+            (BakedName::SamplingRecords, &self.records.device),
+            (BakedName::SampledTokens, &self.sampled),
+            (BakedName::RowSlots, &self.row_slots.device),
+            (BakedName::RowTokens, &self.row_tokens.array),
+        ]
+        .map(|(name, array)| BakedAddress {
+            name,
+            address: address(&array.memory, stream),
+        })
     }
 
     /// Decides `layout`'s step and stages its inputs: the records of the slots that changed
@@ -502,7 +520,10 @@ impl Drop for DeviceSampler {
         // The last upload may still be reading the staging; the event waits for it before the
         // arrays go. A failure here cannot be acted on beyond saying so.
         if let Err(error) = self.uploaded.synchronize() {
-            warn!(%error, "the sampler's last upload could not be waited on before its staging goes");
+            warn!(
+                %error,
+                "the sampler's last upload could not be waited on before its staging goes"
+            );
         }
     }
 }
