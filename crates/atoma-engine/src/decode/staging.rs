@@ -7,7 +7,8 @@
 //! 256-byte boundary, so the bucket's staging is one block, [`StagingLayout::bytes`] long and
 //! proportional to the batch rather than to the largest bucket, that one copy can carry.
 //! [`StagingLayout::carve`] carves the seven arrays out of such a block; [`stage`] writes the
-//! model's five from the batch layout, and the sampler writes its own two.
+//! model's five from the batch layout, and [`stage_sampler`] the sampler's two from what the
+//! sampler decided for the step.
 //!
 //! The block table is staged at the full width a sequence can reach, never at the layout's
 //! batch-local width: the width is baked into the attention launch, so it cannot follow the
@@ -20,10 +21,12 @@ use std::fmt;
 use std::mem;
 use std::slice;
 
+use atoma_core::types::RequestSlot;
 use thiserror::Error;
 
 use crate::batch::BatchLayout;
 use crate::decode::batch::DecodeBatch;
+use crate::sampling::inputs::SamplerInputs;
 
 /// One of the seven arrays a bucket stages, as the staging names it: the five inputs the model
 /// step reads, then the two the sampler reads.
@@ -63,6 +66,12 @@ pub enum StagingError {
         len: usize,
         tokens: usize,
         needed: usize,
+    },
+    #[error("the {input} array holds {len} values; {rows} rows stage this step")]
+    SamplerArrayTooShort {
+        input: StagedInput,
+        len: usize,
+        rows: usize,
     },
     #[error("{value} in the {input} does not fit the kernel's 32-bit input")]
     Overflow { input: StagedInput, value: i64 },
@@ -378,6 +387,64 @@ pub fn stage(
     Ok(())
 }
 
+/// Writes `inputs`' two arrays into the leading rows of `arrays`, as the kernels index them: the
+/// slot of every selected row, and for every covered token row the slot it takes its token from,
+/// or a negative value where the host's token stands.
+///
+/// # Errors
+///
+/// Returns [`StagingError`] when an array is shorter than the rows it stages, or a slot does not
+/// fit the kernel's index.
+pub fn stage_sampler(
+    inputs: &SamplerInputs,
+    arrays: SamplerArrays<'_>,
+) -> Result<(), StagingError> {
+    let SamplerArrays {
+        row_slots,
+        gather_slots,
+    } = arrays;
+    holds(
+        StagedInput::RowSlots,
+        row_slots.len(),
+        inputs.row_slots.len(),
+    )?;
+    holds(
+        StagedInput::GatherSlots,
+        gather_slots.len(),
+        inputs.gather.len(),
+    )?;
+    for (staged, slot) in row_slots.iter_mut().zip(&inputs.row_slots) {
+        *staged = slot_index(StagedInput::RowSlots, *slot)?;
+    }
+    for (staged, slot) in gather_slots.iter_mut().zip(&inputs.gather) {
+        *staged = match slot {
+            Some(slot) => slot_index(StagedInput::GatherSlots, *slot)?,
+            None => KEEP_HOST_TOKEN,
+        };
+    }
+    Ok(())
+}
+
+/// The gather slot of a row whose token the host's upload serves: negative, as the kernel reads
+/// it.
+const KEEP_HOST_TOKEN: i32 = -1;
+
+/// `slot` as the kernels index a per-slot array.
+fn slot_index(input: StagedInput, slot: RequestSlot) -> Result<i32, StagingError> {
+    i32::try_from(slot.get()).map_err(|_| StagingError::Overflow {
+        input,
+        value: i64::from(slot.get()),
+    })
+}
+
+/// Holds a sampler array of `len` values to the `rows` the step stages in it.
+fn holds(input: StagedInput, len: usize, rows: usize) -> Result<(), StagingError> {
+    if len < rows {
+        return Err(StagingError::SamplerArrayTooShort { input, len, rows });
+    }
+    Ok(())
+}
+
 /// Holds an array of `len` values to the `needed` a bucket of `tokens` stages.
 fn fits(input: StagedInput, len: usize, tokens: usize, needed: usize) -> Result<(), StagingError> {
     if len < needed {
@@ -397,6 +464,7 @@ mod tests {
 
     use atoma_core::dispatch::DispatchDecision;
     use atoma_core::step::CommandEntry;
+    use atoma_core::types::RequestSlot;
 
     use super::*;
     use crate::decode::batch::{Checked, DecodeBuckets};
@@ -710,6 +778,136 @@ mod tests {
             StagingError::Overflow {
                 input: StagedInput::BlockTable,
                 value: i64::from(u32::MAX)
+            }
+        );
+    }
+
+    fn sampler_inputs(row_slots: &[u32], gather: &[Option<u32>]) -> SamplerInputs {
+        SamplerInputs {
+            records: Vec::new(),
+            row_slots: row_slots.iter().copied().map(RequestSlot::new).collect(),
+            gather: gather
+                .iter()
+                .map(|slot| slot.map(RequestSlot::new))
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn the_samplers_two_arrays_are_written_as_the_kernels_index_them_and_rows_past_the_step_kept() {
+        let staging = StagingLayout::packed(shape(), MAX_TOKENS).unwrap();
+        let mut block = Block::sized(staging.bytes());
+        let BucketArrays { sampler, .. } = staging.carve(block.bytes()).unwrap();
+        sampler.row_slots.fill(7);
+        sampler.gather_slots.fill(7);
+
+        let BucketArrays { sampler, .. } = staging.carve(block.bytes()).unwrap();
+        stage_sampler(&sampler_inputs(&[3, 5], &[Some(3), None, Some(5)]), sampler).unwrap();
+
+        let BucketArrays { sampler, .. } = staging.carve(block.bytes()).unwrap();
+        assert_eq!(sampler.row_slots, [3, 5, 7, 7], "one slot per selected row");
+        assert_eq!(
+            sampler.gather_slots,
+            [3, -1, 5, 7],
+            "one slot per covered token row, negative where the host's token stands"
+        );
+    }
+
+    #[test]
+    fn an_eager_step_that_gathers_nothing_needs_no_gather_array() {
+        let mut row_slots = [7; 2];
+        let arrays = SamplerArrays {
+            row_slots: &mut row_slots,
+            gather_slots: &mut [],
+        };
+
+        stage_sampler(&sampler_inputs(&[4, 2], &[]), arrays).unwrap();
+
+        assert_eq!(row_slots, [4, 2]);
+    }
+
+    #[test]
+    fn a_sampler_array_shorter_than_the_step_is_refused_by_name() {
+        let inputs = sampler_inputs(&[1, 2, 3], &[Some(1), Some(2), Some(3)]);
+        let mut short = [0; 2];
+        let mut long = [0; 4];
+
+        assert_eq!(
+            stage_sampler(
+                &inputs,
+                SamplerArrays {
+                    row_slots: &mut short,
+                    gather_slots: &mut long,
+                }
+            )
+            .unwrap_err(),
+            StagingError::SamplerArrayTooShort {
+                input: StagedInput::RowSlots,
+                len: 2,
+                rows: 3
+            }
+        );
+        assert_eq!(
+            stage_sampler(
+                &inputs,
+                SamplerArrays {
+                    row_slots: &mut long,
+                    gather_slots: &mut short,
+                }
+            )
+            .unwrap_err(),
+            StagingError::SamplerArrayTooShort {
+                input: StagedInput::GatherSlots,
+                len: 2,
+                rows: 3
+            }
+        );
+        let mut exact = [0; 3];
+        assert!(
+            stage_sampler(
+                &inputs,
+                SamplerArrays {
+                    row_slots: &mut exact,
+                    gather_slots: &mut [0; 3],
+                }
+            )
+            .is_ok(),
+            "arrays of exactly the step's rows stage"
+        );
+    }
+
+    #[test]
+    fn a_slot_past_the_kernels_index_is_refused_by_name() {
+        let mut row_slots = [0; 2];
+        let mut gather_slots = [0; 2];
+        let overflow = i64::from(u32::MAX);
+
+        assert_eq!(
+            stage_sampler(
+                &sampler_inputs(&[1, u32::MAX], &[]),
+                SamplerArrays {
+                    row_slots: &mut row_slots,
+                    gather_slots: &mut gather_slots,
+                }
+            )
+            .unwrap_err(),
+            StagingError::Overflow {
+                input: StagedInput::RowSlots,
+                value: overflow
+            }
+        );
+        assert_eq!(
+            stage_sampler(
+                &sampler_inputs(&[1], &[None, Some(u32::MAX)]),
+                SamplerArrays {
+                    row_slots: &mut row_slots,
+                    gather_slots: &mut gather_slots,
+                }
+            )
+            .unwrap_err(),
+            StagingError::Overflow {
+                input: StagedInput::GatherSlots,
+                value: overflow
             }
         );
     }

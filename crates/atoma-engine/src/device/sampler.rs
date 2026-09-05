@@ -2,34 +2,42 @@
 //! rows' inputs and outputs, all at fixed addresses from the Allocation session phase on, and the
 //! descriptors that run a step's sampling through the seam.
 //!
-//! What crosses to the device each step is small and goes up, not down: the records of the slots
-//! that changed hands, the slot each selected row samples under, and, for a uniform decode, which
-//! token rows take their token from the device. What comes back is one asynchronous copy of the
-//! rows' tokens, fenced by the readback's event and waited on once the step is enqueued: the host
-//! learns what was sampled for detokenisation and finish detection, and the device never waits
-//! for it. The sampled tokens stay in the per-slot array the next step's gather reads.
+//! What crosses to the device each step is small and goes up, not down. The sampling records of
+//! the slots that changed hands are staged in the sampler's own pinned memory and uploaded as
+//! sparse copies, one per record, in front of everything else the step copies. The slot each
+//! selected row samples under, and which token rows take their token from the device, are the
+//! sampler's two per-step arrays, and [`DeviceSampler::stage`] writes them where the caller says:
+//! the decode step stages them in a [`SamplerStaging`] of its own and uploads that separately.
+//! What comes back is one asynchronous copy of the rows' tokens, fenced by the readback's event
+//! and waited on once the step is enqueued: the host learns what was sampled for detokenisation
+//! and finish detection, and the device never waits for it. The sampled tokens stay in the
+//! per-slot array the next step's gather reads.
 //!
-//! The candle forward samples through the same state on candle's stream, enqueuing the same
-//! descriptors there; the host wait that ends every step, on either stream, is what orders the
-//! two streams' use of the sampler's device state.
+//! The candle forward samples through the same state on candle's stream. An eager step gathers
+//! nothing, so [`DeviceSampler::stage_eager`] writes its row slots into the sampler's own pinned
+//! pair and [`DeviceSampler::run_on`] uploads them there with the records; the host wait that
+//! ends every step, on either stream, is what orders the two streams' use of the sampler's
+//! device state.
 
 use std::ffi::c_void;
+use std::fmt;
 use std::mem::size_of;
 use std::ptr;
 use std::sync::Arc;
 
-use atoma_core::types::{RequestCount, RequestSlot};
+use atoma_core::types::RequestCount;
 use atoma_kernels::error::KernelError;
 use atoma_kernels::sampler::{gather, sample, GatherCall, SampleCall};
 use atoma_runtime::error::RuntimeError;
 use atoma_runtime::session::{Allocation, Descriptor};
 use cudarc::driver::result::{event, memcpy_htod_async};
 use cudarc::driver::sys::{self, CUevent_flags};
-use cudarc::driver::{CudaEvent, CudaSlice, CudaStream, DevicePtr};
+use cudarc::driver::{CudaContext, CudaEvent, CudaSlice, CudaStream, DevicePtr};
 use thiserror::Error;
 use tracing::{info, warn};
 
 use crate::batch::BatchLayout;
+use crate::decode::staging::{stage_sampler, SamplerArrays, StagedInput, StagingError};
 use crate::pinned::Pinned;
 use crate::readback::{Readback, ReadbackCopy, ReadbackError};
 use crate::sampling::inputs::{SamplerInputs, SamplerInputsError};
@@ -51,14 +59,38 @@ pub enum SamplerError {
     /// A descriptor was asked for with no step staged, or a wait with none enqueued.
     #[error("no step is staged; stage the layout before running its sampling")]
     NoStepStaged,
+    /// An upload from the other staging: an eager step's arrays are in the sampler's own memory,
+    /// a decode step's in the caller's.
+    #[error("the staged step's arrays are in {0}; upload them from there")]
+    ArraysElsewhere(ArraysIn),
     #[error(transparent)]
     Inputs(#[from] SamplerInputsError),
+    #[error(transparent)]
+    Staging(#[from] StagingError),
     #[error(transparent)]
     Readback(#[from] ReadbackError),
     #[error(transparent)]
     Launch(#[from] KernelError),
     #[error(transparent)]
     Driver(#[from] RuntimeError),
+}
+
+/// Whose memory a staged step's two per-step arrays are in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArraysIn {
+    /// The sampler's own pinned pair: an eager step's, uploaded by [`DeviceSampler::run_on`].
+    Sampler,
+    /// The caller's [`SamplerStaging`]: a decode step's, uploaded by [`SamplerStaging::upload`].
+    Caller,
+}
+
+impl fmt::Display for ArraysIn {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            ArraysIn::Sampler => "the sampler's own memory",
+            ArraysIn::Caller => "the caller's staging",
+        })
+    }
 }
 
 /// A device array: the memory, owned here so the address stays allocated for as long as it is
@@ -108,6 +140,19 @@ struct StagedStep {
     rows: usize,
     /// Token rows the gather covers: the batch's tokens for a uniform decode, none otherwise.
     gather_rows: usize,
+    /// Whose memory the row slots and gather slots were written to.
+    arrays: ArraysIn,
+}
+
+impl StagedStep {
+    /// The step `inputs` decided, its two arrays written to `arrays`.
+    fn of(inputs: &SamplerInputs, arrays: ArraysIn) -> Self {
+        Self {
+            rows: inputs.row_slots.len(),
+            gather_rows: inputs.gather.len(),
+            arrays,
+        }
+    }
 }
 
 /// The sampler's device state and staging for one rank.
@@ -121,14 +166,17 @@ pub struct DeviceSampler {
     pending_records: Vec<usize>,
     /// u32 per slot: the token last sampled there.
     sampled: DeviceArray,
-    /// i32 per row: the slot each selected row samples under, as the kernel indexes it.
+    /// i32 per row: the slot each selected row samples under, as the kernel indexes it. The
+    /// device array is what every step's sample reads; the pinned staging is an eager step's own.
     row_slots: StagedArray<i32>,
     /// i32 per token row: the slot the row takes its token from, or negative to keep the host's.
-    gather_slots: StagedArray<i32>,
+    /// A decode step's upload writes it; an eager step gathers nothing and stages none.
+    gather_slots: DeviceArray,
     /// u32 per row: the token sampled for each selected row this step.
     out: DeviceArray,
     readback: Readback<u32>,
-    /// Recorded behind every upload; waited on before the staging is freed.
+    /// Recorded behind every upload from the sampler's own staging; waited on before the staging
+    /// is freed.
     uploaded: CudaEvent,
     owners: SlotOwners,
     staged: Option<StagedStep>,
@@ -165,7 +213,7 @@ impl DeviceSampler {
             pending_records: Vec::new(),
             sampled: DeviceArray::zeroed(stream, slots * size_of::<u32>())?,
             row_slots: StagedArray::new(stream, max_rows)?,
-            gather_slots: StagedArray::new(stream, max_rows)?,
+            gather_slots: DeviceArray::zeroed(stream, max_rows * size_of::<i32>())?,
             out: DeviceArray::zeroed(stream, max_rows * size_of::<u32>())?,
             readback: Readback::new(allocation, context, max_rows, 1)?,
             uploaded,
@@ -176,23 +224,60 @@ impl DeviceSampler {
         Ok(sampler)
     }
 
-    /// Decides `layout`'s step and writes its inputs into the staging: the records of the slots
-    /// that changed hands, the slot of every selected row, and which token rows gather.
+    /// Decides `layout`'s step and stages its inputs: the records of the slots that changed
+    /// hands into the sampler's own staging, and the slot of every selected row and which token
+    /// rows gather into `arrays`, as the kernels index them.
     ///
     /// `gather_rows` is how many leading token rows the gather covers, which only a caller
-    /// holding a batch of one token per entry may state; every other caller states none and the
-    /// host's uploaded token ids stand.
+    /// holding a batch of one token per entry may state.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SamplerError`] when the layout has more rows than the sampler or `arrays` hold,
+    /// or its inputs cannot be decided.
+    pub fn stage(
+        &mut self,
+        layout: &BatchLayout,
+        gather_rows: usize,
+        arrays: SamplerArrays<'_>,
+    ) -> Result<(), SamplerError> {
+        self.staged = None;
+        let inputs = self.stage_records(layout, Some(gather_rows))?;
+        stage_sampler(&inputs, arrays)?;
+        self.staged = Some(StagedStep::of(&inputs, ArraysIn::Caller));
+        Ok(())
+    }
+
+    /// Decides `layout`'s eager step, which gathers nothing, and stages its inputs in the
+    /// sampler's own memory: the records of the slots that changed hands, and the slot of every
+    /// selected row.
     ///
     /// # Errors
     ///
     /// Returns [`SamplerError`] when the layout has more rows than the sampler holds, or its
     /// inputs cannot be decided.
-    pub fn stage(
+    pub fn stage_eager(&mut self, layout: &BatchLayout) -> Result<(), SamplerError> {
+        self.staged = None;
+        let inputs = self.stage_records(layout, None)?;
+        stage_sampler(
+            &inputs,
+            SamplerArrays {
+                row_slots: self.row_slots.host.as_mut_slice(),
+                gather_slots: &mut [],
+            },
+        )?;
+        self.staged = Some(StagedStep::of(&inputs, ArraysIn::Sampler));
+        Ok(())
+    }
+
+    /// Decides `layout`'s step against the slot mirror, holding its rows to what the sampler's
+    /// device arrays hold, and writes the records of the slots that changed hands into their
+    /// staging.
+    fn stage_records(
         &mut self,
         layout: &BatchLayout,
         gather_rows: Option<usize>,
-    ) -> Result<(), SamplerError> {
-        self.staged = None;
+    ) -> Result<SamplerInputs, SamplerError> {
         let rows = layout.sampling.len();
         if rows > self.max_rows {
             return Err(SamplerError::TooManyRows {
@@ -200,49 +285,51 @@ impl DeviceSampler {
                 max_rows: self.max_rows,
             });
         }
-        let SamplerInputs {
-            records,
-            row_slots,
-            gather,
-        } = SamplerInputs::for_step(layout, &mut self.owners, gather_rows)?;
-        if gather.len() > self.max_rows {
+        let inputs = SamplerInputs::for_step(layout, &mut self.owners, gather_rows)?;
+        if inputs.gather.len() > self.max_rows {
             return Err(SamplerError::TooManyGatherRows {
-                rows: gather.len(),
+                rows: inputs.gather.len(),
                 max_rows: self.max_rows,
             });
         }
         self.pending_records.clear();
         let records_host = self.records.host.as_mut_slice();
-        for (slot, record) in records {
+        for (slot, record) in &inputs.records {
             let index = slot.index();
-            records_host[index] = record;
+            records_host[index] = *record;
             self.pending_records.push(index);
         }
-        let row_slots_host = self.row_slots.host.as_mut_slice();
-        for (row, slot) in row_slots.iter().enumerate() {
-            row_slots_host[row] = slot_i32(*slot);
-        }
-        let gather_host = self.gather_slots.host.as_mut_slice();
-        for (row, slot) in gather.iter().enumerate() {
-            gather_host[row] = slot.map_or(-1, slot_i32);
-        }
-        self.staged = Some(StagedStep {
-            rows,
-            gather_rows: gather.len(),
-        });
-        Ok(())
+        Ok(inputs)
     }
 
-    /// The descriptor that copies the staged step's inputs to the device.
+    /// The descriptor that copies the staged step's changed records to the device, one sparse
+    /// copy per record.
     ///
     /// # Errors
     ///
     /// Returns [`SamplerError::NoStepStaged`] when no step is staged.
-    pub fn upload(&self) -> Result<Upload<'_>, SamplerError> {
+    pub fn upload_records(&self) -> Result<RecordUpload<'_>, SamplerError> {
+        if self.staged.is_none() {
+            return Err(SamplerError::NoStepStaged);
+        }
+        Ok(RecordUpload { sampler: self })
+    }
+
+    /// The descriptor that copies an eager step's inputs from the sampler's own staging: the
+    /// changed records, then the rows' slots.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SamplerError`] when no step is staged, or the staged step's arrays are the
+    /// caller's.
+    fn upload_eager(&self) -> Result<EagerUpload<'_>, SamplerError> {
         let staged = self.staged.ok_or(SamplerError::NoStepStaged)?;
-        Ok(Upload {
+        if staged.arrays != ArraysIn::Sampler {
+            return Err(SamplerError::ArraysElsewhere(staged.arrays));
+        }
+        Ok(EagerUpload {
             sampler: self,
-            staged,
+            rows: staged.rows,
         })
     }
 
@@ -257,7 +344,7 @@ impl DeviceSampler {
         Ok(Gather {
             call: GatherCall {
                 token_ids,
-                gather_slots: self.gather_slots.address(),
+                gather_slots: self.gather_slots.address,
                 sampled: self.sampled.address,
                 n_rows: staged.gather_rows,
                 stream: ptr::null_mut(),
@@ -301,13 +388,14 @@ impl DeviceSampler {
         Ok(self.readback.wait()?)
     }
 
-    /// Runs the staged step's sampling on `stream` — the upload, the sample and the readback —
-    /// over the f32 logits `logits` holds, and waits for its tokens: the candle path, which has
-    /// no descriptor seam.
+    /// Runs the eager step staged by [`DeviceSampler::stage_eager`] on `stream` — the upload
+    /// from the sampler's own staging, the sample and the readback — over the f32 logits `logits`
+    /// holds, and waits for its tokens: the candle path, which has no descriptor seam.
     ///
     /// # Errors
     ///
-    /// Returns [`SamplerError`] when no step is staged or the driver refuses a copy or a launch.
+    /// Returns [`SamplerError`] when no eager step is staged or the driver refuses a copy or a
+    /// launch.
     pub fn run_on<S: DevicePtr<f32>>(
         &mut self,
         stream: &Arc<CudaStream>,
@@ -321,7 +409,7 @@ impl DeviceSampler {
         // SAFETY: candle's stream is live in the sampler's context, and every address the
         // descriptors name is this sampler's, or the logits the stream's earlier work wrote.
         unsafe {
-            self.upload()?.enqueue(stream.cu_stream())?;
+            self.upload_eager()?.enqueue(stream.cu_stream())?;
             self.sample(address)?.enqueue(stream.cu_stream())?;
         }
         self.wait()
@@ -338,41 +426,188 @@ impl Drop for DeviceSampler {
     }
 }
 
-/// The upload of one step's sampler inputs: the changed records, the rows' slots and the gather
-/// slots.
-pub struct Upload<'a> {
-    sampler: &'a DeviceSampler,
-    staged: StagedStep,
+/// Pinned host memory a caller stages the sampler's two per-step arrays in, `rows` values each,
+/// and the event recorded behind its upload. The decode step owns one, hands
+/// [`SamplerStaging::arrays`] to [`DeviceSampler::stage`], and enqueues
+/// [`SamplerStaging::upload`] to carry the staged rows to the sampler's device arrays.
+pub struct SamplerStaging {
+    row_slots: Pinned<i32>,
+    gather_slots: Pinned<i32>,
+    /// Recorded behind every upload; waited on before the staging is freed.
+    uploaded: CudaEvent,
 }
 
-impl Descriptor for Upload<'_> {
+impl SamplerStaging {
+    /// Staging for up to `rows` rows, pinned in `context`'s host memory during the Allocation
+    /// session phase, which is taken as a witness.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SamplerError::Driver`] when the driver cannot pin the memory or create its
+    /// event.
+    pub fn new(
+        _allocation: &Allocation,
+        context: &Arc<CudaContext>,
+        rows: usize,
+    ) -> Result<Self, SamplerError> {
+        context.bind_to_thread().map_err(RuntimeError::from)?;
+        let uploaded = context
+            .new_event(Some(CUevent_flags::CU_EVENT_BLOCKING_SYNC))
+            .map_err(RuntimeError::from)?;
+        Ok(Self {
+            row_slots: Pinned::new(rows)?,
+            gather_slots: Pinned::new(rows)?,
+            uploaded,
+        })
+    }
+
+    /// The arrays a step is staged into, each `rows` long.
+    pub fn arrays(&mut self) -> SamplerArrays<'_> {
+        SamplerArrays {
+            row_slots: self.row_slots.as_mut_slice(),
+            gather_slots: self.gather_slots.as_mut_slice(),
+        }
+    }
+
+    /// The descriptor that copies the staged step's rows of both arrays to `sampler`'s device
+    /// arrays, and records the event behind the copies.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SamplerError`] when no step is staged, the staged step's arrays are the
+    /// sampler's own, or this staging is shorter than the step's rows.
+    pub fn upload<'a>(
+        &'a self,
+        sampler: &'a DeviceSampler,
+    ) -> Result<ArrayUpload<'a>, SamplerError> {
+        let staged = sampler.staged.ok_or(SamplerError::NoStepStaged)?;
+        if staged.arrays != ArraysIn::Caller {
+            return Err(SamplerError::ArraysElsewhere(staged.arrays));
+        }
+        Ok(ArrayUpload {
+            row_slots: staged_rows(
+                StagedInput::RowSlots,
+                self.row_slots.as_slice(),
+                staged.rows,
+            )?,
+            gather_slots: staged_rows(
+                StagedInput::GatherSlots,
+                self.gather_slots.as_slice(),
+                staged.gather_rows,
+            )?,
+            row_slots_device: sampler.row_slots.address(),
+            gather_slots_device: sampler.gather_slots.address,
+            uploaded: &self.uploaded,
+        })
+    }
+}
+
+impl Drop for SamplerStaging {
+    fn drop(&mut self) {
+        // The last upload may still be reading the staging; the event waits for it before the
+        // arrays go. A failure here cannot be acted on beyond saying so.
+        if let Err(error) = self.uploaded.synchronize() {
+            warn!(%error, "the last array upload could not be waited on before its staging goes");
+        }
+    }
+}
+
+/// The leading `rows` values of `array`, which the step staged there.
+fn staged_rows(input: StagedInput, array: &[i32], rows: usize) -> Result<&[i32], StagingError> {
+    array.get(..rows).ok_or(StagingError::SamplerArrayTooShort {
+        input,
+        len: array.len(),
+        rows,
+    })
+}
+
+/// The upload of one step's changed records: one sparse copy per record, and the sampler's
+/// event recorded behind them.
+pub struct RecordUpload<'a> {
+    sampler: &'a DeviceSampler,
+}
+
+impl Descriptor for RecordUpload<'_> {
+    type Error = SamplerError;
+
+    unsafe fn enqueue(&mut self, stream: sys::CUstream) -> Result<(), SamplerError> {
+        // SAFETY: the session hands a live stream in the buffers' context.
+        unsafe {
+            copy_records(self.sampler, stream)?;
+            event::record(self.sampler.uploaded.cu_event(), stream).map_err(RuntimeError::from)?;
+        }
+        Ok(())
+    }
+}
+
+/// The upload of an eager step's inputs from the sampler's own staging: the changed records,
+/// then the rows' slots, with the sampler's event recorded behind them.
+struct EagerUpload<'a> {
+    sampler: &'a DeviceSampler,
+    rows: usize,
+}
+
+impl Descriptor for EagerUpload<'_> {
     type Error = SamplerError;
 
     unsafe fn enqueue(&mut self, stream: sys::CUstream) -> Result<(), SamplerError> {
         let sampler = self.sampler;
-        let records = sampler.records.host.as_slice();
-        // SAFETY: the session hands a live stream in the buffers' context; every destination is
-        // this sampler's device array and every source its pinned staging, which outlives the
-        // copies through the event recorded behind them.
+        // SAFETY: candle's stream is live in the buffers' context; the destination is this
+        // sampler's device array and the source its pinned staging, which outlives the copy
+        // through the event recorded behind it.
         unsafe {
-            for &slot in &sampler.pending_records {
-                let destination = sampler.records.address() + (slot * RECORD_BYTES) as u64;
-                memcpy_htod_async(destination, &records[slot..=slot], stream)
-                    .map_err(RuntimeError::from)?;
-            }
+            copy_records(sampler, stream)?;
             memcpy_htod_async(
                 sampler.row_slots.address(),
-                &sampler.row_slots.host.as_slice()[..self.staged.rows],
-                stream,
-            )
-            .map_err(RuntimeError::from)?;
-            memcpy_htod_async(
-                sampler.gather_slots.address(),
-                &sampler.gather_slots.host.as_slice()[..self.staged.gather_rows],
+                &sampler.row_slots.host.as_slice()[..self.rows],
                 stream,
             )
             .map_err(RuntimeError::from)?;
             event::record(sampler.uploaded.cu_event(), stream).map_err(RuntimeError::from)?;
+        }
+        Ok(())
+    }
+}
+
+/// Copies every pending record to its slot's place in the device records, one copy each.
+///
+/// # Safety
+///
+/// `stream` must be a live stream in the sampler's context.
+unsafe fn copy_records(sampler: &DeviceSampler, stream: sys::CUstream) -> Result<(), RuntimeError> {
+    let records = sampler.records.host.as_slice();
+    for &slot in &sampler.pending_records {
+        let destination = sampler.records.address() + (slot * RECORD_BYTES) as u64;
+        // SAFETY: the destination is this sampler's device records and the source its pinned
+        // staging, which outlives the copy through the event the caller records behind it.
+        unsafe { memcpy_htod_async(destination, &records[slot..=slot], stream) }?;
+    }
+    Ok(())
+}
+
+/// The upload of a decode step's two per-step arrays from the [`SamplerStaging`] they were
+/// staged in to the sampler's device arrays, with the staging's event recorded behind the copies.
+pub struct ArrayUpload<'a> {
+    row_slots: &'a [i32],
+    gather_slots: &'a [i32],
+    row_slots_device: u64,
+    gather_slots_device: u64,
+    uploaded: &'a CudaEvent,
+}
+
+impl Descriptor for ArrayUpload<'_> {
+    type Error = SamplerError;
+
+    unsafe fn enqueue(&mut self, stream: sys::CUstream) -> Result<(), SamplerError> {
+        // SAFETY: the session hands a live stream in the buffers' context; each destination is
+        // the sampler's device array, which holds every row the staging was held to, and each
+        // source is pinned staging that outlives the copy through the event recorded behind it.
+        unsafe {
+            memcpy_htod_async(self.row_slots_device, self.row_slots, stream)
+                .map_err(RuntimeError::from)?;
+            memcpy_htod_async(self.gather_slots_device, self.gather_slots, stream)
+                .map_err(RuntimeError::from)?;
+            event::record(self.uploaded.cu_event(), stream).map_err(RuntimeError::from)?;
         }
         Ok(())
     }
@@ -420,11 +655,6 @@ impl Descriptor for Sample<'_> {
         }
         Ok(())
     }
-}
-
-/// A staged slot as the kernel indexes it; the mirror refused any past the count that fits.
-fn slot_i32(slot: RequestSlot) -> i32 {
-    i32::try_from(slot.get()).expect("the mirror holds only slots that fit the kernel's index")
 }
 
 /// The device address of a buffer; event tracking is disabled at context creation, so the read

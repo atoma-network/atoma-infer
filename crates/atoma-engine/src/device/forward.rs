@@ -153,9 +153,8 @@ impl CudaForward {
         }
     }
 
-    /// Runs `batch` on the decode step and samples its live rows, when this rank samples. The
-    /// batch states that every entry computes one token, so its rows are the token rows the
-    /// gather covers.
+    /// Runs `batch` on the decode step, which stages the sampler for it and samples its live
+    /// rows, when this rank samples.
     #[cfg(not(feature = "nccl"))]
     fn run_decode_step(
         &mut self,
@@ -167,18 +166,16 @@ impl CudaForward {
             decode_step,
             session,
         } = self;
-        if let Some(sampler) = allocated.sampler.as_mut() {
-            sampler.stage(layout, Some(batch.tokens))?;
-        }
         Ok(decode_step.run(session, layout, batch, allocated.sampler.as_mut())?)
     }
 
     /// Runs `layout` through the Llama forward on candle's stream and samples the selected rows
-    /// there, where the forward left its logits. No row gathers: candle takes its token ids from
-    /// the host, and the batch it serves is not the shape the gather is for.
+    /// there, where the forward left its logits, from the sampler's own staging. No row gathers:
+    /// candle takes its token ids from the host, and the batch it serves is not the shape the
+    /// gather is for.
     fn candle_forward(&mut self, layout: &BatchLayout) -> Result<&[u32], CudaForwardError> {
         if let Some(sampler) = self.allocated.sampler.as_mut() {
-            sampler.stage(layout, None)?;
+            sampler.stage_eager(layout)?;
         }
         let logits = self.candle_logits(layout)?;
         let Allocated {

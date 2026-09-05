@@ -5,9 +5,10 @@
 //! nothing else: greedy rows must match the reference exactly; drawn rows must match it token for
 //! token but for a bounded few that rounding at a cutoff can move, and those must still be tokens
 //! the reference keeps; a seeded request must produce the same tokens whatever batch it is
-//! sampled in, wherever in that batch it sits and whatever slot it occupies; and the gather must
+//! sampled in, wherever in that batch it sits and whatever slot it occupies; the gather must
 //! overwrite a decoding row's token with what its slot sampled and leave a fresh slot's row to
-//! the host.
+//! the host; a step staged where the caller says must sample under the row slots uploaded from
+//! there; and an upload from the other staging must be refused.
 //!
 //! Run through `scripts/sampler-parity.sh`.
 
@@ -25,7 +26,7 @@ use atoma_core::types::{
     BlockId, RequestCount, RequestId, RequestSlot, SequenceIndex, StepId, TokenCount,
 };
 use atoma_engine::batch::BatchLayout;
-use atoma_engine::device::sampler::DeviceSampler;
+use atoma_engine::device::sampler::{ArraysIn, DeviceSampler, SamplerError, SamplerStaging};
 use atoma_engine::sampling::record::SlotRecord;
 use atoma_engine::sampling::reference;
 use atoma_runtime::context::RuntimeContext;
@@ -60,10 +61,11 @@ impl Lcg {
     }
 }
 
-/// The device, its stream and the sampler under test, with a buffer for the logits and one for
-/// the token ids a step would upload.
+/// The device, its stream and the sampler under test, with the staging a decode step would hand
+/// the sampler, a buffer for the logits and one for the token ids a step would upload.
 struct Rig {
     sampler: DeviceSampler,
+    staging: SamplerStaging,
     stream: Arc<CudaStream>,
     logits: CudaSlice<f32>,
     token_ids: CudaSlice<u32>,
@@ -77,6 +79,8 @@ impl Rig {
         let stream = context.cuda().default_stream();
         let sampler = DeviceSampler::new(&allocation, &stream, SLOTS, MAX_ROWS, VOCAB)
             .expect("the sampler allocates");
+        let staging = SamplerStaging::new(&allocation, stream.context(), MAX_ROWS.get())
+            .expect("the staging pins");
         let logits = stream
             .alloc_zeros::<f32>(MAX_ROWS.get() * VOCAB)
             .expect("the logits allocate");
@@ -85,6 +89,7 @@ impl Rig {
             .expect("the token ids allocate");
         Self {
             sampler,
+            staging,
             stream,
             logits,
             token_ids,
@@ -103,24 +108,37 @@ impl Rig {
             .expect("the logits upload");
     }
 
-    /// Stages `layout` covering its token rows with the gather, uploads `token_ids` as the host
-    /// would, runs the sampler's upload and its gather over them, and returns the token ids the
-    /// gather left.
+    /// Stages `layout` into the rig's staging, covering its token rows with the gather, and
+    /// enqueues the record upload and the staging's upload as a decode step would.
+    fn stage_as_decode_step(&mut self, layout: &BatchLayout, gather_rows: usize) {
+        self.sampler
+            .stage(layout, gather_rows, self.staging.arrays())
+            .expect("the layout stages");
+        // SAFETY: the stream is the sampler's, and every address is the sampler's own.
+        unsafe {
+            self.sampler
+                .upload_records()
+                .expect("a step is staged")
+                .enqueue(self.stream.cu_stream())
+                .expect("the record upload enqueues");
+            self.staging
+                .upload(&self.sampler)
+                .expect("a step is staged there")
+                .enqueue(self.stream.cu_stream())
+                .expect("the array upload enqueues");
+        }
+    }
+
+    /// Stages `layout` as a decode step would, uploads `token_ids` as the host would, runs the
+    /// gather over them, and returns the token ids the gather left.
     fn gather(&mut self, layout: &BatchLayout, token_ids: &[u32]) -> Vec<u32> {
         self.stream
             .memcpy_htod(token_ids, &mut self.token_ids)
             .expect("the token ids upload");
-        self.sampler
-            .stage(layout, Some(token_ids.len()))
-            .expect("the layout stages");
+        self.stage_as_decode_step(layout, token_ids.len());
         let (address, _reads) = self.token_ids.device_ptr(&self.stream);
         // SAFETY: the stream is the sampler's, and the token ids are live on its device.
         unsafe {
-            self.sampler
-                .upload()
-                .expect("a step is staged")
-                .enqueue(self.stream.cu_stream())
-                .expect("the upload enqueues");
             self.sampler
                 .gather(address)
                 .expect("a step is staged")
@@ -133,15 +151,32 @@ impl Rig {
             .expect("the token ids read back")
     }
 
-    /// Samples `rows` under `layout`, and returns the tokens.
+    /// Samples `rows` under `layout` as an eager step, and returns the tokens.
     fn sample(&mut self, layout: &BatchLayout, rows: &[Vec<f32>]) -> Vec<u32> {
         self.upload_logits(rows);
-        self.sampler.stage(layout, None).expect("the layout stages");
+        self.sampler.stage_eager(layout).expect("the layout stages");
         let view = self.logits.slice(0..rows.len() * VOCAB);
         self.sampler
             .run_on(&self.stream, &view)
             .expect("the sampler runs")
             .to_vec()
+    }
+
+    /// Samples `rows` under `layout` as a decode step would, staged where the caller says and
+    /// uploaded from there, and returns the tokens.
+    fn sample_as_decode_step(&mut self, layout: &BatchLayout, rows: &[Vec<f32>]) -> Vec<u32> {
+        self.upload_logits(rows);
+        self.stage_as_decode_step(layout, rows.len());
+        let (logits, _reads) = self.logits.device_ptr(&self.stream);
+        // SAFETY: the stream is the sampler's, and the logits were uploaded to its device.
+        unsafe {
+            self.sampler
+                .sample(logits)
+                .expect("a step is staged")
+                .enqueue(self.stream.cu_stream())
+                .expect("the sample enqueues");
+        }
+        self.sampler.wait().expect("the tokens come back").to_vec()
     }
 }
 
@@ -426,5 +461,73 @@ fn the_gather_takes_a_decoding_rows_token_from_its_slot_and_leaves_a_fresh_slots
         gathered,
         [sampled[0], sampled[1], 999],
         "the decoding rows take their slots' tokens; the fresh slot's row keeps the host's"
+    );
+}
+
+#[test]
+#[ignore = "needs a device and the CUDA toolkit; run scripts/sampler-parity.sh"]
+fn a_step_staged_where_the_caller_says_samples_under_the_row_slots_uploaded_from_there() {
+    let mut rig = Rig::open();
+    let mut random = Lcg(0xCA11_2026_0905);
+    let rows: Vec<Vec<f32>> = (0..3).map(|_| random_row(&mut random)).collect();
+    // Slots out of row order and none of them slot zero, so a row sampling under the wrong
+    // slot's record would be greedy under a drawn one, or the reverse. A fresh device's row
+    // slots all name slot zero, whose zeroed record is greedy, so the drawn row is held to its
+    // exact first draw: the greedy token it would sample without the upload is a kept token too.
+    let params = drawn(0.7, 40, 1.0, 77);
+    let entries = vec![
+        entry(1, 9, SamplingParams::default()),
+        entry(2, 2, params),
+        entry(3, 6, SamplingParams::default()),
+    ];
+    let sampled = rig.sample_as_decode_step(&layout(entries), &rows);
+
+    let greedy: Vec<u32> = [0, 2]
+        .iter()
+        .map(|&row| expected(&rows[row], &SamplingParams::default(), 0))
+        .collect();
+    let drawn_expected = expected(&rows[1], &params, 0);
+    println!("=============== caller-staged sample ===============");
+    println!("sampled:              {sampled:?}");
+    println!("greedy rows expected: {greedy:?}");
+    println!("drawn row expected:   {drawn_expected}");
+    assert_eq!(
+        [sampled[0], sampled[2]],
+        [greedy[0], greedy[1]],
+        "the greedy rows sample under their own slots' records"
+    );
+    assert_eq!(
+        sampled[1], drawn_expected,
+        "the drawn row samples its slot's first draw"
+    );
+}
+
+#[test]
+#[ignore = "needs a device and the CUDA toolkit; run scripts/sampler-parity.sh"]
+fn an_upload_from_the_other_staging_is_refused_by_name() {
+    let mut rig = Rig::open();
+    let step = layout(vec![entry(1, 0, SamplingParams::default())]);
+
+    // An eager step's arrays are the sampler's own; the caller's staging holds nothing for it.
+    rig.sampler.stage_eager(&step).expect("the layout stages");
+    assert!(
+        matches!(
+            rig.staging.upload(&rig.sampler),
+            Err(SamplerError::ArraysElsewhere(ArraysIn::Sampler))
+        ),
+        "the caller's staging refuses to upload an eager step"
+    );
+
+    // A decode step's arrays are the caller's; the eager upload would carry stale rows.
+    rig.sampler
+        .stage(&step, 1, rig.staging.arrays())
+        .expect("the layout stages");
+    let view = rig.logits.slice(0..VOCAB);
+    assert!(
+        matches!(
+            rig.sampler.run_on(&rig.stream, &view),
+            Err(SamplerError::ArraysElsewhere(ArraysIn::Caller))
+        ),
+        "the eager upload refuses a step staged in the caller's memory"
     );
 }

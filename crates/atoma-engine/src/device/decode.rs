@@ -4,13 +4,13 @@
 //! Candle keeps owning the weights and the cache; this module snapshots their device addresses
 //! into tensor views, allocates the arena, the step's fixed buffers and the cuBLAS workspace,
 //! resolves every usable bucket's slot tables, and holds the step descriptor over them. A step is
-//! then six descriptors on the capture stream: the wait on candle's stream, the input upload,
-//! the sampler's upload, the gather that takes each decoding row's token from what the device
-//! sampled for its slot, the model step, and the sample, which leaves the tokens on the device and
-//! reads them back; then one host wait. Nothing is captured here. Going through the descriptor
-//! seam is what lets a later capture record the gather, the model step and the sample unchanged;
-//! the two uploads are the host's copies of what changed, as many as changed, and stay in front
-//! of the graph.
+//! then seven descriptors on the capture stream: the wait on candle's stream, the sampler's
+//! record upload, the input upload, the upload of the sampler's two per-step arrays, the gather
+//! that takes each decoding row's token from what the device sampled for its slot, the model
+//! step, and the sample, which leaves the tokens on the device and reads them back; then one host
+//! wait. Nothing is captured here. Going through the descriptor seam is what lets a later capture
+//! record the gather, the model step and the sample unchanged; the three uploads are the host's
+//! copies of what changed, as many as changed, and stay in front of the graph.
 
 use std::sync::Arc;
 
@@ -44,7 +44,7 @@ use crate::config::Dtype as ConfiguredDtype;
 use crate::decode::batch::{Checked, DecodeBatch, DecodeBatchError, DecodeBuckets};
 use crate::decode::inputs::{DecodeInputs, InputTensors, InputsError, Upload, WaitEvent};
 use crate::decode::staging::StagingShape;
-use crate::device::sampler::{DeviceSampler, SamplerError};
+use crate::device::sampler::{DeviceSampler, SamplerError, SamplerStaging};
 use crate::device::{KvCache, RankDevice, Weights};
 use crate::logits::Logits;
 use crate::readback::{Readback, ReadbackError};
@@ -131,6 +131,8 @@ struct Statics {
 pub struct DecodeStep {
     buckets: DecodeBuckets,
     inputs: DecodeInputs,
+    /// Where a step's sampler stages its two per-step arrays, sized at the largest bucket.
+    sampler_staging: SamplerStaging,
     decode: LlamaDecode,
     blas: StepBlas,
     /// Recorded on candle's stream after every candle forward; the step waits on it.
@@ -196,6 +198,7 @@ impl DecodeStep {
             buckets: &buckets,
         };
         let inputs = DecodeInputs::new(allocation, stream, shape)?;
+        let sampler_staging = SamplerStaging::new(allocation, stream.context(), buckets.largest())?;
         let (statics, step_statics) = allocate_statics(allocation, stream, &sizing)?;
         let (arena_memory, arena_bytes, slots) = resolve_slots(
             allocation,
@@ -230,6 +233,7 @@ impl DecodeStep {
         Ok(Self {
             buckets,
             inputs,
+            sampler_staging,
             decode,
             blas,
             candle_done,
@@ -252,9 +256,11 @@ impl DecodeStep {
         )?)
     }
 
-    /// Runs `batch`'s step through `session` and samples it: the inputs staged, then the wait on
-    /// candle's stream, the input upload, the sampler's upload, the gather, the model step and the
-    /// sample enqueued in that order, then the host wait on the sampled tokens. A rank with no
+    /// Runs `batch`'s step through `session` and samples it: the inputs and the sampler staged,
+    /// then the wait on candle's stream, the sampler's record upload, the input upload, the
+    /// upload of the sampler's arrays, the gather, the model step and the sample enqueued in that
+    /// order, then the host wait on the sampled tokens. The batch states that every entry
+    /// computes one token, so its rows are the token rows the gather covers. A rank with no
     /// sampler runs the same step without the sampler's descriptors and waits for it instead,
     /// so the next step's staging is fenced either way, and returns no tokens.
     ///
@@ -270,14 +276,18 @@ impl DecodeStep {
         sampler: Option<&'a mut DeviceSampler>,
     ) -> Result<&'a [u32], DecodeStepError> {
         self.stage(layout, &batch)?;
-        session.run(&mut WaitEvent::new(&self.candle_done))?;
-        session.run(&mut self.upload(&batch))?;
         let Some(sampler) = sampler else {
+            session.run(&mut WaitEvent::new(&self.candle_done))?;
+            session.run(&mut self.upload(&batch))?;
             session.run(&mut self.descriptor(batch.bucket)?)?;
             session.synchronize()?;
             return Ok(&[]);
         };
-        session.run(&mut sampler.upload()?)?;
+        sampler.stage(layout, batch.tokens, self.sampler_staging.arrays())?;
+        session.run(&mut WaitEvent::new(&self.candle_done))?;
+        session.run(&mut sampler.upload_records()?)?;
+        session.run(&mut self.upload(&batch))?;
+        session.run(&mut self.sampler_staging.upload(sampler)?)?;
         session.run(&mut sampler.gather(self.token_ids_address())?)?;
         session.run(&mut self.descriptor(batch.bucket)?)?;
         let logits = self.decode.bucket(batch.bucket)?.statics.logits.address();
