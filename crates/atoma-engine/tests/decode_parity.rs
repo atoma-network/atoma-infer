@@ -1,12 +1,12 @@
 //! Decode parity and capture cleanliness on a device.
 //!
 //! Builds the decode step over runtime tensors beside the candle forward on the same weights and
-//! KV cache, records the step under capture to show the driver accepts it, then runs decode steps
-//! of varying ids, lengths and block tables through both forwards and compares their logits: the
-//! argmax of every live row must agree, and the largest absolute difference is reported against a
-//! bound. Every row also goes through candle alone, so the run measures what candle's own logits
-//! do when nothing changes but the live batch it is computed in; that spread is the floor the
-//! step is read against, and it is printed beside the step's.
+//! KV cache, records the step under capture over a dummy run to show the driver accepts it, then
+//! runs decode steps of varying ids, lengths and block tables through both forwards and compares
+//! their logits: the argmax of every live row must agree, and the largest absolute difference is
+//! reported against a bound. Every row also goes through candle alone, so the run measures what
+//! candle's own logits do when nothing changes but the live batch it is computed in; that spread
+//! is the floor the step is read against, and it is printed beside the step's.
 //!
 //! Around every keyed step the device's free memory is read, and it must not change: the
 //! session captures in relaxed mode, where an allocation from the capturing thread is legal, so
@@ -37,9 +37,9 @@ use atoma_core::types::{
 };
 use atoma_engine::batch::BatchLayout;
 use atoma_engine::config::{DeviceOrdinal, Dtype, ModelConfig, ModelId, PromptTemplate};
-use atoma_engine::decode::batch::Checked;
 use atoma_engine::decode::declaration;
 use atoma_engine::decode::ring::StagingDepth;
+use atoma_engine::decode::staging::DummyRun;
 use atoma_engine::device::decode::{DecodeStep, DecodeStepPlan};
 use atoma_engine::device::forward::{Allocated, CudaForward};
 use atoma_engine::device::{Checkpoint, KvCache, KvGeometry, RankDevice, Weights};
@@ -257,43 +257,30 @@ fn open(model: &ModelConfig) -> Rig {
     }
 }
 
-/// Capture cleanliness: the bucket-of-one step, over a staged one-token batch, warms up and
-/// records without the driver invalidating it. Returns the Replay phase, the graph's node count,
-/// and how many of its nodes allocate or free memory.
+/// Capture cleanliness: the bucket-of-one step, over a dummy run of one padding row on the dummy
+/// block, warms up and records without the driver invalidating it. Returns the Replay phase, the
+/// graph's node count, and how many of its nodes allocate or free memory.
 fn record_bucket_of_one(
     allocation: Allocation,
     decode_step: &mut DecodeStep,
-    dispatcher: &mut Dispatcher,
     dummy_block: u32,
 ) -> (Replay, usize, usize) {
-    let first = Sequence {
-        tokens: vec![1],
-        blocks: vec![0],
-        context_len: 0,
-    };
-    let (keyed, _) = decode_commands(&[(0, &first)], dispatcher, dummy_block, 1);
-    let layout = lay_out(&keyed);
-    let DispatchDecision::FullReplay(key) = layout.dispatch else {
-        panic!("keyed");
-    };
-    let Checked::Step(batch) = decode_step.check(&layout, key).expect("checks") else {
-        panic!("the bucket of one serves one decode");
-    };
-    let entry = decode_step.stage(&layout, &batch).expect("stages");
+    let run = DummyRun::new(BucketIdx(0), vec![BlockId::new(dummy_block)]);
+    let entry = decode_step.stage_dummy(&run).expect("the dummy run stages");
     let mut capture = allocation.into_capture();
     capture
         .warm_up(
             &mut decode_step
-                .upload(entry, &batch)
+                .upload(entry, run.bucket())
                 .expect("bucket 0 is served"),
         )
         .expect("the upload runs eagerly");
     capture
-        .warm_up(&mut decode_step.descriptor(BucketIdx(0)).expect("bucket 0"))
+        .warm_up(&mut decode_step.descriptor(run.bucket()).expect("bucket 0"))
         .expect("the step warms up");
     let graph = capture
         .record(
-            &mut decode_step.descriptor(BucketIdx(0)).expect("bucket 0"),
+            &mut decode_step.descriptor(run.bucket()).expect("bucket 0"),
             BakedBuffers::default(),
         )
         .expect("the step records without invalidating the capture");
@@ -547,11 +534,11 @@ fn the_two_forwards_agree_on_every_decode_and_the_step_records_under_capture() {
         vocab,
     } = open(&model);
     let contract = CaptureContract::resolve(&[declaration()], &ModelDeclaration::new("llama"));
-    let mut dispatcher = Dispatcher::new(&dispatch_config(), &contract);
+    let dispatcher = Dispatcher::new(&dispatch_config(), &contract);
     let dummy_block = u32::try_from(BLOCK_COUNT - 1).expect("fits");
 
     let (session, nodes, memory_nodes) =
-        record_bucket_of_one(allocation, &mut decode_step, &mut dispatcher, dummy_block);
+        record_bucket_of_one(allocation, &mut decode_step, dummy_block);
     println!(
         "capture: the bucket-of-one step recorded as a graph of {nodes} nodes, {memory_nodes} of \
          them allocating or freeing memory"

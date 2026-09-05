@@ -10,7 +10,8 @@
 //! copies the bucket's packed length to the device block in one asynchronous copy and signals
 //! the staging entry's fence behind it. Every bucket reads the device block through views minted
 //! once, in the Allocation session phase, at the bucket's own offsets, so no address a step
-//! reads follows the batch.
+//! reads follows the batch. A dummy run is staged the same way, every row a padding row, and
+//! uploaded through the same staging entry and fence.
 //!
 //! Reuse of a pinned block is what the fence guards: the staging ring hands a staging entry out
 //! again only once the copy that last read its block has finished, and the blocks are freed only
@@ -38,7 +39,8 @@ use crate::batch::BatchLayout;
 use crate::decode::batch::{DecodeBatch, DecodeBuckets};
 use crate::decode::ring::{StagingDepth, StagingEntry, StagingRing};
 use crate::decode::staging::{
-    stage, BucketArrays, SamplerArrays, StagedInput, StagingError, StagingLayout, StagingShape,
+    stage, stage_dummy, BucketArrays, DummyRun, SamplerArrays, StagedInput, StagingError,
+    StagingLayout, StagingShape,
 };
 use crate::pinned::Pinned;
 
@@ -52,6 +54,17 @@ pub enum InputsError {
     /// No bucket to stage for, so nothing sizes the blocks.
     #[error("no bucket is usable; the inputs stage for at least one")]
     NoBucket,
+    /// A dummy run with other than one block per row of its bucket.
+    #[error(
+        "a dummy run of bucket {} names {blocks} blocks; the bucket has {rows} rows, one block \
+         each",
+        bucket.0
+    )]
+    DummyRunNotBucket {
+        bucket: BucketIdx,
+        rows: usize,
+        blocks: usize,
+    },
     #[error(transparent)]
     Driver(#[from] RuntimeError),
     #[error(transparent)]
@@ -152,10 +165,23 @@ impl PackedBuckets {
         Ok(sampler)
     }
 
-    /// The leading bytes of `block` one copy of `batch`'s bucket carries: the bucket's packed
-    /// length.
-    fn staged<'a>(&self, block: &'a [u8], batch: &DecodeBatch) -> Result<&'a [u8], InputsError> {
-        let packed = self.layout(batch.bucket)?;
+    /// Writes `run`'s rows into `block` at its bucket's offsets as padding rows, the sampler's
+    /// two arrays included, once the run names one block per row of the bucket.
+    fn stage_dummy(&self, block: &mut [u8], run: &DummyRun) -> Result<(), InputsError> {
+        let packed = self.layout(run.bucket())?;
+        if run.rows() != packed.rows() {
+            return Err(InputsError::DummyRunNotBucket {
+                bucket: run.bucket(),
+                rows: packed.rows(),
+                blocks: run.rows(),
+            });
+        }
+        Ok(stage_dummy(run, self.shape, packed.carve(block)?)?)
+    }
+
+    /// The leading bytes of `block` one copy of `bucket` carries: the bucket's packed length.
+    fn staged<'a>(&self, block: &'a [u8], bucket: BucketIdx) -> Result<&'a [u8], InputsError> {
+        let packed = self.layout(bucket)?;
         block
             .get(..packed.bytes())
             .ok_or(InputsError::Staging(StagingError::BlockTooShort {
@@ -280,26 +306,40 @@ impl DecodeInputs {
         self.packed.stage(block, layout, batch)
     }
 
-    /// The descriptor that copies `batch`'s bucket from `entry`'s pinned block to the device
-    /// block in one copy and signals the staging entry's fence behind it. Taking the staging
-    /// entry is the only way to upload, so every copy is fenced.
+    /// Writes `run`'s rows into `entry`'s pinned block at the bucket's offsets as padding rows,
+    /// the sampler's two arrays naming no request slot: a dummy run's staging, uploaded as a
+    /// step's is.
     ///
     /// # Errors
     ///
-    /// Returns [`InputsError::UnknownBucket`] when the inputs were not built for the batch's
-    /// bucket.
+    /// Returns [`InputsError`] when the inputs were not built for the run's bucket, the run does
+    /// not name one block per row of it, or a block id cannot be staged.
+    pub fn stage_dummy(&mut self, entry: &StagingEntry, run: &DummyRun) -> Result<(), InputsError> {
+        // As in `stage`: the staging entry indexes a block.
+        let block = self.blocks[entry.index()].as_mut_slice();
+        self.packed.stage_dummy(block, run)
+    }
+
+    /// The descriptor that copies `bucket`'s packed length from `entry`'s pinned block to the
+    /// device block in one copy and signals the staging entry's fence behind it. Taking the
+    /// staging entry is the only way to upload, so every copy is fenced, a dummy run's as a
+    /// step's.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InputsError::UnknownBucket`] when the inputs were not built for `bucket`.
     // The staging entry is taken by value on purpose: one acquire hands out one, and the upload
     // is its one use.
     #[allow(clippy::needless_pass_by_value)]
     pub fn upload(
         &self,
         entry: StagingEntry,
-        batch: &DecodeBatch,
+        bucket: BucketIdx,
     ) -> Result<Upload<'_>, InputsError> {
         // As in `stage`: the staging entry indexes a block.
         let source = self
             .packed
-            .staged(self.blocks[entry.index()].as_slice(), batch)?;
+            .staged(self.blocks[entry.index()].as_slice(), bucket)?;
         Ok(Upload {
             source,
             destination: self.device_address,
@@ -378,8 +418,12 @@ mod tests {
     use atoma_core::step::CommandEntry;
     use atoma_core::types::RequestCount;
 
+    use atoma_core::request::PADDING_TOKEN;
+    use atoma_core::types::BlockId;
+
     use super::*;
     use crate::decode::batch::Checked;
+    use crate::decode::staging::DummyRun;
     use crate::test_support::{engine_config, entry, keyed_command, BLOCK_SIZE};
 
     const WIDTH: usize = 64;
@@ -391,6 +435,7 @@ mod tests {
             max_tokens: 4,
             block_table_width: WIDTH,
             max_position: 32,
+            block_size: BLOCK_SIZE,
         }
     }
 
@@ -415,13 +460,14 @@ mod tests {
         (layout, batch)
     }
 
-    /// Storage for a packed block with every byte set, so an untouched byte reads as `0xFF`,
-    /// handed out from the first base aligned as the carve requires.
+    /// Storage for a packed block with every byte set to `0x5A`, which no input stages, so an
+    /// untouched value reads as neither a `0` nor the `-1` the sampler's arrays carry; handed out
+    /// from the first base aligned as the carve requires.
     struct Block(Vec<u8>);
 
     impl Block {
         fn sized(bytes: usize) -> Self {
-            Self(vec![0xFF; bytes + align_of::<i64>()])
+            Self(vec![0x5A; bytes + align_of::<i64>()])
         }
 
         fn bytes(&mut self) -> &mut [u8] {
@@ -531,7 +577,7 @@ mod tests {
         assert_eq!(bytes[1540..1544], [0x66; 4]);
         assert_eq!(bytes[1792..1796], [0x77; 4]);
         assert!(
-            bytes[2048..2560].iter().all(|&byte| byte == 0xFF),
+            bytes[2048..2560].iter().all(|&byte| byte == 0x5A),
             "past bucket 2's packed length the block is as the storage set it"
         );
     }
@@ -547,11 +593,17 @@ mod tests {
         ]);
 
         // Bucket 1 packs 1792 bytes and bucket 2 packs 2048: the 2560-byte block is never copied
-        // whole.
-        assert_eq!(packed.staged(block.bytes(), &one).unwrap().len(), 1792);
-        assert_eq!(packed.staged(block.bytes(), &two).unwrap().len(), 2048);
+        // whole. A dummy run uploads by its bucket through the same call.
+        assert_eq!(
+            packed.staged(block.bytes(), one.bucket).unwrap().len(),
+            1792
+        );
+        assert_eq!(
+            packed.staged(block.bytes(), two.bucket).unwrap().len(),
+            2048
+        );
         assert!(matches!(
-            packed.staged(&block.bytes()[..2047], &two),
+            packed.staged(&block.bytes()[..2047], two.bucket),
             Err(InputsError::Staging(StagingError::BlockTooShort {
                 len: 2047,
                 rows: 2,
@@ -582,8 +634,72 @@ mod tests {
         assert!(unknown(
             &packed.stage(block.bytes(), &layout, &past).unwrap_err()
         ));
-        assert!(unknown(&packed.staged(block.bytes(), &past).unwrap_err()));
+        assert!(unknown(
+            &packed.staged(block.bytes(), past.bucket).unwrap_err()
+        ));
         assert!(unknown(&packed.layout(BucketIdx(3)).unwrap_err()));
+        let run = DummyRun::new(BucketIdx(3), vec![BlockId::new(7)]);
+        assert!(unknown(
+            &packed.stage_dummy(block.bytes(), &run).unwrap_err()
+        ));
+    }
+
+    #[test]
+    fn a_dummy_run_is_staged_at_its_buckets_offsets_with_every_row_a_padding_row() {
+        let packed = packed();
+        let mut block = Block::sized(packed.block_bytes);
+        let run = DummyRun::new(BucketIdx(1), vec![BlockId::new(15), BlockId::new(3)]);
+
+        packed.stage_dummy(block.bytes(), &run).unwrap();
+
+        // Bucket 2's offsets, as above; four-token blocks, so block 15's first slot is 60 and
+        // block 3's is 12; each table row is its block then zero to the width; the sampler's
+        // two arrays name no request slot.
+        let bytes = block.bytes();
+        let twice = |value: [u8; 4]| [value, value].concat();
+        assert_eq!(bytes[..8], twice(PADDING_TOKEN.to_ne_bytes()));
+        assert_eq!(bytes[256..264], twice(0i32.to_ne_bytes()));
+        assert_eq!(bytes[512..520], twice(1i32.to_ne_bytes()));
+        assert_eq!(
+            bytes[768..784],
+            [60i64.to_ne_bytes(), 12i64.to_ne_bytes()].concat()
+        );
+        assert_eq!(bytes[1024..1028], 15i32.to_ne_bytes());
+        assert!(bytes[1028..1280].iter().all(|&byte| byte == 0));
+        assert_eq!(bytes[1280..1284], 3i32.to_ne_bytes());
+        assert!(bytes[1284..1536].iter().all(|&byte| byte == 0));
+        assert_eq!(bytes[1536..1544], twice((-1i32).to_ne_bytes()));
+        assert_eq!(bytes[1792..1800], twice((-1i32).to_ne_bytes()));
+        assert!(
+            bytes[2048..2560].iter().all(|&byte| byte == 0x5A),
+            "past bucket 2's packed length the block is as the storage set it"
+        );
+    }
+
+    #[test]
+    fn a_dummy_run_with_other_than_one_block_per_row_of_its_bucket_is_refused() {
+        let packed = packed();
+        let mut block = Block::sized(packed.block_bytes);
+
+        for blocks in [1, 3] {
+            let run = DummyRun::new(BucketIdx(1), vec![BlockId::new(7); blocks]);
+            let refused = packed.stage_dummy(block.bytes(), &run).unwrap_err();
+            assert!(
+                matches!(
+                    refused,
+                    InputsError::DummyRunNotBucket {
+                        bucket: BucketIdx(1),
+                        rows: 2,
+                        blocks: named
+                    } if named == blocks
+                ),
+                "{blocks} blocks for the bucket of two: {refused}"
+            );
+        }
+        assert!(
+            block.bytes()[..2048].iter().all(|&byte| byte == 0x5A),
+            "a refused dummy run writes nothing"
+        );
     }
 
     #[test]

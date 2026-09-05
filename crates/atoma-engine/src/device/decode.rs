@@ -11,7 +11,9 @@
 //! step, and the sample, which leaves the tokens on the device and reads them back; then one host
 //! wait. Nothing is captured here. Going through the descriptor seam is what lets a later capture
 //! record the gather, the model step and the sample unchanged; the two uploads are the host's
-//! copies of what changed and stay in front of the graph.
+//! copies of what changed and stay in front of the graph. A dummy run — a bucket's rows as
+//! padding rows over one block each — is staged and uploaded the same way, with no sampler
+//! descriptor and no readback: what a capture check or a warmup runs when there is no live batch.
 //!
 //! The step's outputs reach the sampler and the readback as tensor views narrowed to the live
 //! rows: the bucket's logits and the sampler's row tokens are viewed once, at Allocation, over
@@ -50,7 +52,7 @@ use crate::config::Dtype as ConfiguredDtype;
 use crate::decode::batch::{Checked, DecodeBatch, DecodeBatchError, DecodeBuckets};
 use crate::decode::inputs::{DecodeInputs, InputsError, Upload, WaitEvent};
 use crate::decode::ring::{StagingDepth, StagingEntry};
-use crate::decode::staging::StagingShape;
+use crate::decode::staging::{DummyRun, StagingShape};
 use crate::device::sampler::{DeviceSampler, SamplerError};
 use crate::device::{KvCache, RankDevice, Weights};
 use crate::logits::Logits;
@@ -183,6 +185,7 @@ impl DecodeStep {
                 dims.head_dim,
             ),
             max_position: dims.rope.max_position,
+            block_size: plan.block_size,
         };
         let sm_count = multiprocessors(stream)?;
         let plans = buckets
@@ -279,7 +282,7 @@ impl DecodeStep {
         let arrays = self.inputs.stage(&entry, layout, &batch)?;
         let Some(sampler) = sampler else {
             session.run(&mut WaitEvent::new(&self.candle_done))?;
-            session.run(&mut self.upload(entry, &batch)?)?;
+            session.run(&mut self.upload(entry, batch.bucket)?)?;
             session.run(&mut self.descriptor(batch.bucket)?)?;
             session.synchronize()?;
             return Ok(&[]);
@@ -288,7 +291,7 @@ impl DecodeStep {
         let views = self.inputs.bucket(batch.bucket)?;
         session.run(&mut WaitEvent::new(&self.candle_done))?;
         session.run(&mut sampler.upload_records()?)?;
-        session.run(&mut self.upload(entry, &batch)?)?;
+        session.run(&mut self.upload(entry, batch.bucket)?)?;
         session.run(&mut sampler.gather(&views.inputs.token_ids, &views.gather_slots)?)?;
         session.run(&mut self.descriptor(batch.bucket)?)?;
         let logits = self.live_logits(&batch)?;
@@ -314,7 +317,7 @@ impl DecodeStep {
     ) -> Result<Logits<'a>, DecodeStepError> {
         let entry = self.stage(layout, &batch)?;
         session.run(&mut WaitEvent::new(&self.candle_done))?;
-        session.run(&mut self.upload(entry, &batch)?)?;
+        session.run(&mut self.upload(entry, batch.bucket)?)?;
         session.run(&mut self.descriptor(batch.bucket)?)?;
         let logits = self.live_logits(&batch)?;
         session.run(&mut readback.copy(&logits)?)?;
@@ -346,18 +349,33 @@ impl DecodeStep {
         Ok(entry)
     }
 
-    /// The descriptor that copies `batch`'s bucket from `entry`'s block to the device in one copy
-    /// and signals the staging entry's fence behind it.
+    /// Acquires a staging entry, waiting until the copy that last read its block has finished,
+    /// and writes `run`'s rows into it as padding rows, the sampler's two arrays naming no
+    /// request slot: a dummy run's staging, which [`DecodeStep::upload`] carries to the device
+    /// as it carries a step's.
     ///
     /// # Errors
     ///
-    /// Returns [`DecodeStepError::Inputs`] when the inputs were not built for the batch's bucket.
+    /// Returns [`DecodeStepError::Inputs`] when the fence cannot be waited on, the inputs were
+    /// not built for the run's bucket, or the run does not name one block per row of it.
+    pub fn stage_dummy(&mut self, run: &DummyRun) -> Result<StagingEntry, DecodeStepError> {
+        let entry = self.inputs.acquire()?;
+        self.inputs.stage_dummy(&entry, run)?;
+        Ok(entry)
+    }
+
+    /// The descriptor that copies `bucket`'s packed length from `entry`'s block to the device in
+    /// one copy and signals the staging entry's fence behind it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DecodeStepError::Inputs`] when the inputs were not built for `bucket`.
     pub fn upload(
         &self,
         entry: StagingEntry,
-        batch: &DecodeBatch,
+        bucket: BucketIdx,
     ) -> Result<Upload<'_>, DecodeStepError> {
-        Ok(self.inputs.upload(entry, batch)?)
+        Ok(self.inputs.upload(entry, bucket)?)
     }
 
     /// The descriptor that enqueues `bucket`'s model step over the uploaded inputs.

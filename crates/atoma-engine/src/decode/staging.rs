@@ -8,7 +8,9 @@
 //! proportional to the batch rather than to the largest bucket, that one copy can carry.
 //! [`StagingLayout::carve`] carves the seven arrays out of such a block; [`stage`] writes the
 //! model's five from the batch layout, and [`stage_sampler`] the sampler's two from what the
-//! sampler decided for the step.
+//! sampler decided for the step. [`stage_dummy`] writes all seven for a [`DummyRun`]: every row
+//! a padding row over one block, and the sampler's two naming no request slot, which is what a
+//! capture check or a warmup runs when there is no live batch.
 //!
 //! The block table is staged at the full width a sequence can reach, never at the layout's
 //! batch-local width: the width is baked into the attention launch, so it cannot follow the
@@ -21,7 +23,9 @@ use std::fmt;
 use std::mem;
 use std::slice;
 
-use atoma_core::types::RequestSlot;
+use atoma_core::request::PADDING_TOKEN;
+use atoma_core::types::{BlockId, RequestSlot, TokenCount};
+use atoma_runtime::arena::BucketIdx;
 use thiserror::Error;
 
 use crate::batch::BatchLayout;
@@ -99,7 +103,8 @@ pub enum StagingError {
     BlockUnaddressable { rows: usize, width: usize },
 }
 
-/// How wide the staged arrays are: the shape every bucket's inputs are carved from.
+/// How wide the staged arrays are, and the KV geometry a row is written against: the shape
+/// every bucket's inputs are carved from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StagingShape {
     /// Rows the arrays hold: the largest bucket.
@@ -109,6 +114,42 @@ pub struct StagingShape {
     pub block_table_width: usize,
     /// Positions the rotary tables cover.
     pub max_position: usize,
+    /// Tokens per KV block: a block id times it is the block's first KV slot, where a padding
+    /// row's token is written.
+    pub block_size: TokenCount,
+}
+
+/// A bucket's rows run as padding rows, over one KV block each: what a capture check or a warmup
+/// runs when there is no live batch to run. Each row is what a padding dummy's row is in a live
+/// step — the padding token at position 0, a key length of one, the block's first KV slot, and a
+/// block table of that one block — so the step computes what it computes for a dummy, and the
+/// only cache it writes is each block's first KV slot. No row samples, so a dummy run stages
+/// nothing for the sampler and reads nothing back.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DummyRun {
+    bucket: BucketIdx,
+    /// One block per row of the bucket.
+    blocks: Vec<BlockId>,
+}
+
+impl DummyRun {
+    /// A dummy run of `bucket` over `blocks`, one per row. That the count is the bucket's rows
+    /// is checked where the bucket's layout is known, when the run is staged.
+    #[must_use]
+    pub fn new(bucket: BucketIdx, blocks: Vec<BlockId>) -> Self {
+        Self { bucket, blocks }
+    }
+
+    #[must_use]
+    pub fn bucket(&self) -> BucketIdx {
+        self.bucket
+    }
+
+    /// The rows the run fills: one per block.
+    #[must_use]
+    pub fn rows(&self) -> usize {
+        self.blocks.len()
+    }
 }
 
 /// Each array in a packed block begins at a multiple of this many bytes: the alignment a device
@@ -425,9 +466,81 @@ pub fn stage_sampler(
     Ok(())
 }
 
+/// Writes `run`'s rows into the leading rows of `arrays` as padding rows: the padding token at
+/// position 0 with a key length of one, the row's block's first KV slot as its slot, and the
+/// block alone in its block table row, zero past it. The sampler's two arrays name no request
+/// slot for any row: the gather keeps the host's padding token, as it does for a live step's
+/// padding rows, and nothing samples.
+///
+/// # Errors
+///
+/// Returns [`StagingError`] when an array is shorter than the run's rows, or a block id does not
+/// fit the kernel's input.
+pub fn stage_dummy(
+    run: &DummyRun,
+    shape: StagingShape,
+    arrays: BucketArrays<'_>,
+) -> Result<(), StagingError> {
+    let rows = run.rows();
+    let width = shape.block_table_width;
+    let BucketArrays {
+        inputs:
+            StagingArrays {
+                token_ids,
+                positions,
+                seqlens_k,
+                slot_mapping,
+                block_table,
+            },
+        sampler: SamplerArrays {
+            row_slots,
+            gather_slots,
+        },
+    } = arrays;
+    fits(StagedInput::TokenIds, token_ids.len(), rows, rows)?;
+    fits(StagedInput::Positions, positions.len(), rows, rows)?;
+    fits(StagedInput::KeyLengths, seqlens_k.len(), rows, rows)?;
+    fits(StagedInput::SlotMapping, slot_mapping.len(), rows, rows)?;
+    fits(
+        StagedInput::BlockTable,
+        block_table.len(),
+        rows,
+        rows * width,
+    )?;
+    holds(StagedInput::RowSlots, row_slots.len(), rows)?;
+    holds(StagedInput::GatherSlots, gather_slots.len(), rows)?;
+
+    token_ids[..rows].fill(PADDING_TOKEN);
+    positions[..rows].fill(0);
+    seqlens_k[..rows].fill(1);
+    for (row, &block) in run.blocks.iter().enumerate() {
+        slot_mapping[row] = first_slot(block, shape.block_size);
+        // The width covers a sequence of the model's maximum length, so a row has a first cell.
+        let table_row = &mut block_table[row * width..(row + 1) * width];
+        table_row[0] = i32::try_from(block.get()).map_err(|_| StagingError::Overflow {
+            input: StagedInput::BlockTable,
+            value: i64::from(block.get()),
+        })?;
+        table_row[1..].fill(0);
+    }
+    row_slots[..rows].fill(NO_REQUEST_SLOT);
+    gather_slots[..rows].fill(KEEP_HOST_TOKEN);
+    Ok(())
+}
+
+/// The first KV slot of `block`: where a padding row's token is written, derived as the batch
+/// layout derives every slot.
+fn first_slot(block: BlockId, block_size: TokenCount) -> i64 {
+    // A block id is 32 bits and a block size is a token count, so the product fits.
+    i64::try_from(block.index() * block_size.get()).expect("a block's first KV slot fits i64")
+}
+
 /// The gather slot of a row whose token the host's upload serves: negative, as the kernel reads
 /// it.
 const KEEP_HOST_TOKEN: i32 = -1;
+
+/// The row slot of a row that does not sample: negative, the value no request slot has.
+const NO_REQUEST_SLOT: i32 = -1;
 
 /// `slot` as the kernels index a per-slot array.
 fn slot_index(input: StagedInput, slot: RequestSlot) -> Result<i32, StagingError> {
@@ -468,7 +581,7 @@ mod tests {
 
     use super::*;
     use crate::decode::batch::{Checked, DecodeBuckets};
-    use crate::test_support::{engine_config, entry, keyed_command, BLOCK_SIZE};
+    use crate::test_support::{command, dummy, engine_config, entry, keyed_command, BLOCK_SIZE};
 
     const MAX_TOKENS: usize = 4;
     const WIDTH: usize = 8;
@@ -478,16 +591,19 @@ mod tests {
             max_tokens: MAX_TOKENS,
             block_table_width: WIDTH,
             max_position: 32,
+            block_size: BLOCK_SIZE,
         }
     }
 
     /// Storage for a packed block: `u64` words, so the base is aligned as the carve requires,
-    /// with every byte set, so an untouched value reads as `u32::MAX` or `-1`.
+    /// with every byte set to `0x5A`, which no input stages, so an untouched value reads as
+    /// `0x5A5A_5A5A` and never as the `-1` the sampler's arrays carry.
     struct Block(Vec<u64>);
 
     impl Block {
         fn sized(bytes: usize) -> Self {
-            Self(vec![u64::MAX; bytes.div_ceil(size_of::<u64>())])
+            let words = bytes.div_ceil(size_of::<u64>());
+            Self(vec![u64::from_ne_bytes([0x5A; 8]); words])
         }
 
         fn bytes(&mut self) -> &mut [u8] {
@@ -516,7 +632,7 @@ mod tests {
         let wide = StagingShape {
             max_tokens: 128,
             block_table_width: 64,
-            max_position: 32,
+            ..shape()
         };
         let staging = StagingLayout::packed(wide, 100).unwrap();
 
@@ -544,7 +660,7 @@ mod tests {
         let wide = StagingShape {
             max_tokens: 32,
             block_table_width: 64,
-            max_position: 32,
+            ..shape()
         };
         let widest = StagingShape {
             max_tokens: 4096,
@@ -587,7 +703,7 @@ mod tests {
 
         // Each array's last value lands at its offset plus three rows (31 for the table), at its
         // element's width; every other byte of the block is as the storage set it.
-        let mut expected = vec![0xFF; 1792];
+        let mut expected = vec![0x5A; 1792];
         expected[12..16].fill(0x11);
         expected[256 + 12..256 + 16].fill(0x22);
         expected[512 + 12..512 + 16].fill(0x33);
@@ -698,10 +814,10 @@ mod tests {
             "the dummy's row is its block, then zero"
         );
         assert_eq!(
-            sampler.row_slots, [-1; 4],
+            sampler.row_slots, [0x5A5A_5A5A; 4],
             "the sampler's arrays are the sampler's to write"
         );
-        assert_eq!(sampler.gather_slots, [-1; 4]);
+        assert_eq!(sampler.gather_slots, [0x5A5A_5A5A; 4]);
     }
 
     #[test]
@@ -714,9 +830,9 @@ mod tests {
         stage(&layout, &batch, shape(), inputs).unwrap();
 
         let BucketArrays { inputs, .. } = staging.carve(block.bytes()).unwrap();
-        assert_eq!(inputs.token_ids, [9, u32::MAX, u32::MAX, u32::MAX]);
-        assert_eq!(inputs.positions, [3, -1, -1, -1]);
-        assert_eq!(inputs.block_table[WIDTH..], vec![-1; 3 * WIDTH]);
+        assert_eq!(inputs.token_ids, [9, 0x5A5A_5A5A, 0x5A5A_5A5A, 0x5A5A_5A5A]);
+        assert_eq!(inputs.positions, [3, 0x5A5A_5A5A, 0x5A5A_5A5A, 0x5A5A_5A5A]);
+        assert_eq!(inputs.block_table[WIDTH..], vec![0x5A5A_5A5A; 3 * WIDTH]);
     }
 
     #[test]
@@ -775,6 +891,159 @@ mod tests {
 
         assert_eq!(
             stage(&layout, &batch, shape(), inputs).unwrap_err(),
+            StagingError::Overflow {
+                input: StagedInput::BlockTable,
+                value: i64::from(u32::MAX)
+            }
+        );
+    }
+
+    /// A dummy run of the bucket of four over `blocks`.
+    fn dummy_run(blocks: [u32; 4]) -> DummyRun {
+        DummyRun::new(BucketIdx(2), blocks.map(BlockId::new).to_vec())
+    }
+
+    #[test]
+    fn a_dummy_run_stages_every_row_as_a_padding_row_over_its_own_block() {
+        let staging = StagingLayout::packed(shape(), MAX_TOKENS).unwrap();
+        let mut block = Block::sized(staging.bytes());
+
+        let arrays = staging.carve(block.bytes()).unwrap();
+        stage_dummy(&dummy_run([10, 20, 21, 22]), shape(), arrays).unwrap();
+
+        let BucketArrays { inputs, sampler } = staging.carve(block.bytes()).unwrap();
+        assert_eq!(inputs.token_ids, [PADDING_TOKEN; 4]);
+        assert_eq!(inputs.positions, [0; 4]);
+        assert_eq!(
+            inputs.seqlens_k, [1; 4],
+            "the one token, at position 0, is the key"
+        );
+        assert_eq!(
+            inputs.slot_mapping,
+            [40, 80, 84, 88],
+            "four-token blocks: a block's first slot is four times its id"
+        );
+        let rows: Vec<&[i32]> = inputs.block_table.chunks(WIDTH).collect();
+        assert_eq!(rows[0], [10, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(rows[1], [20, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(rows[2], [21, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(rows[3], [22, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(sampler.row_slots, [-1; 4], "no row samples");
+        assert_eq!(
+            sampler.gather_slots, [-1; 4],
+            "every row keeps the host's padding token"
+        );
+    }
+
+    #[test]
+    fn a_dummy_runs_rows_are_what_a_live_step_stages_for_its_padding_rows() {
+        // One live decode and three padding dummies over blocks 101, 102 and 103, laid out as
+        // the engine lays a padded step out; the batch is what the check yields for it.
+        let padded = command(
+            vec![
+                entry(1, 3, vec![9], &[10], true),
+                dummy(2, 101),
+                dummy(3, 102),
+                dummy(4, 103),
+            ],
+            3,
+        );
+        let layout = BatchLayout::lay_out(&padded, BLOCK_SIZE).unwrap();
+        let batch = DecodeBatch {
+            bucket: BucketIdx(2),
+            tokens: 4,
+            live: 1,
+        };
+        let staging = StagingLayout::packed(shape(), MAX_TOKENS).unwrap();
+        let mut live = Block::sized(staging.bytes());
+        let BucketArrays { inputs, sampler } = staging.carve(live.bytes()).unwrap();
+        stage(&layout, &batch, shape(), inputs).unwrap();
+        stage_sampler(&sampler_inputs(&[1], &[None; 4]), sampler).unwrap();
+        let mut dummies = Block::sized(staging.bytes());
+        let arrays = staging.carve(dummies.bytes()).unwrap();
+        stage_dummy(&dummy_run([10, 101, 102, 103]), shape(), arrays).unwrap();
+
+        // Rows 1..4 are padding rows on both sides; row 0 is the live decode on one side only.
+        let live = staging.carve(live.bytes()).unwrap();
+        let dummies = staging.carve(dummies.bytes()).unwrap();
+        assert_eq!(live.inputs.token_ids[1..], dummies.inputs.token_ids[1..]);
+        assert_eq!(live.inputs.positions[1..], dummies.inputs.positions[1..]);
+        assert_eq!(live.inputs.seqlens_k[1..], dummies.inputs.seqlens_k[1..]);
+        assert_eq!(
+            live.inputs.slot_mapping[1..],
+            dummies.inputs.slot_mapping[1..]
+        );
+        assert_eq!(
+            live.inputs.block_table[WIDTH..],
+            dummies.inputs.block_table[WIDTH..]
+        );
+        assert_eq!(
+            live.sampler.gather_slots[1..],
+            dummies.sampler.gather_slots[1..],
+            "a padding row keeps the host's token on both sides"
+        );
+        assert_ne!(
+            live.inputs.token_ids[0], dummies.inputs.token_ids[0],
+            "the live row is a decode, the dummy run's row 0 a padding row"
+        );
+        assert_eq!(
+            dummies.sampler.row_slots, [-1; 4],
+            "the live step leaves a padding row's row slot; a dummy run names no request slot"
+        );
+    }
+
+    #[test]
+    fn a_dummy_run_over_an_array_shorter_than_its_rows_is_refused_by_name() {
+        let run = DummyRun::new(BucketIdx(1), vec![BlockId::new(10), BlockId::new(20)]);
+        let staging = StagingLayout::packed(shape(), MAX_TOKENS).unwrap();
+        let mut block = Block::sized(staging.bytes());
+        let mut short = [0; 1];
+
+        let BucketArrays { inputs, sampler } = staging.carve(block.bytes()).unwrap();
+        let arrays = BucketArrays {
+            inputs: StagingArrays {
+                positions: &mut short,
+                ..inputs
+            },
+            sampler,
+        };
+        assert_eq!(
+            stage_dummy(&run, shape(), arrays).unwrap_err(),
+            StagingError::ArrayTooShort {
+                input: StagedInput::Positions,
+                len: 1,
+                tokens: 2,
+                needed: 2
+            }
+        );
+
+        let BucketArrays { inputs, sampler } = staging.carve(block.bytes()).unwrap();
+        let arrays = BucketArrays {
+            inputs,
+            sampler: SamplerArrays {
+                gather_slots: &mut short,
+                ..sampler
+            },
+        };
+        assert_eq!(
+            stage_dummy(&run, shape(), arrays).unwrap_err(),
+            StagingError::SamplerArrayTooShort {
+                input: StagedInput::GatherSlots,
+                len: 1,
+                rows: 2
+            }
+        );
+    }
+
+    #[test]
+    fn a_dummy_runs_block_past_the_kernels_input_width_is_refused() {
+        let run = DummyRun::new(BucketIdx(0), vec![BlockId::new(u32::MAX)]);
+        let staging = StagingLayout::packed(shape(), MAX_TOKENS).unwrap();
+        let mut block = Block::sized(staging.bytes());
+        let arrays = staging.carve(block.bytes()).unwrap();
+
+        assert_eq!(
+            stage_dummy(&run, shape(), arrays).unwrap_err(),
             StagingError::Overflow {
                 input: StagedInput::BlockTable,
                 value: i64::from(u32::MAX)
