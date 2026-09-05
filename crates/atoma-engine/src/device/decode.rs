@@ -22,8 +22,8 @@ use atoma_models::gemm::{GemmError, StepBlas, WORKSPACE_BYTES};
 use atoma_models::kernels::RotaryTensors;
 use atoma_models::layer::LLAMA_LAYER;
 use atoma_models::llama::slots::{
-    Bucket, BucketSlots, LayerWeights, LlamaCache, LlamaWeights, SlotError, SlotSources,
-    StepStatics,
+    Bucket, BucketInputs, BucketSlots, LayerWeights, LlamaCache, LlamaWeights, SlotError,
+    SlotSources, StepStatics,
 };
 use atoma_models::llama::step::{LlamaDecode, LlamaStep, StepError};
 use atoma_models::rope::RotaryTables;
@@ -193,12 +193,17 @@ impl DecodeStep {
             dims: &dims,
             plans: &plans,
             shape,
+            buckets: &buckets,
         };
         let inputs = DecodeInputs::new(allocation, stream, shape)?;
-        let (statics, step_statics) =
-            allocate_statics(allocation, stream, &sizing, &inputs.tensors())?;
-        let (arena_memory, arena_bytes, slots) =
-            resolve_slots(allocation, stream, &sizing, &buckets, &step_statics)?;
+        let (statics, step_statics) = allocate_statics(allocation, stream, &sizing)?;
+        let (arena_memory, arena_bytes, slots) = resolve_slots(
+            allocation,
+            stream,
+            &sizing,
+            &step_statics,
+            &inputs.tensors(),
+        )?;
         let decode = LlamaDecode::new(
             dims,
             snapshot_weights(allocation, llama, stream)?,
@@ -357,22 +362,25 @@ struct Sizing<'a> {
     dims: &'a LlamaDims,
     plans: &'a [AttentionPlan],
     shape: StagingShape,
+    /// The buckets served, one plan each in `plans`, in bucket-ladder order.
+    buckets: &'a DecodeBuckets,
 }
 
-/// Allocates the arena and resolves every bucket's slot tables over it: the arena's memory (owned
-/// for as long as the tables are read), its size, and the tables in bucket order.
+/// Allocates the arena and resolves every bucket's slot tables over it, each bucket's inputs
+/// minted from `inputs`: the arena's memory (owned for as long as the tables are read), its
+/// size, and the tables in bucket order.
 fn resolve_slots(
     allocation: &Allocation,
     stream: &Arc<CudaStream>,
     sizing: &Sizing<'_>,
-    buckets: &DecodeBuckets,
     statics: &StepStatics,
+    inputs: &InputTensors,
 ) -> Result<(CudaSlice<u8>, usize, Vec<BucketSlots>), DecodeStepError> {
     let dims = sizing.dims;
     let arena = CaptureArena::new(
         dims.layers + 1,
         LLAMA_LAYER.role_table(dims),
-        buckets.tokens(),
+        sizing.buckets.tokens(),
         ArenaLayout::Greedy,
     )?;
     let arena_memory = zeroed(stream, arena.total_size())?;
@@ -390,7 +398,8 @@ fn resolve_slots(
         statics,
         dims,
     };
-    let slots = buckets
+    let slots = sizing
+        .buckets
         .tokens()
         .iter()
         .zip(sizing.plans)
@@ -400,10 +409,23 @@ fn resolve_slots(
                 index: BucketIdx(index),
                 tokens,
             };
-            BucketSlots::resolve(&sources, bucket, *attention)
+            let inputs = bucket_inputs(inputs, tokens)?;
+            Ok(BucketSlots::resolve(&sources, bucket, *attention, inputs)?)
         })
-        .collect::<Result<Vec<_>, _>>()?;
+        .collect::<Result<Vec<_>, DecodeStepError>>()?;
     Ok((arena_memory, arena.total_size(), slots))
+}
+
+/// The views a bucket of `tokens` rows reads its inputs through: the leading rows of each
+/// device buffer, where the upload puts them.
+fn bucket_inputs(inputs: &InputTensors, tokens: usize) -> Result<BucketInputs, TensorError> {
+    Ok(BucketInputs {
+        token_ids: inputs.token_ids.narrow(0, 0, tokens)?,
+        positions: inputs.positions.narrow(0, 0, tokens)?,
+        seqlens_k: inputs.seqlens_k.narrow(0, 0, tokens)?,
+        slot_mapping: inputs.slot_mapping.narrow(0, 0, tokens)?,
+        block_table: inputs.block_table.narrow(0, 0, tokens)?,
+    })
 }
 
 /// The dimensions the step reads off the checkpoint's configuration.
@@ -564,7 +586,6 @@ fn allocate_statics(
     allocation: &Allocation,
     stream: &Arc<CudaStream>,
     sizing: &Sizing<'_>,
-    inputs: &InputTensors,
 ) -> Result<(Statics, StepStatics), DecodeStepError> {
     let (dims, plans, shape) = (sizing.dims, sizing.plans, sizing.shape);
     let largest = |bytes: fn(&AttentionPlan) -> usize| plans.iter().map(bytes).max().unwrap_or(0);
@@ -601,11 +622,6 @@ fn allocate_statics(
             _sin: sin_buffer,
         },
         StepStatics {
-            token_ids: inputs.token_ids,
-            positions: inputs.positions,
-            seqlens_k: inputs.seqlens_k,
-            slot_mapping: inputs.slot_mapping,
-            block_table: inputs.block_table,
             logits,
             softmax_lse,
             lse_accum,

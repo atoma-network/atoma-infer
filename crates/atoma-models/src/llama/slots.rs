@@ -4,10 +4,10 @@
 //! only through its offset lookup. This module is the one place that lookup becomes a tensor
 //! view: for each bucket, for each arena row, one `[tokens, width]` view per role, and the query,
 //! key and value column views of the fused row. Beside them sit the weights, the paged cache
-//! halves and the step's fixed buffers — the inputs written before every step, the logits read
-//! after it, the attention workspace — each checked against the model's dimensions when the
-//! table is built. What the step enqueues is then a walk over these tables: no address
-//! arithmetic, no lookup and no check inside a recording.
+//! halves, the bucket's inputs where their upload lands, and the step's fixed buffers — the
+//! logits read after every step, the attention workspace — each checked against the model's
+//! dimensions when the table is built. What the step enqueues is then a walk over these tables:
+//! no address arithmetic, no lookup and no check inside a recording.
 //!
 //! A row is one layer's frame in the arena. There are `layers + 1` rows: the last layer's
 //! residual add writes the row after it, which the final norm then reads, and whose `Normed`
@@ -404,20 +404,10 @@ impl LlamaCache {
     }
 }
 
-/// The step's fixed buffers, sized once at the largest bucket: the inputs the host writes before
-/// every step, the logits it reads after, the attention workspace, and the rotary tables.
+/// The step's fixed buffers, sized once at the largest bucket: the logits the host reads after
+/// every step, the attention workspace, and the rotary tables.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StepStatics {
-    /// u32 `[max_tokens]`.
-    pub token_ids: Tensor,
-    /// i32 `[max_tokens]`.
-    pub positions: Tensor,
-    /// i32 `[max_tokens]`: each sequence's key length after this step's token.
-    pub seqlens_k: Tensor,
-    /// i64 `[max_tokens]`.
-    pub slot_mapping: Tensor,
-    /// i32 `[max_tokens, max_blocks_per_seq]`.
-    pub block_table: Tensor,
     /// f32 `[max_tokens, vocab]`.
     pub logits: Tensor,
     /// f32, at least the largest bucket's log-sum-exp output.
@@ -429,8 +419,25 @@ pub struct StepStatics {
     pub rotary: RotaryTensors,
 }
 
-/// One bucket's views of the fixed buffers: the leading rows of each, as many as the bucket has
-/// tokens, and the attention workspace at the bucket's split count.
+/// One bucket's inputs: the views the host's upload lands in, each of exactly the bucket's rows.
+/// Minted at Allocation by whoever places the rows, and taken as given here: checked against the
+/// plan, never cut from a larger buffer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BucketInputs {
+    /// u32 `[tokens]`.
+    pub token_ids: Tensor,
+    /// i32 `[tokens]`.
+    pub positions: Tensor,
+    /// i32 `[tokens]`: each sequence's key length after this step's token.
+    pub seqlens_k: Tensor,
+    /// i64 `[tokens]`.
+    pub slot_mapping: Tensor,
+    /// i32 `[tokens, max_blocks_per_seq]`.
+    pub block_table: Tensor,
+}
+
+/// One bucket's views of what a step reads and writes outside the arena: its inputs as given,
+/// the leading rows of the logits, and the attention workspace at the bucket's split count.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BucketStatics {
     pub token_ids: Tensor,
@@ -445,65 +452,63 @@ pub struct BucketStatics {
 }
 
 impl BucketStatics {
-    /// The leading rows of each static that `plan`'s bucket reads and writes.
+    /// `inputs` as given, and the leading rows of each static that `plan`'s bucket reads and
+    /// writes.
     ///
     /// # Errors
     ///
-    /// Returns [`SlotError`] when a static is not the dtype the kernels read, not contiguous,
-    /// not as wide as the plan, or shorter than the bucket.
+    /// Returns [`SlotError`] when an input is not exactly the bucket's rows at the plan's width,
+    /// or a static is not the dtype the kernels read, not contiguous, not as wide as the plan,
+    /// or shorter than the bucket.
     pub fn resolve(
         statics: &StepStatics,
+        inputs: BucketInputs,
         plan: &AttentionPlan,
         dims: &LlamaDims,
     ) -> Result<Self, SlotError> {
         let tokens = plan.bucket;
         let shape = plan.shape();
-        let pairs = dims.head_dim / 2;
-        let rotary = [dims.rope.max_position, pairs];
-        static_shape(
+        let BucketInputs {
+            token_ids,
+            positions,
+            seqlens_k,
+            slot_mapping,
+            block_table,
+        } = inputs;
+        given(OperandKind::TokenIds, &token_ids, Dtype::U32, &[tokens])?;
+        given(OperandKind::Positions, &positions, Dtype::I32, &[tokens])?;
+        given(OperandKind::KeyLengths, &seqlens_k, Dtype::I32, &[tokens])?;
+        given(
+            OperandKind::SlotMapping,
+            &slot_mapping,
+            Dtype::I64,
+            &[tokens],
+        )?;
+        given(
+            OperandKind::BlockTable,
+            &block_table,
+            Dtype::I32,
+            &[tokens, plan.max_blocks_per_seq],
+        )?;
+        let rotary = [dims.rope.max_position, dims.head_dim / 2];
+        given(
             OperandKind::CosineTable,
             &statics.rotary.cos,
             Dtype::F32,
             &rotary,
         )?;
-        static_shape(
+        given(
             OperandKind::SineTable,
             &statics.rotary.sin,
             Dtype::F32,
             &rotary,
         )?;
         Ok(Self {
-            token_ids: leading(
-                OperandKind::TokenIds,
-                &statics.token_ids,
-                Dtype::U32,
-                tokens,
-            )?,
-            positions: leading(
-                OperandKind::Positions,
-                &statics.positions,
-                Dtype::I32,
-                tokens,
-            )?,
-            seqlens_k: leading(
-                OperandKind::KeyLengths,
-                &statics.seqlens_k,
-                Dtype::I32,
-                tokens,
-            )?,
-            slot_mapping: leading(
-                OperandKind::SlotMapping,
-                &statics.slot_mapping,
-                Dtype::I64,
-                tokens,
-            )?,
-            block_table: leading_rows(
-                OperandKind::BlockTable,
-                &statics.block_table,
-                Dtype::I32,
-                tokens,
-                plan.max_blocks_per_seq,
-            )?,
+            token_ids,
+            positions,
+            seqlens_k,
+            slot_mapping,
+            block_table,
             logits: leading_rows(
                 OperandKind::Logits,
                 &statics.logits,
@@ -553,7 +558,8 @@ pub struct SlotSources<'a> {
 }
 
 impl BucketSlots {
-    /// Resolves the activations and statics of `bucket`, whose attention runs `plan`.
+    /// Resolves the activations and statics of `bucket`, whose attention runs `plan` and whose
+    /// inputs land in `inputs`.
     ///
     /// # Errors
     ///
@@ -566,6 +572,7 @@ impl BucketSlots {
         sources: &SlotSources<'_>,
         bucket: Bucket,
         plan: AttentionPlan,
+        inputs: BucketInputs,
     ) -> Result<Self, SlotError> {
         if plan.bucket != bucket.tokens {
             return Err(SlotError::PlanBucket {
@@ -582,7 +589,7 @@ impl BucketSlots {
                 bucket,
                 sources.dims,
             )?,
-            statics: BucketStatics::resolve(sources.statics, &plan, sources.dims)?,
+            statics: BucketStatics::resolve(sources.statics, inputs, &plan, sources.dims)?,
         })
     }
 }
@@ -606,8 +613,8 @@ fn exact(
     Ok(())
 }
 
-/// A model-level static of exactly `shape`.
-fn static_shape(
+/// A model-level view taken as given: contiguous, of `dtype`, and exactly `shape`.
+fn given(
     kind: OperandKind,
     tensor: &Tensor,
     dtype: Dtype,
@@ -949,16 +956,22 @@ mod tests {
         );
     }
 
+    /// A bucket's inputs at `tokens` rows, each at its own address.
+    fn inputs(tokens: usize) -> BucketInputs {
+        BucketInputs {
+            token_ids: view(0x8000_0000, &[tokens], Dtype::U32),
+            positions: view(0x8001_0000, &[tokens], Dtype::I32),
+            seqlens_k: view(0x8002_0000, &[tokens], Dtype::I32),
+            slot_mapping: view(0x8003_0000, &[tokens], Dtype::I64),
+            block_table: view(0x8004_0000, &[tokens, BLOCK_COLUMNS], Dtype::I32),
+        }
+    }
+
     fn statics(dims: &LlamaDims) -> StepStatics {
         let max = *LADDER.iter().max().unwrap();
         let widest = plan(max);
         let shape = widest.shape();
         StepStatics {
-            token_ids: view(0x7000_0000, &[max], Dtype::U32),
-            positions: view(0x7001_0000, &[max], Dtype::I32),
-            seqlens_k: view(0x7002_0000, &[max], Dtype::I32),
-            slot_mapping: view(0x7003_0000, &[max], Dtype::I64),
-            block_table: view(0x7004_0000, &[max, BLOCK_COLUMNS], Dtype::I32),
             logits: view(0x7100_0000, &[max, dims.vocab], Dtype::F32),
             softmax_lse: view(0x7200_0000, &[shape.softmax_lse_len()], Dtype::F32),
             lse_accum: view(
@@ -987,17 +1000,20 @@ mod tests {
     }
 
     #[test]
-    fn a_buckets_statics_are_the_leading_rows_of_each_fixed_buffer() {
+    fn a_bucket_takes_its_inputs_as_given_and_the_leading_rows_of_each_output() {
         let dims = dims();
         let statics = statics(&dims);
         let one = plan(1);
+        let given = inputs(1);
 
-        let bucket = BucketStatics::resolve(&statics, &one, &dims).unwrap();
+        let bucket = BucketStatics::resolve(&statics, given, &one, &dims).unwrap();
 
-        assert_eq!(bucket.token_ids.address(), statics.token_ids.address());
-        assert_eq!(bucket.token_ids.dims(), [1]);
-        assert_eq!(bucket.block_table.dims(), [1, BLOCK_COLUMNS]);
-        assert!(bucket.block_table.is_contiguous());
+        assert_eq!(bucket.token_ids, given.token_ids);
+        assert_eq!(bucket.positions, given.positions);
+        assert_eq!(bucket.seqlens_k, given.seqlens_k);
+        assert_eq!(bucket.slot_mapping, given.slot_mapping);
+        assert_eq!(bucket.block_table, given.block_table);
+        assert_eq!(bucket.logits.address(), statics.logits.address());
         assert_eq!(bucket.logits.dims(), [1, dims.vocab]);
         assert_eq!(bucket.softmax_lse.dims(), [one.shape().softmax_lse_len()]);
         assert_eq!(
@@ -1009,21 +1025,71 @@ mod tests {
             [one.shape().o_accum_len(one.num_splits)]
         );
 
-        let full = BucketStatics::resolve(&statics, &plan(8), &dims).unwrap();
+        let full = BucketStatics::resolve(&statics, inputs(8), &plan(8), &dims).unwrap();
         assert_eq!(full.logits.dims(), [8, dims.vocab]);
-        assert_eq!(full.slot_mapping.dims(), [8]);
+    }
+
+    #[test]
+    fn an_input_of_another_buckets_rows_is_refused_with_both_shapes() {
+        let dims = dims();
+        let statics = statics(&dims);
+        let mut given = inputs(8);
+        given.positions = view(0x8001_0000, &[4], Dtype::I32);
+
+        assert_eq!(
+            BucketStatics::resolve(&statics, given, &plan(8), &dims).unwrap_err(),
+            SlotError::Operand(OperandError::Shape {
+                operand: Operand::model(OperandKind::Positions),
+                shape: Shape::new(&[4]),
+                expected: Shape::new(&[8])
+            })
+        );
+    }
+
+    #[test]
+    fn an_input_in_another_dtype_is_refused_by_name() {
+        let dims = dims();
+        let statics = statics(&dims);
+        let mut given = inputs(8);
+        given.token_ids = view(0x8000_0000, &[8], Dtype::I32);
+
+        assert_eq!(
+            BucketStatics::resolve(&statics, given, &plan(8), &dims).unwrap_err(),
+            SlotError::Operand(OperandError::Dtype {
+                operand: Operand::model(OperandKind::TokenIds),
+                dtype: Dtype::I32,
+                expected: Dtype::U32
+            })
+        );
+    }
+
+    #[test]
+    fn a_block_table_narrower_than_the_plan_is_refused_with_both_shapes() {
+        let dims = dims();
+        let statics = statics(&dims);
+        let mut given = inputs(8);
+        given.block_table = view(0x8004_0000, &[8, 16], Dtype::I32);
+
+        assert_eq!(
+            BucketStatics::resolve(&statics, given, &plan(8), &dims).unwrap_err(),
+            SlotError::Operand(OperandError::Shape {
+                operand: Operand::model(OperandKind::BlockTable),
+                shape: Shape::new(&[8, 16]),
+                expected: Shape::new(&[8, BLOCK_COLUMNS])
+            })
+        );
     }
 
     #[test]
     fn a_static_shorter_than_the_bucket_is_refused_with_the_rows_it_holds() {
         let dims = dims();
         let mut statics = statics(&dims);
-        statics.positions = view(0x7001_0000, &[4], Dtype::I32);
+        statics.logits = view(0x7100_0000, &[4, dims.vocab], Dtype::F32);
 
         assert_eq!(
-            BucketStatics::resolve(&statics, &plan(8), &dims).unwrap_err(),
+            BucketStatics::resolve(&statics, inputs(8), &plan(8), &dims).unwrap_err(),
             SlotError::Operand(OperandError::TooShort {
-                operand: Operand::model(OperandKind::Positions),
+                operand: Operand::model(OperandKind::Logits),
                 len: 4,
                 needed: 8
             })
@@ -1034,30 +1100,14 @@ mod tests {
     fn a_scalar_static_is_refused_by_rank_rather_than_indexed() {
         let dims = dims();
         let mut statics = statics(&dims);
-        statics.seqlens_k = view(0x7002_0000, &[], Dtype::I32);
+        statics.softmax_lse = view(0x7200_0000, &[], Dtype::F32);
 
         assert_eq!(
-            BucketStatics::resolve(&statics, &plan(8), &dims).unwrap_err(),
+            BucketStatics::resolve(&statics, inputs(8), &plan(8), &dims).unwrap_err(),
             SlotError::Operand(OperandError::Rank {
-                operand: Operand::model(OperandKind::KeyLengths),
+                operand: Operand::model(OperandKind::LogSumExp),
                 rank: 0,
                 expected: 1
-            })
-        );
-    }
-
-    #[test]
-    fn a_block_table_narrower_than_the_plan_is_refused_with_both_shapes() {
-        let dims = dims();
-        let mut statics = statics(&dims);
-        statics.block_table = view(0x7004_0000, &[8, 16], Dtype::I32);
-
-        assert_eq!(
-            BucketStatics::resolve(&statics, &plan(8), &dims).unwrap_err(),
-            SlotError::Operand(OperandError::Shape {
-                operand: Operand::model(OperandKind::BlockTable),
-                shape: Shape::new(&[8, 16]),
-                expected: Shape::new(&[8, BLOCK_COLUMNS])
             })
         );
     }
@@ -1075,14 +1125,14 @@ mod tests {
             dims: &dims,
         };
 
-        let slots = BucketSlots::resolve(&sources, bucket(1), plan(8)).unwrap();
+        let slots = BucketSlots::resolve(&sources, bucket(1), plan(8), inputs(8)).unwrap();
         assert_eq!(slots.bucket, bucket(1));
         assert_eq!(slots.plan.bucket, 8);
         assert_eq!(slots.activations.rows(), LAYERS + 1);
-        assert_eq!(slots.statics.token_ids.dims(), [8]);
+        assert_eq!(slots.statics.token_ids, inputs(8).token_ids);
 
         assert_eq!(
-            BucketSlots::resolve(&sources, bucket(1), plan(1)).unwrap_err(),
+            BucketSlots::resolve(&sources, bucket(1), plan(1), inputs(1)).unwrap_err(),
             SlotError::PlanBucket { plan: 1, tokens: 8 }
         );
     }
