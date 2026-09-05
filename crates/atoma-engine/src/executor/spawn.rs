@@ -16,8 +16,6 @@ use tracing::info;
 
 use crate::config::{DeviceOrdinal, ExecutorConfig, ModelConfig, Rank, RankConfig};
 #[cfg(not(feature = "nccl"))]
-use crate::decode::ring::StagingDepth;
-#[cfg(not(feature = "nccl"))]
 use crate::device::decode::{DecodeStep, DecodeStepPlan};
 use crate::device::forward::{Allocated, CudaForward};
 use crate::device::sampler::DeviceSampler;
@@ -110,7 +108,7 @@ pub fn spawn_ranks(
             max_model_len: engine.scheduler.max_model_len,
             block_size: engine.scheduler.block_size,
             dtype: model.dtype,
-            staging_depth: StagingDepth::default(),
+            staging_depth: executor.staging_depth,
         },
         #[cfg(feature = "nccl")]
         collective: Id::new().map_err(|error| StartupError::Collective { status: error.0 })?,

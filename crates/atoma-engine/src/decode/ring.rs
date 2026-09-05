@@ -24,11 +24,15 @@ use std::num::NonZeroUsize;
 
 use atoma_runtime::error::RuntimeError;
 use atoma_runtime::fence::StagingFence;
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
 /// How many staging entries the staging ring holds, between one and [`StagingDepth::MAX`] by
 /// construction: two unless configured, so the host writes one staging entry while the device is
-/// still reading the other.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// still reading the other. Read from configuration as a plain integer, through
+/// [`StagingDepth::new`], so a depth out of range refuses the configuration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(into = "usize", try_from = "usize")]
 pub struct StagingDepth(NonZeroUsize);
 
 impl StagingDepth {
@@ -68,6 +72,32 @@ impl fmt::Display for StagingDepth {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.0.fmt(f)
     }
+}
+
+impl TryFrom<usize> for StagingDepth {
+    type Error = StagingDepthError;
+
+    fn try_from(depth: usize) -> Result<Self, Self::Error> {
+        Self::new(depth).ok_or(StagingDepthError { depth })
+    }
+}
+
+impl From<StagingDepth> for usize {
+    fn from(depth: StagingDepth) -> Self {
+        depth.get()
+    }
+}
+
+/// A staging depth no staging ring can be built at: zero, or above [`StagingDepth::MAX`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+#[error(
+    "staging depth {depth} is out of range; a staging ring holds between 1 and {max} staging \
+     entries",
+    max = StagingDepth::MAX
+)]
+pub struct StagingDepthError {
+    /// The depth that was asked for.
+    pub depth: usize,
 }
 
 /// What the staging ring asks of the fence guarding one staging entry: a blocking wait and a
@@ -299,6 +329,24 @@ mod tests {
         assert_eq!(StagingDepth::new(deepest), Some(StagingDepth::MAX));
         assert_eq!(StagingDepth::new(deepest + 1), None, "one past the deepest");
         assert_eq!(StagingDepth::new(usize::MAX), None);
+    }
+
+    #[test]
+    fn a_plain_integer_becomes_a_staging_depth_only_inside_the_bounds() {
+        assert_eq!(StagingDepth::try_from(1).map(usize::from), Ok(1));
+        assert_eq!(StagingDepth::try_from(8).map(usize::from), Ok(8));
+        assert_eq!(
+            StagingDepth::try_from(0),
+            Err(StagingDepthError { depth: 0 })
+        );
+        assert_eq!(
+            StagingDepth::try_from(9),
+            Err(StagingDepthError { depth: 9 })
+        );
+        assert_eq!(
+            StagingDepthError { depth: 9 }.to_string(),
+            "staging depth 9 is out of range; a staging ring holds between 1 and 8 staging entries"
+        );
     }
 
     #[test]
