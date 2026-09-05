@@ -4,7 +4,7 @@
 //! Candle keeps owning the weights and the cache; this module snapshots their device addresses
 //! into tensor views, allocates the arena, the step's fixed buffers and the cuBLAS workspace,
 //! resolves every usable bucket's slot tables, and holds the step descriptor over them. A step is
-//! then six descriptors on the capture stream: the fence after candle's stream, the input upload,
+//! then six descriptors on the capture stream: the wait on candle's stream, the input upload,
 //! the sampler's upload, the gather that takes each decoding row's token from what the device
 //! sampled for its slot, the model step, and the sample, which leaves the tokens on the device and
 //! reads them back; then one host wait. Nothing is captured here. Going through the descriptor
@@ -42,7 +42,7 @@ use tracing::info;
 use crate::batch::BatchLayout;
 use crate::config::Dtype as ConfiguredDtype;
 use crate::decode::batch::{Checked, DecodeBatch, DecodeBatchError, DecodeBuckets};
-use crate::decode::inputs::{DecodeInputs, Fence, InputTensors, InputsError, Upload};
+use crate::decode::inputs::{DecodeInputs, InputTensors, InputsError, Upload, WaitEvent};
 use crate::decode::staging::StagingShape;
 use crate::device::sampler::{DeviceSampler, SamplerError};
 use crate::device::{KvCache, RankDevice, Weights};
@@ -247,11 +247,11 @@ impl DecodeStep {
         )?)
     }
 
-    /// Runs `batch`'s step through `session` and samples it: the inputs staged, then the fence,
-    /// the input upload, the sampler's upload, the gather, the model step and the sample enqueued
-    /// in that order, then the host wait on the sampled tokens. A rank with no sampler runs the
-    /// same step without the sampler's descriptors and waits for it instead, so the next step's
-    /// staging is fenced either way, and returns no tokens.
+    /// Runs `batch`'s step through `session` and samples it: the inputs staged, then the wait on
+    /// candle's stream, the input upload, the sampler's upload, the gather, the model step and the
+    /// sample enqueued in that order, then the host wait on the sampled tokens. A rank with no
+    /// sampler runs the same step without the sampler's descriptors and waits for it instead,
+    /// so the next step's staging is fenced either way, and returns no tokens.
     ///
     /// # Errors
     ///
@@ -265,7 +265,7 @@ impl DecodeStep {
         sampler: Option<&'a mut DeviceSampler>,
     ) -> Result<&'a [u32], DecodeStepError> {
         self.stage(layout, &batch)?;
-        session.run(&mut Fence::new(&self.candle_done))?;
+        session.run(&mut WaitEvent::new(&self.candle_done))?;
         session.run(&mut self.upload(&batch))?;
         let Some(sampler) = sampler else {
             session.run(&mut self.descriptor(batch.bucket)?)?;
@@ -296,7 +296,7 @@ impl DecodeStep {
         readback: &'a mut Readback<f32>,
     ) -> Result<Logits<'a>, DecodeStepError> {
         self.stage(layout, &batch)?;
-        session.run(&mut Fence::new(&self.candle_done))?;
+        session.run(&mut WaitEvent::new(&self.candle_done))?;
         session.run(&mut self.upload(&batch))?;
         session.run(&mut self.descriptor(batch.bucket)?)?;
         let vocab = self.decode.dims().vocab;

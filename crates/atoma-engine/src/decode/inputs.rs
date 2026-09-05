@@ -11,8 +11,8 @@
 //! step precede the readback on the same stream, so by the time the host writes the next step's
 //! inputs the previous step has finished reading both copies.
 //!
-//! The fence descriptor orders the decode step after candle's stream: a prefill runs there, and
-//! the step must not read the cache it wrote until it is written.
+//! [`WaitEvent`] orders the decode step after candle's stream: a prefill runs there, and the
+//! step must not read the cache it wrote until it is written.
 
 use std::sync::Arc;
 
@@ -262,24 +262,25 @@ impl Descriptor for Upload<'_> {
     }
 }
 
-/// A wait on `event` from the capture stream: the step runs after whatever the event fences.
-pub struct Fence<'a> {
+/// A wait on `event` from the capture stream: the step runs after everything enqueued before
+/// the event was recorded.
+pub struct WaitEvent<'a> {
     event: &'a CudaEvent,
 }
 
-impl<'a> Fence<'a> {
+impl<'a> WaitEvent<'a> {
     #[must_use]
     pub fn new(event: &'a CudaEvent) -> Self {
         Self { event }
     }
 }
 
-impl Descriptor for Fence<'_> {
+impl Descriptor for WaitEvent<'_> {
     type Error = RuntimeError;
 
     unsafe fn enqueue(&mut self, stream: sys::CUstream) -> Result<(), RuntimeError> {
         // SAFETY: the session hands a live stream, and the event is live for as long as this
-        // fence borrows it. An event never recorded is complete, so the wait is a no-op.
+        // descriptor borrows it. An event never recorded is complete, so the wait is a no-op.
         unsafe {
             stream::wait_event(
                 stream,
