@@ -9,7 +9,7 @@
 //! |---|---|
 //! | [`batch`] | A keyed batch held to its bucket, and the buckets the decode step serves |
 //! | [`staging`] | One step's inputs written into staging at full width, ready to upload |
-//! | [`inputs`] | Pinned staging and fixed device buffers per input; the upload and wait descriptors |
+//! | [`inputs`] | The staging ring's blocks, the device block, each bucket's views; the upload and wait descriptors |
 //! | [`ring`] | The staging ring: a fence per staging entry and a cursor; `acquire` waits, `try_acquire` asks |
 
 pub mod batch;

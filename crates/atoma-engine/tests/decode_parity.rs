@@ -39,6 +39,7 @@ use atoma_engine::batch::BatchLayout;
 use atoma_engine::config::{DeviceOrdinal, Dtype, ModelConfig, ModelId, PromptTemplate};
 use atoma_engine::decode::batch::Checked;
 use atoma_engine::decode::declaration;
+use atoma_engine::decode::ring::StagingDepth;
 use atoma_engine::device::decode::{DecodeStep, DecodeStepPlan};
 use atoma_engine::device::forward::{Allocated, CudaForward};
 use atoma_engine::device::{Checkpoint, KvCache, KvGeometry, RankDevice, Weights};
@@ -236,6 +237,7 @@ fn open(model: &ModelConfig) -> Rig {
         max_model_len: tokens(MAX_MODEL_LEN),
         block_size: tokens(BLOCK_SIZE),
         dtype: model.dtype,
+        staging_depth: StagingDepth::default(),
     };
     let decode_step = DecodeStep::build(&allocation, &device, &weights, &kv_cache, &plan)
         .expect("the decode step builds");
@@ -277,10 +279,14 @@ fn record_bucket_of_one(
     let Checked::Step(batch) = decode_step.check(&layout, key).expect("checks") else {
         panic!("the bucket of one serves one decode");
     };
-    decode_step.stage(&layout, &batch).expect("stages");
+    let entry = decode_step.stage(&layout, &batch).expect("stages");
     let mut capture = allocation.into_capture();
     capture
-        .warm_up(&mut decode_step.upload(&batch))
+        .warm_up(
+            &mut decode_step
+                .upload(entry, &batch)
+                .expect("bucket 0 is served"),
+        )
         .expect("the upload runs eagerly");
     capture
         .warm_up(&mut decode_step.descriptor(BucketIdx(0)).expect("bucket 0"))

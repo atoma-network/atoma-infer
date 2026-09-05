@@ -7,13 +7,15 @@
 //! copy of its own. The memory is cacheable, never write-combined, because the readback reads
 //! every value it brings back and reads from write-combined memory are uncached.
 //!
-//! The values are unwritten until the owner writes them or a copy lands in them; the owner reads
-//! only what was written. Waiting is the owner's too: a `Pinned` frees its memory on drop without
-//! waiting for a copy that may still be reading or writing it, so the owner waits on the event
-//! recorded behind its last copy before letting it go.
+//! The values are unwritten until the owner writes them or a copy lands in them, and the owner
+//! reads only what was written; a block from [`Pinned::zeroed`] is written whole at allocation,
+//! so a slice over any of it reads initialised memory. Waiting is the owner's too: a `Pinned`
+//! frees its memory on drop without waiting for a copy that may still be reading or writing it,
+//! so the owner waits on the event recorded behind its last copy before letting it go.
 
 use std::ffi::c_void;
 use std::mem::size_of;
+use std::ptr;
 use std::slice;
 
 use atoma_runtime::error::RuntimeError;
@@ -56,6 +58,21 @@ impl<T> Pinned<T> {
     /// through [`Pinned::as_slice`], only after that copy has been waited on.
     pub fn as_mut_ptr(&mut self) -> *mut T {
         self.ptr
+    }
+}
+
+impl Pinned<u8> {
+    /// `len` zeroed bytes of pinned, cacheable host memory in the current context: every byte is
+    /// written here, so a slice over the block reads initialised memory from the start.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RuntimeError`] when the driver cannot pin the memory.
+    pub fn zeroed(len: usize) -> Result<Self, RuntimeError> {
+        let block = Self::new(len)?;
+        // SAFETY: `len` bytes were allocated at the pointer and nothing else holds them yet.
+        unsafe { ptr::write_bytes(block.ptr, 0, len) };
+        Ok(block)
     }
 }
 

@@ -1,38 +1,57 @@
-//! One step's inputs on their way to the device: pinned host staging, the fixed device buffers
-//! the graphs bake, and the descriptors that carry a step from one to the other.
+//! One step's inputs on their way to the device: the staging ring's pinned blocks, the one
+//! device block every bucket's views are minted over, and the descriptors that carry a step from
+//! one to the other.
 //!
-//! Each input has one pinned host array and one device buffer, both sized at the largest bucket
-//! and allocated once, in the Allocation phase. Before a step the host arrays are written from
-//! the batch layout; the upload descriptor then copies the bucket's rows of each to the device
-//! on the capture stream, asynchronously, which is what pinned memory is for. The device buffers
-//! never move, so the views the step reads them through are minted once.
+//! A bucket's seven arrays are packed into one block, as [`StagingLayout`] lays them out: the
+//! five the model step reads and the two the sampler reads. The staging ring holds `depth`
+//! pinned blocks, one fence each, and the device holds one block, all of the largest bucket's
+//! packed length. Before a step the host acquires a staging entry and writes the bucket's arrays
+//! into the staging entry's pinned block at the bucket's offsets; the upload descriptor then
+//! copies the bucket's packed length to the device block in one asynchronous copy and signals
+//! the staging entry's fence behind it. Every bucket reads the device block through views minted
+//! once, in the Allocation session phase, at the bucket's own offsets, so no address a step
+//! reads follows the batch.
 //!
-//! Reuse is fenced by the step itself: every step ends in a readback wait, and the upload and the
-//! step precede the readback on the same stream, so by the time the host writes the next step's
-//! inputs the previous step has finished reading both copies.
+//! Reuse of a pinned block is what the fence guards: the staging ring hands a staging entry out
+//! again only once the copy that last read its block has finished, and the blocks are freed only
+//! once every fence is passed.
 //!
-//! [`WaitEvent`] orders the decode step after candle's stream: a prefill runs there, and the
-//! step must not read the cache it wrote until it is written.
+//! [`WaitEvent`] orders the decode step after candle's stream: a prefill runs there and writes
+//! the cache, and the step must not read it before those writes have landed.
 
+use std::iter;
 use std::sync::Arc;
 
+use atoma_models::llama::slots::BucketInputs;
+use atoma_runtime::arena::BucketIdx;
 use atoma_runtime::error::RuntimeError;
+use atoma_runtime::fence::{FenceSignal, StagingFence};
 use atoma_runtime::session::{Allocation, Descriptor};
 use atoma_runtime::tensor::{Dtype, Layout, Tensor, TensorError};
-use cudarc::driver::result::{event, memcpy_htod_async, stream};
-use cudarc::driver::sys::{self, CUevent_flags, CUevent_wait_flags};
+use cudarc::driver::result::{memcpy_htod_async, stream};
+use cudarc::driver::sys::{self, CUevent_wait_flags};
 use cudarc::driver::{CudaEvent, CudaSlice, CudaStream, DevicePtr};
 use thiserror::Error;
 use tracing::warn;
 
 use crate::batch::BatchLayout;
-use crate::decode::batch::DecodeBatch;
-use crate::decode::staging::{stage, StagingArrays, StagingError, StagingShape};
+use crate::decode::batch::{DecodeBatch, DecodeBuckets};
+use crate::decode::ring::{StagingDepth, StagingEntry, StagingRing};
+use crate::decode::staging::{
+    stage, BucketArrays, SamplerArrays, StagedInput, StagingError, StagingLayout, StagingShape,
+};
 use crate::pinned::Pinned;
 
 /// Why the inputs could not be allocated, staged or uploaded.
 #[derive(Debug, Error)]
 pub enum InputsError {
+    /// A batch of a bucket the inputs were not built for: the engine and the executor disagree
+    /// on the bucket ladder.
+    #[error("bucket {} is past the {buckets} buckets the inputs stage for", bucket.0)]
+    UnknownBucket { bucket: BucketIdx, buckets: usize },
+    /// No bucket to stage for, so nothing sizes the blocks.
+    #[error("no bucket is usable; the inputs stage for at least one")]
+    NoBucket,
     #[error(transparent)]
     Driver(#[from] RuntimeError),
     #[error(transparent)]
@@ -41,222 +60,283 @@ pub enum InputsError {
     Staging(#[from] StagingError),
 }
 
-/// The layouts of the five inputs at `shape`: what each device buffer holds and each view reads.
+/// One bucket's views over the device block, each at the bucket's packed offset: the model
+/// step's five inputs, and the sampler's two per-step arrays.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct InputLayouts {
-    /// u32 `[max_tokens]`.
-    pub token_ids: Layout,
-    /// i32 `[max_tokens]`.
-    pub positions: Layout,
-    /// i32 `[max_tokens]`.
-    pub seqlens_k: Layout,
-    /// i64 `[max_tokens]`.
-    pub slot_mapping: Layout,
-    /// i32 `[max_tokens, block_table_width]`.
-    pub block_table: Layout,
+pub struct BucketViews {
+    pub inputs: BucketInputs,
+    /// i32 `[tokens]`: the slot each selected row samples under.
+    pub row_slots: Tensor,
+    /// i32 `[tokens]`: the slot each token row takes its token from, or negative to keep the
+    /// host's.
+    pub gather_slots: Tensor,
 }
 
-impl InputLayouts {
-    /// The layouts every input takes at `shape`.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`TensorError`] only for a shape a layout cannot hold, which no staging shape is.
-    pub fn new(shape: StagingShape) -> Result<Self, TensorError> {
-        let rows = [shape.max_tokens];
-        Ok(Self {
-            token_ids: Layout::contiguous(&rows, Dtype::U32)?,
-            positions: Layout::contiguous(&rows, Dtype::I32)?,
-            seqlens_k: Layout::contiguous(&rows, Dtype::I32)?,
-            slot_mapping: Layout::contiguous(&rows, Dtype::I64)?,
-            block_table: Layout::contiguous(
-                &[shape.max_tokens, shape.block_table_width],
-                Dtype::I32,
-            )?,
-        })
-    }
-}
-
-/// The views the step reads each input through, each over its whole device buffer.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct InputTensors {
-    pub token_ids: Tensor,
-    pub positions: Tensor,
-    pub seqlens_k: Tensor,
-    pub slot_mapping: Tensor,
-    pub block_table: Tensor,
-}
-
-/// One input: its pinned staging, its device buffer, and the view over the buffer.
-struct Staged<T> {
-    host: Pinned<T>,
-    /// Owned here so the address the view names stays allocated for as long as the view does.
-    _device: CudaSlice<u8>,
-    tensor: Tensor,
-}
-
-impl<T> Staged<T> {
-    fn new(
-        allocation: &Allocation,
-        stream: &Arc<CudaStream>,
-        layout: Layout,
-    ) -> Result<Self, InputsError> {
-        let host = Pinned::new(layout.element_count())?;
-        let device = stream
-            .alloc_zeros::<u8>(layout.extent_bytes())
-            .map_err(RuntimeError::from)?;
-        // The address is read before the buffer moves into this value, and the read guard is
-        // dropped with the block; device allocations do not move.
-        let address = {
-            let (address, _reads) = device.device_ptr(stream);
-            address
+impl BucketViews {
+    /// The views of the bucket `packed` lays out, over the block at `base`: each array's view
+    /// is minted by `mint` at the array's offset, with the array's dtype at the bucket's rows and
+    /// the block table `width` wide.
+    fn minted(
+        base: u64,
+        packed: &StagingLayout,
+        width: usize,
+        mint: impl Fn(u64, Layout) -> Result<Tensor, TensorError>,
+    ) -> Result<Self, TensorError> {
+        let rows = packed.rows();
+        let view = |input: StagedInput, dims: &[usize], dtype: Dtype| {
+            // The block was allocated at `base` for every offset the layout places, so the sum is
+            // an address inside it.
+            let address = base + packed.offset(input) as u64;
+            mint(address, Layout::contiguous(dims, dtype)?)
         };
         Ok(Self {
-            host,
-            tensor: Tensor::new(allocation, address, layout)?,
-            _device: device,
+            inputs: BucketInputs {
+                token_ids: view(StagedInput::TokenIds, &[rows], Dtype::U32)?,
+                positions: view(StagedInput::Positions, &[rows], Dtype::I32)?,
+                seqlens_k: view(StagedInput::KeyLengths, &[rows], Dtype::I32)?,
+                slot_mapping: view(StagedInput::SlotMapping, &[rows], Dtype::I64)?,
+                block_table: view(StagedInput::BlockTable, &[rows, width], Dtype::I32)?,
+            },
+            row_slots: view(StagedInput::RowSlots, &[rows], Dtype::I32)?,
+            gather_slots: view(StagedInput::GatherSlots, &[rows], Dtype::I32)?,
         })
-    }
-
-    /// Copies the first `elements` staged values to the device on `stream`.
-    ///
-    /// # Safety
-    ///
-    /// `stream` must be a live stream in the buffers' context.
-    unsafe fn upload(&self, elements: usize, stream: sys::CUstream) -> Result<(), RuntimeError> {
-        let source = &self.host.as_slice()[..elements];
-        // SAFETY: the destination is this input's device buffer, which holds at least as many
-        // elements as the staging it mirrors; the source is pinned and outlives the copy, which
-        // the event recorded after every upload fences before the staging is freed.
-        unsafe { memcpy_htod_async(self.tensor.address(), source, stream) }?;
-        Ok(())
     }
 }
 
-/// One step's inputs: pinned staging and fixed device buffers for each, sized at the largest
-/// bucket.
-pub struct DecodeInputs {
+/// Every bucket's packed layout at one shape, and the length of a block that holds any of them:
+/// the largest bucket's. The host side of the inputs, which needs no device.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PackedBuckets {
     shape: StagingShape,
-    token_ids: Staged<u32>,
-    positions: Staged<i32>,
-    seqlens_k: Staged<i32>,
-    slot_mapping: Staged<i64>,
-    block_table: Staged<i32>,
-    /// Recorded behind every upload; waited on before the staging is freed.
-    uploaded: CudaEvent,
+    /// One layout per bucket, in bucket order.
+    layouts: Vec<StagingLayout>,
+    block_bytes: usize,
+}
+
+impl PackedBuckets {
+    fn new(shape: StagingShape, buckets: &DecodeBuckets) -> Result<Self, InputsError> {
+        let layouts = buckets
+            .tokens()
+            .iter()
+            .map(|&rows| StagingLayout::packed(shape, rows))
+            .collect::<Result<Vec<_>, _>>()?;
+        let Some(block_bytes) = layouts.iter().map(StagingLayout::bytes).max() else {
+            return Err(InputsError::NoBucket);
+        };
+        Ok(Self {
+            shape,
+            layouts,
+            block_bytes,
+        })
+    }
+
+    fn layout(&self, bucket: BucketIdx) -> Result<&StagingLayout, InputsError> {
+        self.layouts
+            .get(bucket.0)
+            .ok_or(InputsError::UnknownBucket {
+                bucket,
+                buckets: self.layouts.len(),
+            })
+    }
+
+    /// Writes `batch`'s inputs from `layout` into `block` at its bucket's offsets, and hands
+    /// back the sampler's two arrays, carved from the same block, for the sampler to write.
+    fn stage<'a>(
+        &self,
+        block: &'a mut [u8],
+        layout: &BatchLayout,
+        batch: &DecodeBatch,
+    ) -> Result<SamplerArrays<'a>, InputsError> {
+        let BucketArrays { inputs, sampler } = self.layout(batch.bucket)?.carve(block)?;
+        stage(layout, batch, self.shape, inputs)?;
+        Ok(sampler)
+    }
+
+    /// The leading bytes of `block` one copy of `batch`'s bucket carries: the bucket's packed
+    /// length.
+    fn staged<'a>(&self, block: &'a [u8], batch: &DecodeBatch) -> Result<&'a [u8], InputsError> {
+        let packed = self.layout(batch.bucket)?;
+        block
+            .get(..packed.bytes())
+            .ok_or(InputsError::Staging(StagingError::BlockTooShort {
+                len: block.len(),
+                rows: packed.rows(),
+                needed: packed.bytes(),
+            }))
+    }
+}
+
+/// One step's inputs: the staging ring's pinned blocks, the device block, and every bucket's
+/// views over it, all of the largest bucket's packed length.
+pub struct DecodeInputs {
+    packed: PackedBuckets,
+    /// One bucket's views each, in bucket order.
+    views: Vec<BucketViews>,
+    ring: StagingRing<StagingFence>,
+    /// One pinned block per staging entry, indexed by the staging entry.
+    blocks: Vec<Pinned<u8>>,
+    /// Owned here so the address every view names stays allocated for as long as the views do.
+    _device: CudaSlice<u8>,
+    device_address: u64,
 }
 
 impl DecodeInputs {
-    /// Allocates the staging and the device buffers of `shape`, during the Allocation session
-    /// phase, on `stream`'s device.
+    /// Allocates a staging ring of `depth` pinned blocks and the device block for `buckets` at
+    /// `shape`, and mints every bucket's views, during the Allocation session phase, on
+    /// `stream`'s device.
     ///
     /// # Errors
     ///
-    /// Returns [`InputsError`] when the driver cannot pin or allocate a buffer, or a view over
-    /// one cannot be minted.
+    /// Returns [`InputsError`] when there is no bucket, a bucket's block is longer than the host
+    /// can address, the driver cannot pin or allocate a block or create a fence, or a view cannot
+    /// be minted.
     pub fn new(
         allocation: &Allocation,
         stream: &Arc<CudaStream>,
         shape: StagingShape,
+        buckets: &DecodeBuckets,
+        depth: StagingDepth,
     ) -> Result<Self, InputsError> {
-        let layouts = InputLayouts::new(shape)?;
+        let packed = PackedBuckets::new(shape, buckets)?;
         let context = stream.context();
         context.bind_to_thread().map_err(RuntimeError::from)?;
-        let uploaded = context
-            .new_event(Some(CUevent_flags::CU_EVENT_BLOCKING_SYNC))
+        let ring = StagingRing::new(depth, || StagingFence::new(context))?;
+        let blocks = iter::repeat_with(|| Pinned::zeroed(packed.block_bytes))
+            .take(depth.get())
+            .collect::<Result<Vec<_>, _>>()?;
+        let device = stream
+            .alloc_zeros::<u8>(packed.block_bytes)
             .map_err(RuntimeError::from)?;
+        // The address is read before the block moves into this value, and the read guard is
+        // dropped with it; device allocations do not move.
+        let device_address = {
+            let (address, _reads) = device.device_ptr(stream);
+            address
+        };
+        let views = packed
+            .layouts
+            .iter()
+            .map(|layout| {
+                BucketViews::minted(
+                    device_address,
+                    layout,
+                    shape.block_table_width,
+                    |at, view| Tensor::new(allocation, at, view),
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(Self {
-            shape,
-            token_ids: Staged::new(allocation, stream, layouts.token_ids)?,
-            positions: Staged::new(allocation, stream, layouts.positions)?,
-            seqlens_k: Staged::new(allocation, stream, layouts.seqlens_k)?,
-            slot_mapping: Staged::new(allocation, stream, layouts.slot_mapping)?,
-            block_table: Staged::new(allocation, stream, layouts.block_table)?,
-            uploaded,
+            packed,
+            views,
+            ring,
+            blocks,
+            _device: device,
+            device_address,
         })
     }
 
     #[must_use]
     pub fn shape(&self) -> StagingShape {
-        self.shape
+        self.packed.shape
     }
 
-    /// The views the step reads the inputs through.
-    #[must_use]
-    pub fn tensors(&self) -> InputTensors {
-        InputTensors {
-            token_ids: self.token_ids.tensor,
-            positions: self.positions.tensor,
-            seqlens_k: self.seqlens_k.tensor,
-            slot_mapping: self.slot_mapping.tensor,
-            block_table: self.block_table.tensor,
-        }
-    }
-
-    /// Writes `batch`'s inputs from `layout` into the staging.
+    /// The views `bucket`'s step reads the device block through.
     ///
     /// # Errors
     ///
-    /// Returns [`InputsError::Staging`] when the layout cannot be staged at this shape.
-    pub fn stage(&mut self, layout: &BatchLayout, batch: &DecodeBatch) -> Result<(), InputsError> {
-        stage(
-            layout,
-            batch,
-            self.shape,
-            StagingArrays {
-                token_ids: self.token_ids.host.as_mut_slice(),
-                positions: self.positions.host.as_mut_slice(),
-                seqlens_k: self.seqlens_k.host.as_mut_slice(),
-                slot_mapping: self.slot_mapping.host.as_mut_slice(),
-                block_table: self.block_table.host.as_mut_slice(),
-            },
-        )?;
-        Ok(())
+    /// Returns [`InputsError::UnknownBucket`] when the inputs were not built for `bucket`.
+    pub fn bucket(&self, bucket: BucketIdx) -> Result<&BucketViews, InputsError> {
+        self.views.get(bucket.0).ok_or(InputsError::UnknownBucket {
+            bucket,
+            buckets: self.views.len(),
+        })
     }
 
-    /// The descriptor that copies `batch`'s rows of every input to the device.
-    #[must_use]
-    pub fn upload(&self, batch: &DecodeBatch) -> Upload<'_> {
-        Upload {
-            inputs: self,
-            tokens: batch.tokens,
-        }
+    /// A staging entry whose pinned block the host may write: waits, blocking, until the copy
+    /// that last read the block has finished.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InputsError::Driver`] when the fence cannot be waited on.
+    pub fn acquire(&mut self) -> Result<StagingEntry, InputsError> {
+        Ok(self.ring.acquire()?)
+    }
+
+    /// Writes `batch`'s inputs from `layout` into `entry`'s pinned block at the bucket's offsets,
+    /// and hands back the sampler's two arrays in the same block for the sampler to write.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InputsError`] when the inputs were not built for the batch's bucket or the
+    /// layout cannot be staged.
+    pub fn stage(
+        &mut self,
+        entry: &StagingEntry,
+        layout: &BatchLayout,
+        batch: &DecodeBatch,
+    ) -> Result<SamplerArrays<'_>, InputsError> {
+        // The staging ring minted the staging entry below its depth, which is the block count.
+        let block = self.blocks[entry.index()].as_mut_slice();
+        self.packed.stage(block, layout, batch)
+    }
+
+    /// The descriptor that copies `batch`'s bucket from `entry`'s pinned block to the device
+    /// block in one copy and signals the staging entry's fence behind it. Taking the staging
+    /// entry is the only way to upload, so every copy is fenced.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InputsError::UnknownBucket`] when the inputs were not built for the batch's
+    /// bucket.
+    // The staging entry is taken by value on purpose: one acquire hands out one, and the upload
+    // is its one use.
+    #[allow(clippy::needless_pass_by_value)]
+    pub fn upload(
+        &self,
+        entry: StagingEntry,
+        batch: &DecodeBatch,
+    ) -> Result<Upload<'_>, InputsError> {
+        // As in `stage`: the staging entry indexes a block.
+        let source = self
+            .packed
+            .staged(self.blocks[entry.index()].as_slice(), batch)?;
+        Ok(Upload {
+            source,
+            destination: self.device_address,
+            signal: self.ring.fence(&entry).signal(),
+        })
     }
 }
 
 impl Drop for DecodeInputs {
     fn drop(&mut self) {
-        // The last upload may still be reading the staging; the event waits for it before the
-        // arrays go. A failure here cannot be acted on beyond saying so.
-        if let Err(error) = self.uploaded.synchronize() {
-            warn!(%error, "the last input upload could not be waited on before its staging goes");
+        // An upload from any staging entry may still be reading its block; every fence is waited
+        // on before the blocks go. A failure here cannot be acted on beyond saying so.
+        if let Err(error) = self.ring.wait_all() {
+            warn!(%error, "an input upload could not be waited on before its staging goes");
         }
     }
 }
 
-/// The upload of one bucket's rows of every input, enqueued on the capture stream.
+/// The upload of one bucket's packed block: one copy to the device block, then the signal of the
+/// staging entry's fence.
 pub struct Upload<'a> {
-    inputs: &'a DecodeInputs,
-    tokens: usize,
+    source: &'a [u8],
+    destination: u64,
+    signal: FenceSignal<'a>,
 }
 
 impl Descriptor for Upload<'_> {
     type Error = InputsError;
 
     unsafe fn enqueue(&mut self, stream: sys::CUstream) -> Result<(), InputsError> {
-        let inputs = self.inputs;
-        let tokens = self.tokens;
-        // SAFETY: the session hands a live stream in the buffers' context, and every input
-        // holds at least the largest bucket's rows.
+        // SAFETY: the session hands a live stream in the blocks' context; the destination is the
+        // device block, which holds every bucket's packed length; the source is a pinned block
+        // that outlives the copy, since the fence signaled behind the copy is waited on before
+        // the block is written again or freed.
         unsafe {
-            inputs.token_ids.upload(tokens, stream)?;
-            inputs.positions.upload(tokens, stream)?;
-            inputs.seqlens_k.upload(tokens, stream)?;
-            inputs.slot_mapping.upload(tokens, stream)?;
-            inputs
-                .block_table
-                .upload(tokens * inputs.shape.block_table_width, stream)?;
-            event::record(inputs.uploaded.cu_event(), stream).map_err(RuntimeError::from)?;
+            memcpy_htod_async(self.destination, self.source, stream).map_err(RuntimeError::from)?;
+            self.signal.enqueue(stream)?;
         }
         Ok(())
     }
@@ -294,25 +374,232 @@ impl Descriptor for WaitEvent<'_> {
 
 #[cfg(test)]
 mod tests {
+    use atoma_core::dispatch::{BucketLadder, DispatchConfig, DispatchDecision};
+    use atoma_core::step::CommandEntry;
+    use atoma_core::types::RequestCount;
+
     use super::*;
+    use crate::decode::batch::Checked;
+    use crate::test_support::{engine_config, entry, keyed_command, BLOCK_SIZE};
+
+    const WIDTH: usize = 64;
+    /// Where the device block sits, aligned as a device allocation is.
+    const BASE: u64 = 0x7f00_0000_0000;
+
+    fn shape() -> StagingShape {
+        StagingShape {
+            max_tokens: 4,
+            block_table_width: WIDTH,
+            max_position: 32,
+        }
+    }
+
+    /// The buckets [`engine_config`] serves: one, two and four rows.
+    fn buckets() -> DecodeBuckets {
+        DecodeBuckets::usable(&engine_config().dispatch)
+    }
+
+    fn packed() -> PackedBuckets {
+        PackedBuckets::new(shape(), &buckets()).unwrap()
+    }
+
+    fn dispatched(live: Vec<CommandEntry>) -> (BatchLayout, DecodeBatch) {
+        let layout = BatchLayout::lay_out(&keyed_command(live), BLOCK_SIZE).unwrap();
+        let DispatchDecision::FullReplay(key) = layout.dispatch else {
+            panic!("keyed: {:?}", layout.dispatch);
+        };
+        let Checked::Step(batch) = DecodeBatch::check(&layout, key, &buckets(), WIDTH).unwrap()
+        else {
+            panic!("served by the decode step");
+        };
+        (layout, batch)
+    }
+
+    /// Storage for a packed block with every byte set, so an untouched byte reads as `0xFF`,
+    /// handed out from the first base aligned as the carve requires.
+    struct Block(Vec<u8>);
+
+    impl Block {
+        fn sized(bytes: usize) -> Self {
+            Self(vec![0xFF; bytes + align_of::<i64>()])
+        }
+
+        fn bytes(&mut self) -> &mut [u8] {
+            let address = self.0.as_ptr().addr();
+            let start = address.next_multiple_of(align_of::<i64>()) - address;
+            &mut self.0[start..]
+        }
+    }
 
     #[test]
-    fn the_input_layouts_are_the_kernels_dtypes_at_the_largest_bucket() {
-        let layouts = InputLayouts::new(StagingShape {
-            max_tokens: 32,
-            block_table_width: 256,
-            max_position: 8192,
-        })
-        .unwrap();
+    fn every_buckets_views_sit_at_its_own_packed_offsets_over_the_device_block() {
+        let packed = packed();
+        let views: Vec<BucketViews> = packed
+            .layouts
+            .iter()
+            .map(|layout| BucketViews::minted(BASE, layout, WIDTH, Tensor::for_test).unwrap())
+            .collect();
+        let at = |view: Tensor| (view.address() - BASE, view.dims().to_vec(), view.dtype());
 
-        assert_eq!(layouts.token_ids.dims(), [32]);
-        assert_eq!(layouts.token_ids.dtype(), Dtype::U32);
-        assert_eq!(layouts.positions.dtype(), Dtype::I32);
-        assert_eq!(layouts.seqlens_k.dtype(), Dtype::I32);
-        assert_eq!(layouts.slot_mapping.dtype(), Dtype::I64);
-        assert_eq!(layouts.slot_mapping.extent_bytes(), 32 * 8);
-        assert_eq!(layouts.block_table.dims(), [32, 256]);
-        assert_eq!(layouts.block_table.dtype(), Dtype::I32);
-        assert_eq!(layouts.block_table.extent_bytes(), 32 * 256 * 4);
+        // Bucket 2 at width 64: each 8-byte array pads to 256, the 16-byte slot mapping too, the
+        // block table's 2 * 64 * 4 = 512 bytes end at 1536, and the sampler's two follow.
+        let two = &views[1];
+        assert_eq!(at(two.inputs.token_ids), (0, vec![2], Dtype::U32));
+        assert_eq!(at(two.inputs.positions), (256, vec![2], Dtype::I32));
+        assert_eq!(at(two.inputs.seqlens_k), (512, vec![2], Dtype::I32));
+        assert_eq!(at(two.inputs.slot_mapping), (768, vec![2], Dtype::I64));
+        assert_eq!(at(two.inputs.block_table), (1024, vec![2, 64], Dtype::I32));
+        assert_eq!(at(two.row_slots), (1536, vec![2], Dtype::I32));
+        assert_eq!(at(two.gather_slots), (1792, vec![2], Dtype::I32));
+
+        // Bucket 4's block table is 1024 bytes, so its sampler arrays sit 512 further on; bucket
+        // 1's is 256, so they sit 256 nearer.
+        assert_eq!(
+            at(views[2].inputs.block_table),
+            (1024, vec![4, 64], Dtype::I32)
+        );
+        assert_eq!(at(views[2].row_slots), (2048, vec![4], Dtype::I32));
+        assert_eq!(at(views[2].gather_slots), (2304, vec![4], Dtype::I32));
+        assert_eq!(
+            at(views[0].inputs.block_table),
+            (1024, vec![1, 64], Dtype::I32)
+        );
+        assert_eq!(at(views[0].row_slots), (1280, vec![1], Dtype::I32));
+        assert_eq!(at(views[0].gather_slots), (1536, vec![1], Dtype::I32));
+    }
+
+    #[test]
+    fn the_device_block_is_the_largest_buckets_packed_length() {
+        // Bucket 4 at width 64: four 256-byte arrays, a 1024-byte block table, then two more
+        // 256-byte arrays; buckets 1 and 2 pack 1792 and 2048, so the block is neither a sum nor
+        // the first bucket's.
+        assert_eq!(packed().block_bytes, 2560);
+    }
+
+    #[test]
+    fn a_batch_is_staged_at_its_buckets_offsets_and_the_samplers_arrays_are_the_buckets() {
+        let (layout, batch) = dispatched(vec![
+            entry(1, 3, vec![9], &[10], true),
+            entry(2, 8, vec![7], &[20, 21, 22], true),
+        ]);
+        assert_eq!(batch.bucket, BucketIdx(1), "two live entries fill bucket 2");
+        let packed = packed();
+        let mut block = Block::sized(packed.block_bytes);
+
+        let sampler = packed.stage(block.bytes(), &layout, &batch).unwrap();
+        assert_eq!(sampler.row_slots.len(), 2, "one row slot per bucket row");
+        assert_eq!(
+            sampler.gather_slots.len(),
+            2,
+            "one gather slot per bucket row"
+        );
+        sampler.row_slots[1] = 0x6666_6666;
+        sampler.gather_slots[0] = 0x7777_7777;
+
+        // Bucket 2's offsets: token ids at 0, positions at 256, key lengths at 512, slot
+        // mapping at 768, block table rows at 1024 and 1280, row slots at 1536, gather slots at
+        // 1792; a key length is the context plus this token, a slot is the block times the
+        // block size plus the offset.
+        let bytes = block.bytes();
+        assert_eq!(
+            bytes[..8],
+            [9u32.to_ne_bytes(), 7u32.to_ne_bytes()].concat()
+        );
+        assert_eq!(
+            bytes[256..264],
+            [3i32.to_ne_bytes(), 8i32.to_ne_bytes()].concat()
+        );
+        assert_eq!(
+            bytes[512..520],
+            [4i32.to_ne_bytes(), 9i32.to_ne_bytes()].concat()
+        );
+        assert_eq!(
+            bytes[768..784],
+            [43i64.to_ne_bytes(), 88i64.to_ne_bytes()].concat()
+        );
+        assert_eq!(
+            bytes[1024..1032],
+            [10i32.to_ne_bytes(), 0i32.to_ne_bytes()].concat()
+        );
+        assert_eq!(
+            bytes[1280..1296],
+            [20i32, 21, 22, 0]
+                .iter()
+                .flat_map(|block| block.to_ne_bytes())
+                .collect::<Vec<u8>>()
+        );
+        assert_eq!(bytes[1540..1544], [0x66; 4]);
+        assert_eq!(bytes[1792..1796], [0x77; 4]);
+        assert!(
+            bytes[2048..2560].iter().all(|&byte| byte == 0xFF),
+            "past bucket 2's packed length the block is as the storage set it"
+        );
+    }
+
+    #[test]
+    fn the_upload_carries_the_buckets_packed_length_and_no_more() {
+        let packed = packed();
+        let mut block = Block::sized(packed.block_bytes);
+        let (_, one) = dispatched(vec![entry(1, 3, vec![9], &[10], true)]);
+        let (_, two) = dispatched(vec![
+            entry(1, 3, vec![9], &[10], true),
+            entry(2, 3, vec![9], &[20], true),
+        ]);
+
+        // Bucket 1 packs 1792 bytes and bucket 2 packs 2048: the 2560-byte block is never copied
+        // whole.
+        assert_eq!(packed.staged(block.bytes(), &one).unwrap().len(), 1792);
+        assert_eq!(packed.staged(block.bytes(), &two).unwrap().len(), 2048);
+        assert!(matches!(
+            packed.staged(&block.bytes()[..2047], &two),
+            Err(InputsError::Staging(StagingError::BlockTooShort {
+                len: 2047,
+                rows: 2,
+                needed: 2048
+            }))
+        ));
+    }
+
+    #[test]
+    fn a_batch_of_a_bucket_the_inputs_do_not_stage_for_is_refused() {
+        let (layout, batch) = dispatched(vec![entry(1, 3, vec![9], &[10], true)]);
+        let past = DecodeBatch {
+            bucket: BucketIdx(3),
+            ..batch
+        };
+        let packed = packed();
+        let mut block = Block::sized(packed.block_bytes);
+        let unknown = |error: &InputsError| {
+            matches!(
+                error,
+                InputsError::UnknownBucket {
+                    bucket: BucketIdx(3),
+                    buckets: 3
+                }
+            )
+        };
+
+        assert!(unknown(
+            &packed.stage(block.bytes(), &layout, &past).unwrap_err()
+        ));
+        assert!(unknown(&packed.staged(block.bytes(), &past).unwrap_err()));
+        assert!(unknown(&packed.layout(BucketIdx(3)).unwrap_err()));
+    }
+
+    #[test]
+    fn inputs_for_no_bucket_are_refused() {
+        let none = DecodeBuckets::usable(&DispatchConfig {
+            bucket_ladder: BucketLadder::new(vec![2, 4]).unwrap(),
+            captured_max_requests: RequestCount::new(1).unwrap(),
+        });
+        assert!(
+            none.tokens().is_empty(),
+            "no bucket is at or below one request"
+        );
+
+        assert!(matches!(
+            PackedBuckets::new(shape(), &none),
+            Err(InputsError::NoBucket)
+        ));
     }
 }

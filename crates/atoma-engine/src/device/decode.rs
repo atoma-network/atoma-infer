@@ -4,13 +4,14 @@
 //! Candle keeps owning the weights and the cache; this module snapshots their device addresses
 //! into tensor views, allocates the arena, the step's fixed buffers and the cuBLAS workspace,
 //! resolves every usable bucket's slot tables, and holds the step descriptor over them. A step is
-//! then seven descriptors on the capture stream: the wait on candle's stream, the sampler's
-//! record upload, the input upload, the upload of the sampler's two per-step arrays, the gather
+//! then six descriptors on the capture stream: the wait on candle's stream, the sampler's record
+//! upload, the upload of the bucket's packed block (the five inputs and the sampler's two
+//! per-step arrays in one copy, with the staging entry's fence signaled behind it), the gather
 //! that takes each decoding row's token from what the device sampled for its slot, the model
 //! step, and the sample, which leaves the tokens on the device and reads them back; then one host
 //! wait. Nothing is captured here. Going through the descriptor seam is what lets a later capture
-//! record the gather, the model step and the sample unchanged; the three uploads are the host's
-//! copies of what changed, as many as changed, and stay in front of the graph.
+//! record the gather, the model step and the sample unchanged; the two uploads are the host's
+//! copies of what changed and stay in front of the graph.
 
 use std::sync::Arc;
 
@@ -22,8 +23,8 @@ use atoma_models::gemm::{GemmError, StepBlas, WORKSPACE_BYTES};
 use atoma_models::kernels::RotaryTensors;
 use atoma_models::layer::LLAMA_LAYER;
 use atoma_models::llama::slots::{
-    Bucket, BucketInputs, BucketSlots, LayerWeights, LlamaCache, LlamaWeights, SlotError,
-    SlotSources, StepStatics,
+    Bucket, BucketSlots, LayerWeights, LlamaCache, LlamaWeights, SlotError, SlotSources,
+    StepStatics,
 };
 use atoma_models::llama::step::{LlamaDecode, LlamaStep, StepError};
 use atoma_models::rope::RotaryTables;
@@ -42,9 +43,10 @@ use tracing::info;
 use crate::batch::BatchLayout;
 use crate::config::Dtype as ConfiguredDtype;
 use crate::decode::batch::{Checked, DecodeBatch, DecodeBatchError, DecodeBuckets};
-use crate::decode::inputs::{DecodeInputs, InputTensors, InputsError, Upload, WaitEvent};
+use crate::decode::inputs::{DecodeInputs, InputsError, Upload, WaitEvent};
+use crate::decode::ring::{StagingDepth, StagingEntry};
 use crate::decode::staging::StagingShape;
-use crate::device::sampler::{DeviceSampler, SamplerError, SamplerStaging};
+use crate::device::sampler::{DeviceSampler, SamplerError};
 use crate::device::{KvCache, RankDevice, Weights};
 use crate::logits::Logits;
 use crate::readback::{Readback, ReadbackError};
@@ -114,6 +116,8 @@ pub struct DecodeStepPlan {
     pub max_model_len: TokenCount,
     pub block_size: TokenCount,
     pub dtype: ConfiguredDtype,
+    /// How many staging entries the inputs' staging ring holds.
+    pub staging_depth: StagingDepth,
 }
 
 /// The step's outputs and workspace on the device, owned here for as long as the views over
@@ -131,8 +135,6 @@ struct Statics {
 pub struct DecodeStep {
     buckets: DecodeBuckets,
     inputs: DecodeInputs,
-    /// Where a step's sampler stages its two per-step arrays, sized at the largest bucket.
-    sampler_staging: SamplerStaging,
     decode: LlamaDecode,
     blas: StepBlas,
     /// Recorded on candle's stream after every candle forward; the step waits on it.
@@ -197,16 +199,10 @@ impl DecodeStep {
             shape,
             buckets: &buckets,
         };
-        let inputs = DecodeInputs::new(allocation, stream, shape)?;
-        let sampler_staging = SamplerStaging::new(allocation, stream.context(), buckets.largest())?;
+        let inputs = DecodeInputs::new(allocation, stream, shape, &buckets, plan.staging_depth)?;
         let (statics, step_statics) = allocate_statics(allocation, stream, &sizing)?;
-        let (arena_memory, arena_bytes, slots) = resolve_slots(
-            allocation,
-            stream,
-            &sizing,
-            &step_statics,
-            &inputs.tensors(),
-        )?;
+        let (arena_memory, arena_bytes, slots) =
+            resolve_slots(allocation, stream, &sizing, &step_statics, &inputs)?;
         let decode = LlamaDecode::new(
             dims,
             snapshot_weights(allocation, llama, stream)?,
@@ -233,7 +229,6 @@ impl DecodeStep {
         Ok(Self {
             buckets,
             inputs,
-            sampler_staging,
             decode,
             blas,
             candle_done,
@@ -256,13 +251,13 @@ impl DecodeStep {
         )?)
     }
 
-    /// Runs `batch`'s step through `session` and samples it: the inputs and the sampler staged,
-    /// then the wait on candle's stream, the sampler's record upload, the input upload, the
-    /// upload of the sampler's arrays, the gather, the model step and the sample enqueued in that
-    /// order, then the host wait on the sampled tokens. The batch states that every entry
-    /// computes one token, so its rows are the token rows the gather covers. A rank with no
-    /// sampler runs the same step without the sampler's descriptors and waits for it instead,
-    /// so the next step's staging is fenced either way, and returns no tokens.
+    /// Runs `batch`'s step through `session` and samples it: a staging entry acquired and the
+    /// inputs and the sampler staged into its block, then the wait on candle's stream, the
+    /// sampler's record upload, the block's upload, the gather, the model step and the sample
+    /// enqueued in that order, then the host wait on the sampled tokens. The batch states that
+    /// every entry computes one token, so its rows are the token rows the gather covers. A rank
+    /// with no sampler runs the same step without the sampler's descriptors and waits for it
+    /// instead, and returns no tokens.
     ///
     /// # Errors
     ///
@@ -275,23 +270,25 @@ impl DecodeStep {
         batch: DecodeBatch,
         sampler: Option<&'a mut DeviceSampler>,
     ) -> Result<&'a [u32], DecodeStepError> {
-        self.stage(layout, &batch)?;
+        let entry = self.inputs.acquire()?;
+        let arrays = self.inputs.stage(&entry, layout, &batch)?;
         let Some(sampler) = sampler else {
             session.run(&mut WaitEvent::new(&self.candle_done))?;
-            session.run(&mut self.upload(&batch))?;
+            session.run(&mut self.upload(entry, &batch)?)?;
             session.run(&mut self.descriptor(batch.bucket)?)?;
             session.synchronize()?;
             return Ok(&[]);
         };
-        sampler.stage(layout, batch.tokens, self.sampler_staging.arrays())?;
+        sampler.stage(layout, batch.tokens, arrays)?;
+        let views = self.inputs.bucket(batch.bucket)?;
         session.run(&mut WaitEvent::new(&self.candle_done))?;
         session.run(&mut sampler.upload_records()?)?;
-        session.run(&mut self.upload(&batch))?;
-        session.run(&mut self.sampler_staging.upload(sampler)?)?;
-        session.run(&mut sampler.gather(self.token_ids_address())?)?;
+        session.run(&mut self.upload(entry, &batch)?)?;
+        let token_ids = views.inputs.token_ids.address();
+        session.run(&mut sampler.gather(token_ids, views.gather_slots.address())?)?;
         session.run(&mut self.descriptor(batch.bucket)?)?;
         let logits = self.decode.bucket(batch.bucket)?.statics.logits.address();
-        session.run(&mut sampler.sample(logits)?)?;
+        session.run(&mut sampler.sample(logits, views.row_slots.address())?)?;
         Ok(sampler.wait()?)
     }
 
@@ -310,9 +307,9 @@ impl DecodeStep {
         batch: DecodeBatch,
         readback: &'a mut Readback<f32>,
     ) -> Result<Logits<'a>, DecodeStepError> {
-        self.stage(layout, &batch)?;
+        let entry = self.stage(layout, &batch)?;
         session.run(&mut WaitEvent::new(&self.candle_done))?;
-        session.run(&mut self.upload(&batch))?;
+        session.run(&mut self.upload(entry, &batch)?)?;
         session.run(&mut self.descriptor(batch.bucket)?)?;
         let vocab = self.decode.dims().vocab;
         let logits = self.decode.bucket(batch.bucket)?.statics.logits.address();
@@ -320,28 +317,36 @@ impl DecodeStep {
         Ok(Logits::new(readback.wait()?, vocab))
     }
 
-    /// The device address of the uploaded token ids, which the gather overwrites.
-    fn token_ids_address(&self) -> u64 {
-        self.inputs.tensors().token_ids.address()
-    }
-
-    /// Writes `batch`'s inputs from `layout` into the pinned staging.
+    /// Acquires a staging entry, waiting until the copy that last read its block has finished,
+    /// and writes `batch`'s inputs from `layout` into it; the sampler's two arrays in the block
+    /// are left as they are.
     ///
     /// # Errors
     ///
-    /// Returns [`DecodeStepError::Inputs`] when the layout cannot be staged.
+    /// Returns [`DecodeStepError::Inputs`] when the fence cannot be waited on or the layout
+    /// cannot be staged.
     pub fn stage(
         &mut self,
         layout: &BatchLayout,
         batch: &DecodeBatch,
-    ) -> Result<(), DecodeStepError> {
-        Ok(self.inputs.stage(layout, batch)?)
+    ) -> Result<StagingEntry, DecodeStepError> {
+        let entry = self.inputs.acquire()?;
+        self.inputs.stage(&entry, layout, batch)?;
+        Ok(entry)
     }
 
-    /// The descriptor that copies `batch`'s rows of the staged inputs to the device.
-    #[must_use]
-    pub fn upload(&self, batch: &DecodeBatch) -> Upload<'_> {
-        self.inputs.upload(batch)
+    /// The descriptor that copies `batch`'s bucket from `entry`'s block to the device in one copy
+    /// and signals the staging entry's fence behind it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DecodeStepError::Inputs`] when the inputs were not built for the batch's bucket.
+    pub fn upload(
+        &self,
+        entry: StagingEntry,
+        batch: &DecodeBatch,
+    ) -> Result<Upload<'_>, DecodeStepError> {
+        Ok(self.inputs.upload(entry, batch)?)
     }
 
     /// The descriptor that enqueues `bucket`'s model step over the uploaded inputs.
@@ -377,14 +382,14 @@ struct Sizing<'a> {
 }
 
 /// Allocates the arena and resolves every bucket's slot tables over it, each bucket's inputs
-/// minted from `inputs`: the arena's memory (owned for as long as the tables are read), its
-/// size, and the tables in bucket order.
+/// the views `inputs` minted for it: the arena's memory (owned for as long as the tables are
+/// read), its size, and the tables in bucket order.
 fn resolve_slots(
     allocation: &Allocation,
     stream: &Arc<CudaStream>,
     sizing: &Sizing<'_>,
     statics: &StepStatics,
-    inputs: &InputTensors,
+    inputs: &DecodeInputs,
 ) -> Result<(CudaSlice<u8>, usize, Vec<BucketSlots>), DecodeStepError> {
     let dims = sizing.dims;
     let arena = CaptureArena::new(
@@ -419,23 +424,16 @@ fn resolve_slots(
                 index: BucketIdx(index),
                 tokens,
             };
-            let inputs = bucket_inputs(inputs, tokens)?;
-            Ok(BucketSlots::resolve(&sources, bucket, *attention, inputs)?)
+            let views = inputs.bucket(bucket.index)?;
+            Ok(BucketSlots::resolve(
+                &sources,
+                bucket,
+                *attention,
+                views.inputs,
+            )?)
         })
         .collect::<Result<Vec<_>, DecodeStepError>>()?;
     Ok((arena_memory, arena.total_size(), slots))
-}
-
-/// The views a bucket of `tokens` rows reads its inputs through: the leading rows of each
-/// device buffer, where the upload puts them.
-fn bucket_inputs(inputs: &InputTensors, tokens: usize) -> Result<BucketInputs, TensorError> {
-    Ok(BucketInputs {
-        token_ids: inputs.token_ids.narrow(0, 0, tokens)?,
-        positions: inputs.positions.narrow(0, 0, tokens)?,
-        seqlens_k: inputs.seqlens_k.narrow(0, 0, tokens)?,
-        slot_mapping: inputs.slot_mapping.narrow(0, 0, tokens)?,
-        block_table: inputs.block_table.narrow(0, 0, tokens)?,
-    })
 }
 
 /// The dimensions the step reads off the checkpoint's configuration.

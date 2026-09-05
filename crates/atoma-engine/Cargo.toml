@@ -38,9 +38,10 @@ cuda = [
 nccl = [ "atoma-runtime/nccl", "cuda", "cudarc/nccl", "models/nccl" ]
 
 [dev-dependencies]
-figment     = { workspace = true, features = [ "toml" ] }
-parking_lot = { workspace = true }
-tempfile    = { workspace = true }
+atoma-runtime = { workspace = true, features = [ "test-support" ] }
+figment       = { workspace = true, features = [ "toml" ] }
+parking_lot   = { workspace = true }
+tempfile      = { workspace = true }
 
 [lints.clippy]
 await_holding_lock      = "deny"

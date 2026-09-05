@@ -7,8 +7,9 @@
 //! [`StagingRing::acquire`] waits on the cursor entry's fence, blocking, hands the staging entry
 //! out and moves the cursor on; [`StagingRing::try_acquire`] asks the fence without blocking and
 //! leaves the cursor where it is while the copy is still in flight. Whoever owns the staging
-//! memory keeps each staging entry's memory indexed by the staging entry, and reaches the fence
-//! the upload signals through [`StagingRing::fence`].
+//! memory keeps each staging entry's memory indexed by the staging entry, reaches the fence the
+//! upload signals through [`StagingRing::fence`], and waits on every fence through
+//! [`StagingRing::wait_all`] before letting the memory go.
 //!
 //! A fence nobody has signaled is passed, and so is one whose copy has finished, so an acquire
 //! that is not overtaking a copy returns at once: the fence costs a query, and a wait only when
@@ -175,6 +176,16 @@ impl<F: EntryFence> StagingRing<F> {
     #[must_use]
     pub fn fence(&self, entry: &StagingEntry) -> &F {
         &self.fences[entry.index]
+    }
+
+    /// Waits on every staging entry's fence in turn, blocking, so no copy reads any staging
+    /// entry once this returns: what the owner of the staging memory calls before freeing it.
+    ///
+    /// # Errors
+    ///
+    /// Returns the first fence's error; the fences after it are not waited on.
+    pub fn wait_all(&self) -> Result<(), F::Error> {
+        self.fences.iter().try_for_each(EntryFence::wait)
     }
 
     /// Hands out the staging entry at the cursor and moves the cursor to the next, wrapping.
@@ -359,6 +370,36 @@ mod tests {
             assert_eq!(ring.acquire().unwrap().index(), 0);
             assert_eq!(fences[0].waits(), reuse, "acquire number {reuse} waited");
         }
+    }
+
+    #[test]
+    fn wait_all_waits_on_every_staging_entrys_fence_whatever_the_cursor() {
+        let (mut ring, fences) = staging_ring(3);
+        ring.acquire().unwrap();
+        for fence in &fences {
+            fence.copy_in_flight();
+        }
+
+        ring.wait_all().unwrap();
+
+        assert_eq!(waits(&fences), [2, 1, 1], "every fence waited on once more");
+        assert!(
+            fences.iter().all(|fence| fence.try_wait() == Ok(true)),
+            "no copy is in flight after the wait"
+        );
+    }
+
+    #[test]
+    fn wait_all_stops_at_the_first_fence_that_cannot_be_waited_on() {
+        let (ring, fences) = staging_ring(3);
+        fences[1].fail();
+
+        assert_eq!(ring.wait_all().unwrap_err(), FakeFenceError);
+        assert_eq!(
+            waits(&fences),
+            [1, 0, 0],
+            "the fences after the failure are not waited on"
+        );
     }
 
     #[test]
