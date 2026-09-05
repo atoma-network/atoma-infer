@@ -8,7 +8,8 @@
 //! sampled in, wherever in that batch it sits and whatever slot it occupies; the gather must
 //! overwrite a decoding row's token with what its slot sampled and leave a fresh slot's row to
 //! the host; a step staged where the caller says must sample under the row slots uploaded from
-//! there; and the eager upload must refuse a step staged where the caller says.
+//! there; the eager upload must refuse a step staged where the caller says; and a view of other
+//! rows than the staged step's, or of another dtype, must be refused by name.
 //!
 //! Run through `scripts/sampler-parity.sh`.
 
@@ -32,6 +33,7 @@ use atoma_engine::sampling::record::SlotRecord;
 use atoma_engine::sampling::reference;
 use atoma_runtime::context::RuntimeContext;
 use atoma_runtime::session::{Allocation, Descriptor};
+use atoma_runtime::tensor::{Dtype, Layout, Tensor};
 use cudarc::driver::{CudaSlice, CudaStream, DevicePtr};
 
 /// Small enough to upload per step, wide enough for the kernel's block-wide reductions to span
@@ -64,7 +66,8 @@ impl Lcg {
 
 /// The device, its stream and the sampler under test, with a buffer for the logits, one for the
 /// token ids a step would upload, and one for each of the sampler's two per-step arrays where a
-/// decode step's upload would put them.
+/// decode step's upload would put them, each viewed at its full rows as a decode step's views
+/// are minted.
 struct Rig {
     sampler: DeviceSampler,
     stream: Arc<CudaStream>,
@@ -72,7 +75,21 @@ struct Rig {
     token_ids: CudaSlice<u32>,
     row_slots: CudaSlice<i32>,
     gather_slots: CudaSlice<i32>,
+    views: Views,
     _allocation: Allocation,
+}
+
+/// The views a decode step would hand the sampler, at the rig's full rows: the decode step
+/// narrows them to the live rows, and so does the rig.
+struct Views {
+    /// f32 `[MAX_ROWS, VOCAB]`.
+    logits: Tensor,
+    /// u32 `[MAX_ROWS]`.
+    token_ids: Tensor,
+    /// i32 `[MAX_ROWS]`.
+    row_slots: Tensor,
+    /// i32 `[MAX_ROWS]`.
+    gather_slots: Tensor,
 }
 
 impl Rig {
@@ -94,6 +111,13 @@ impl Rig {
         let gather_slots = stream
             .alloc_zeros::<i32>(MAX_ROWS.get())
             .expect("the gather slots allocate");
+        let rows = MAX_ROWS.get();
+        let views = Views {
+            logits: view(&allocation, &stream, &logits, &[rows, VOCAB], Dtype::F32),
+            token_ids: view(&allocation, &stream, &token_ids, &[rows], Dtype::U32),
+            row_slots: view(&allocation, &stream, &row_slots, &[rows], Dtype::I32),
+            gather_slots: view(&allocation, &stream, &gather_slots, &[rows], Dtype::I32),
+        };
         Self {
             sampler,
             stream,
@@ -101,6 +125,7 @@ impl Rig {
             token_ids,
             row_slots,
             gather_slots,
+            views,
             _allocation: allocation,
         }
     }
@@ -155,13 +180,22 @@ impl Rig {
             .memcpy_htod(token_ids, &mut self.token_ids)
             .expect("the token ids upload");
         self.stage_as_decode_step(layout, token_ids.len());
-        let (address, _reads) = self.token_ids.device_ptr(&self.stream);
-        let (gather_slots, _reads) = self.gather_slots.device_ptr(&self.stream);
+        let rows = token_ids.len();
+        let ids = self
+            .views
+            .token_ids
+            .narrow(0, 0, rows)
+            .expect("within the rig's rows");
+        let slots = self
+            .views
+            .gather_slots
+            .narrow(0, 0, rows)
+            .expect("within the rig's rows");
         // SAFETY: the stream is the sampler's, and the token ids and the gather slots are live on
         // its device.
         unsafe {
             self.sampler
-                .gather(address, gather_slots)
+                .gather(&ids, &slots)
                 .expect("a step is staged")
                 .enqueue(self.stream.cu_stream())
                 .expect("the gather enqueues");
@@ -188,19 +222,47 @@ impl Rig {
     fn sample_as_decode_step(&mut self, layout: &BatchLayout, rows: &[Vec<f32>]) -> Vec<u32> {
         self.upload_logits(rows);
         self.stage_as_decode_step(layout, rows.len());
-        let (logits, _reads) = self.logits.device_ptr(&self.stream);
-        let (row_slots, _reads) = self.row_slots.device_ptr(&self.stream);
+        let (logits, row_slots) = self.live_views(rows.len());
         // SAFETY: the stream is the sampler's, and the logits and the row slots were uploaded to
         // its device.
         unsafe {
             self.sampler
-                .sample(logits, row_slots)
+                .sample(&logits, &row_slots)
                 .expect("a step is staged")
                 .enqueue(self.stream.cu_stream())
                 .expect("the sample enqueues");
         }
         self.sampler.wait().expect("the tokens come back").to_vec()
     }
+
+    /// The logits and row slots views narrowed to `live` rows, as the decode step hands them to
+    /// the sample.
+    fn live_views(&self, live: usize) -> (Tensor, Tensor) {
+        (
+            self.views
+                .logits
+                .narrow(0, 0, live)
+                .expect("within the rig's rows"),
+            self.views
+                .row_slots
+                .narrow(0, 0, live)
+                .expect("within the rig's rows"),
+        )
+    }
+}
+
+/// The view of `dims` of `dtype` over `buffer`, minted at Allocation as a decode step mints its
+/// views.
+fn view<T>(
+    allocation: &Allocation,
+    stream: &Arc<CudaStream>,
+    buffer: &CudaSlice<T>,
+    dims: &[usize],
+    dtype: Dtype,
+) -> Tensor {
+    let (address, _reads) = buffer.device_ptr(stream);
+    let layout = Layout::contiguous(dims, dtype).expect("rank one or two");
+    Tensor::new(allocation, address, layout).expect("a device allocation is aligned")
 }
 
 /// One decode entry for `request` in `slot`, sampling under `params`.
@@ -551,5 +613,70 @@ fn the_eager_upload_refuses_a_step_staged_where_the_caller_says() {
             Err(SamplerError::ArraysElsewhere(ArraysIn::Caller))
         ),
         "the eager upload refuses a step staged in the caller's memory"
+    );
+}
+
+#[test]
+#[ignore = "needs a device and the CUDA toolkit; run scripts/sampler-parity.sh"]
+fn a_view_of_other_rows_than_the_staged_step_or_of_another_dtype_is_refused_by_name() {
+    let mut rig = Rig::open();
+    let step = layout(vec![
+        entry(1, 0, SamplingParams::default()),
+        entry(2, 1, SamplingParams::default()),
+    ]);
+    rig.stage_as_decode_step(&step, 2);
+
+    // Two rows are staged: a three-row logits view is not the step's rows, and the row slots
+    // view handed as the logits is not f32.
+    let (logits, row_slots) = rig.live_views(2);
+    let (three, _) = rig.live_views(3);
+    assert!(
+        matches!(
+            rig.sampler.sample(&three, &row_slots),
+            Err(SamplerError::ViewShape {
+                what: "logits",
+                ref held,
+                ref expected
+            }) if *held == [3, VOCAB] && *expected == [2, VOCAB]
+        ),
+        "a logits view of other rows than the staged step's is refused"
+    );
+    assert!(
+        matches!(
+            rig.sampler.sample(&row_slots, &logits),
+            Err(SamplerError::ViewDtype {
+                what: "logits",
+                held: Dtype::I32,
+                expected: Dtype::F32
+            })
+        ),
+        "the row slots handed as the logits are refused"
+    );
+
+    // The gather's two views swapped: the gather slots are not u32 token ids.
+    let ids = rig
+        .views
+        .token_ids
+        .narrow(0, 0, 2)
+        .expect("within the rig's rows");
+    let slots = rig
+        .views
+        .gather_slots
+        .narrow(0, 0, 2)
+        .expect("within the rig's rows");
+    assert!(
+        matches!(
+            rig.sampler.gather(&slots, &ids),
+            Err(SamplerError::ViewDtype {
+                what: "token ids",
+                held: Dtype::I32,
+                expected: Dtype::U32
+            })
+        ),
+        "the gather slots handed as the token ids are refused"
+    );
+    assert!(
+        rig.sampler.gather(&ids, &slots).is_ok(),
+        "the right views are taken"
     );
 }

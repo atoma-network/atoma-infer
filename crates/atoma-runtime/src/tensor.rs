@@ -12,6 +12,9 @@
 //! a view over a fresh address cannot be minted once capture has begun. Sub-views
 //! ([`Tensor::narrow`], [`Tensor::select`], [`Tensor::reshape`]) stay inside the extent their root
 //! declared and need no witness: they name bytes that were already fixed.
+//!
+//! [`Element`] ties a host value type to the dtype its views have, so a copy between host values
+//! and a view can hold the view to the type the host reads or writes.
 
 use cudarc::driver::sys;
 use thiserror::Error;
@@ -50,6 +53,32 @@ impl Dtype {
     pub const fn width_bytes(self, elements_per_token: usize) -> usize {
         elements_per_token * self.size_in_bytes()
     }
+}
+
+/// A host value type and the one [`Dtype`] a view of it has.
+///
+/// What a copy between host values of `T` and a view checks the view against: a view of another
+/// dtype would fill or drain the wrong number of bytes. Only the types the host reads and writes
+/// directly implement it; the half-precision dtypes have no host type here.
+pub trait Element: Copy {
+    /// The dtype of a view over values of this type.
+    const DTYPE: Dtype;
+}
+
+impl Element for f32 {
+    const DTYPE: Dtype = Dtype::F32;
+}
+
+impl Element for u32 {
+    const DTYPE: Dtype = Dtype::U32;
+}
+
+impl Element for i32 {
+    const DTYPE: Dtype = Dtype::I32;
+}
+
+impl Element for i64 {
+    const DTYPE: Dtype = Dtype::I64;
 }
 
 /// Rejected layouts, views and tensors.
@@ -507,6 +536,20 @@ mod tests {
 
     fn bf16(dims: &[usize]) -> Layout {
         Layout::contiguous(dims, Dtype::Bf16).unwrap()
+    }
+
+    #[test]
+    fn a_host_elements_size_is_its_dtypes() {
+        // The copy of `len` host values is `len * size_of::<T>()` bytes; the view it fills or
+        // drains is `len * DTYPE.size_in_bytes()`. The two must agree for every host type.
+        assert_eq!(<f32 as Element>::DTYPE, Dtype::F32);
+        assert_eq!(<u32 as Element>::DTYPE, Dtype::U32);
+        assert_eq!(<i32 as Element>::DTYPE, Dtype::I32);
+        assert_eq!(<i64 as Element>::DTYPE, Dtype::I64);
+        assert_eq!(size_of::<f32>(), <f32 as Element>::DTYPE.size_in_bytes());
+        assert_eq!(size_of::<u32>(), <u32 as Element>::DTYPE.size_in_bytes());
+        assert_eq!(size_of::<i32>(), <i32 as Element>::DTYPE.size_in_bytes());
+        assert_eq!(size_of::<i64>(), <i64 as Element>::DTYPE.size_in_bytes());
     }
 
     #[test]

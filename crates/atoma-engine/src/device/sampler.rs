@@ -8,11 +8,14 @@
 //! selected row samples under, and which token rows take their token from the device, are the
 //! sampler's two per-step arrays, and [`DeviceSampler::stage`] writes them where the caller says:
 //! the decode step stages them beside the model's inputs in its packed block, uploads the block
-//! in one copy, and tells [`DeviceSampler::gather`] and [`DeviceSampler::sample`] where on the
-//! device the two arrays landed. What comes back is one asynchronous copy of the rows' tokens,
-//! fenced by the readback's event and waited on once the step is enqueued: the host learns what
-//! was sampled for detokenisation and finish detection, and the device never waits for it. The
-//! sampled tokens stay in the per-slot array the next step's gather reads.
+//! in one copy, and hands [`DeviceSampler::gather`] and [`DeviceSampler::sample`] tensor views
+//! over where the two arrays landed and over the logits. Each view is held to the staged step's
+//! rows and the dtype the kernel reads, so a view handed to the wrong argument is refused by
+//! name. What comes back is one asynchronous copy of the rows' tokens, through the leading rows
+//! of the row tokens view, fenced by the readback's event and waited on once the step is
+//! enqueued: the host learns what was sampled for detokenisation and finish detection, and the
+//! device never waits for it. The sampled tokens stay in the per-slot array the next step's
+//! gather reads.
 //!
 //! The candle forward samples through the same state on candle's stream. An eager step gathers
 //! nothing, so [`DeviceSampler::stage_eager`] writes its row slots into the sampler's own pinned
@@ -31,6 +34,7 @@ use atoma_kernels::error::KernelError;
 use atoma_kernels::sampler::{gather, sample, GatherCall, SampleCall};
 use atoma_runtime::error::RuntimeError;
 use atoma_runtime::session::{Allocation, Descriptor};
+use atoma_runtime::tensor::{Dtype, Layout, Tensor, TensorError};
 use cudarc::driver::result::{event, memcpy_htod_async};
 use cudarc::driver::sys::{self, CUevent_flags};
 use cudarc::driver::{CudaEvent, CudaSlice, CudaStream, DevicePtr};
@@ -64,6 +68,26 @@ pub enum SamplerError {
     /// a decode step's in the caller's.
     #[error("the staged step's arrays are in {0}; upload them from there")]
     ArraysElsewhere(ArraysIn),
+    /// A view handed to the sampler is of another dtype than the kernel reads `what` as.
+    #[error("the {what} view is {held:?}; the sampler reads {expected:?}")]
+    ViewDtype {
+        what: &'static str,
+        held: Dtype,
+        expected: Dtype,
+    },
+    /// A view handed to the sampler is gapped; the kernel reads `what` as one contiguous array.
+    #[error("the {what} view has strides {strides:?}; the sampler reads it contiguous")]
+    ViewNotContiguous {
+        what: &'static str,
+        strides: Vec<usize>,
+    },
+    /// A view handed to the sampler is not the rows the staged step covers.
+    #[error("the {what} view is {held:?}; the sampler reads {expected:?} this step")]
+    ViewShape {
+        what: &'static str,
+        held: Vec<usize>,
+        expected: Vec<usize>,
+    },
     #[error(transparent)]
     Inputs(#[from] SamplerInputsError),
     #[error(transparent)]
@@ -72,6 +96,8 @@ pub enum SamplerError {
     Readback(#[from] ReadbackError),
     #[error(transparent)]
     Launch(#[from] KernelError),
+    #[error(transparent)]
+    Tensor(#[from] TensorError),
     #[error(transparent)]
     Driver(#[from] RuntimeError),
 }
@@ -111,6 +137,29 @@ impl DeviceArray {
         Ok(Self {
             _memory: memory,
             address,
+        })
+    }
+}
+
+/// A device array viewed as a tensor: the view minted over the array at Allocation, and the
+/// array, owned so the address the view names stays allocated for as long as the view is read.
+struct DeviceTensor {
+    view: Tensor,
+    _array: DeviceArray,
+}
+
+impl DeviceTensor {
+    /// `layout`'s elements, zeroed, on `stream`'s device, viewed as `layout`.
+    fn zeroed(
+        allocation: &Allocation,
+        stream: &Arc<CudaStream>,
+        layout: Layout,
+    ) -> Result<Self, SamplerError> {
+        let array = DeviceArray::zeroed(stream, layout.extent_bytes())?;
+        let view = Tensor::new(allocation, array.address, layout)?;
+        Ok(Self {
+            view,
+            _array: array,
         })
     }
 }
@@ -171,8 +220,9 @@ pub struct DeviceSampler {
     /// eager step: staged in the pinned half and read from the device half. A decode step's row
     /// slots are in its own upload.
     row_slots: StagedArray<i32>,
-    /// u32 per row: the token sampled for each selected row this step.
-    out: DeviceArray,
+    /// u32 `[max_rows]`: the token sampled for each selected row this step, viewed for the
+    /// readback to copy the leading rows through.
+    row_tokens: DeviceTensor,
     readback: Readback<u32>,
     /// Recorded behind every upload from the sampler's own staging; waited on before the staging
     /// is freed.
@@ -205,6 +255,7 @@ impl DeviceSampler {
         let uploaded = context
             .new_event(Some(CUevent_flags::CU_EVENT_BLOCKING_SYNC))
             .map_err(RuntimeError::from)?;
+        let row_tokens = Layout::contiguous(&[max_rows], Dtype::U32)?;
         let sampler = Self {
             max_rows,
             vocab,
@@ -212,7 +263,7 @@ impl DeviceSampler {
             pending_records: Vec::new(),
             sampled: DeviceArray::zeroed(stream, slots * size_of::<u32>())?,
             row_slots: StagedArray::new(stream, max_rows)?,
-            out: DeviceArray::zeroed(stream, max_rows * size_of::<u32>())?,
+            row_tokens: DeviceTensor::zeroed(allocation, stream, row_tokens)?,
             readback: Readback::new(allocation, context, max_rows, 1)?,
             uploaded,
             owners: SlotOwners::new(slots),
@@ -331,20 +382,28 @@ impl DeviceSampler {
         })
     }
 
-    /// The descriptor that overwrites the gathering token rows of the u32 token ids at
-    /// `token_ids` with the token last sampled for their slot, as the i32 gather slots at
-    /// `gather_slots` name it for every covered token row: the array the staged step wrote,
-    /// where the caller's upload put it on the device.
+    /// The descriptor that overwrites the gathering token rows of the u32 `token_ids` with the
+    /// token last sampled for their slot, as the i32 `gather_slots` name it for every covered
+    /// token row: the array the staged step wrote, viewed where the caller's upload put it on
+    /// the device. Both views are the covered token rows exactly.
     ///
     /// # Errors
     ///
-    /// Returns [`SamplerError::NoStepStaged`] when no step is staged.
-    pub fn gather(&self, token_ids: u64, gather_slots: u64) -> Result<Gather, SamplerError> {
+    /// Returns [`SamplerError::NoStepStaged`] when no step is staged, or a `View` variant when
+    /// a view is not the covered rows of the dtype the kernel reads.
+    pub fn gather(
+        &self,
+        token_ids: &Tensor,
+        gather_slots: &Tensor,
+    ) -> Result<Gather, SamplerError> {
         let staged = self.staged.ok_or(SamplerError::NoStepStaged)?;
+        let rows = &[staged.gather_rows];
+        check_view("token ids", token_ids, Dtype::U32, rows)?;
+        check_view("gather slots", gather_slots, Dtype::I32, rows)?;
         Ok(Gather {
             call: GatherCall {
-                token_ids,
-                gather_slots,
+                token_ids: token_ids.address(),
+                gather_slots: gather_slots.address(),
                 sampled: self.sampled.address,
                 n_rows: staged.gather_rows,
                 stream: ptr::null_mut(),
@@ -352,27 +411,45 @@ impl DeviceSampler {
         })
     }
 
-    /// The descriptor that samples every selected row from the f32 logits at `logits`, one row
-    /// per selected row a vocabulary wide, under the i32 row slots at `row_slots`, one per
-    /// selected row where the staged step's upload put them, and copies the tokens back for
-    /// [`DeviceSampler::wait`].
+    /// The descriptor that samples every selected row from the f32 `logits`, one row per
+    /// selected row a vocabulary wide, under the i32 `row_slots`, one per selected row viewed
+    /// where the staged step's upload put them, and copies the tokens back for
+    /// [`DeviceSampler::wait`]. Both views are the selected rows exactly: the caller narrows
+    /// them to the live rows.
     ///
     /// # Errors
     ///
-    /// Returns [`SamplerError::NoStepStaged`] when no step is staged.
-    pub fn sample(&mut self, logits: u64, row_slots: u64) -> Result<Sample<'_>, SamplerError> {
+    /// Returns [`SamplerError::NoStepStaged`] when no step is staged, or a `View` variant when
+    /// a view is not the selected rows of the dtype the kernel reads.
+    pub fn sample(
+        &mut self,
+        logits: &Tensor,
+        row_slots: &Tensor,
+    ) -> Result<Sample<'_>, SamplerError> {
         let staged = self.staged.ok_or(SamplerError::NoStepStaged)?;
+        check_view("logits", logits, Dtype::F32, &[staged.rows, self.vocab])?;
+        check_view("row slots", row_slots, Dtype::I32, &[staged.rows])?;
+        self.sample_at(logits.address(), row_slots.address())
+    }
+
+    /// The sample of the staged step's rows from the f32 logits at `logits` under the i32 row
+    /// slots at `row_slots`, and the readback of its tokens through the leading rows of the row
+    /// tokens view. The addresses are the caller's to have checked: a view for a decode step,
+    /// candle's logits and the sampler's own row slots for an eager one.
+    fn sample_at(&mut self, logits: u64, row_slots: u64) -> Result<Sample<'_>, SamplerError> {
+        let staged = self.staged.ok_or(SamplerError::NoStepStaged)?;
+        let tokens = self.row_tokens.view.narrow(0, 0, staged.rows)?;
         let call = SampleCall {
             logits,
             row_slots,
             records: self.records.address(),
             sampled: self.sampled.address,
-            out: self.out.address,
+            out: tokens.address(),
             vocab: self.vocab,
             n_rows: staged.rows,
             stream: ptr::null_mut(),
         };
-        let copy = self.readback.copy(self.out.address, staged.rows)?;
+        let copy = self.readback.copy(&tokens)?;
         Ok(Sample { call, copy })
     }
 
@@ -413,7 +490,7 @@ impl DeviceSampler {
         // descriptors name is this sampler's, or the logits the stream's earlier work wrote.
         unsafe {
             self.upload_eager()?.enqueue(stream.cu_stream())?;
-            self.sample(address, row_slots)?
+            self.sample_at(address, row_slots)?
                 .enqueue(stream.cu_stream())?;
         }
         self.wait()
@@ -538,9 +615,114 @@ impl Descriptor for Sample<'_> {
     }
 }
 
+/// Holds `view` to contiguous `dims` of `dtype`, which is what the kernel reads `what` as,
+/// refusing by the first of dtype, contiguity and shape that fails.
+fn check_view(
+    what: &'static str,
+    view: &Tensor,
+    dtype: Dtype,
+    dims: &[usize],
+) -> Result<(), SamplerError> {
+    if view.dtype() != dtype {
+        return Err(SamplerError::ViewDtype {
+            what,
+            held: view.dtype(),
+            expected: dtype,
+        });
+    }
+    if !view.is_contiguous() {
+        return Err(SamplerError::ViewNotContiguous {
+            what,
+            strides: view.strides().to_vec(),
+        });
+    }
+    if view.dims() != dims {
+        return Err(SamplerError::ViewShape {
+            what,
+            held: view.dims().to_vec(),
+            expected: dims.to_vec(),
+        });
+    }
+    Ok(())
+}
+
 /// The device address of a buffer; event tracking is disabled at context creation, so the read
 /// guard is a no-op and the address is stable for the buffer's lifetime.
 fn address<T>(slice: &CudaSlice<T>, stream: &Arc<CudaStream>) -> u64 {
     let (address, _reads) = slice.device_ptr(stream);
     address
+}
+
+#[cfg(test)]
+mod tests {
+    use atoma_runtime::tensor::{Dtype, Layout, Tensor};
+
+    use super::{check_view, SamplerError};
+
+    /// Where a device buffer sits, aligned as a device allocation is.
+    const BASE: u64 = 0x7f00_0000_0000;
+    /// The width the sampler reads a logits row as.
+    const VOCAB: usize = 4096;
+
+    fn view(layout: Layout) -> Tensor {
+        Tensor::for_test(BASE, layout).unwrap()
+    }
+
+    #[test]
+    fn logits_narrowed_to_the_live_rows_are_taken_and_logits_a_row_apart_are_refused() {
+        // Two live rows of a bucket of eight: narrowed from the contiguous `[8, VOCAB]` logits
+        // the rows stay VOCAB apart, so the view is the `[2, VOCAB]` array the kernel reads.
+        let bucket = view(Layout::contiguous(&[8, VOCAB], Dtype::F32).unwrap());
+        let live = bucket.narrow(0, 0, 2).unwrap();
+        check_view("logits", &live, Dtype::F32, &[2, VOCAB]).unwrap();
+
+        // The same two rows 2 * VOCAB apart: the kernel would read the row between as logits.
+        let gapped = Layout::strided(&[2, VOCAB], &[2 * VOCAB, 1], Dtype::F32).unwrap();
+        let refused = check_view("logits", &view(gapped), Dtype::F32, &[2, VOCAB]).unwrap_err();
+        assert!(
+            matches!(
+                refused,
+                SamplerError::ViewNotContiguous {
+                    what: "logits",
+                    ref strides
+                } if *strides == [2 * VOCAB, 1]
+            ),
+            "logits a row apart are refused as gapped: {refused}"
+        );
+    }
+
+    #[test]
+    fn gather_slots_two_apart_are_refused_since_the_kernel_reads_them_as_one_array() {
+        // Three covered rows whose slots sit every other element: not the `[3]` array.
+        let strided = Layout::strided(&[3], &[2], Dtype::I32).unwrap();
+        let refused = check_view("gather slots", &view(strided), Dtype::I32, &[3]).unwrap_err();
+        assert!(
+            matches!(
+                refused,
+                SamplerError::ViewNotContiguous {
+                    what: "gather slots",
+                    ref strides
+                } if *strides == [2]
+            ),
+            "gather slots two apart are refused as gapped: {refused}"
+        );
+    }
+
+    #[test]
+    fn token_ids_of_other_rows_than_the_gather_covers_are_refused_by_name() {
+        // The step covers three token rows; four rows are the batch's, not the covered rows.
+        let four = view(Layout::contiguous(&[4], Dtype::U32).unwrap());
+        let refused = check_view("token ids", &four, Dtype::U32, &[3]).unwrap_err();
+        assert!(
+            matches!(
+                refused,
+                SamplerError::ViewShape {
+                    what: "token ids",
+                    ref held,
+                    ref expected
+                } if *held == [4] && *expected == [3]
+            ),
+            "token ids of other rows than the gather covers are refused: {refused}"
+        );
+    }
 }

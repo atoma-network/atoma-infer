@@ -12,6 +12,11 @@
 //! wait. Nothing is captured here. Going through the descriptor seam is what lets a later capture
 //! record the gather, the model step and the sample unchanged; the two uploads are the host's
 //! copies of what changed and stay in front of the graph.
+//!
+//! The step's outputs reach the sampler and the readback as tensor views narrowed to the live
+//! rows: the bucket's logits and the sampler's row tokens are viewed once, at Allocation, over
+//! the step's fixed buffers, and a descriptor takes its address, its rows and its width off the
+//! view it is handed, so nothing sized by the batch is spelled out at the call.
 
 use std::sync::Arc;
 
@@ -284,11 +289,11 @@ impl DecodeStep {
         session.run(&mut WaitEvent::new(&self.candle_done))?;
         session.run(&mut sampler.upload_records()?)?;
         session.run(&mut self.upload(entry, &batch)?)?;
-        let token_ids = views.inputs.token_ids.address();
-        session.run(&mut sampler.gather(token_ids, views.gather_slots.address())?)?;
+        session.run(&mut sampler.gather(&views.inputs.token_ids, &views.gather_slots)?)?;
         session.run(&mut self.descriptor(batch.bucket)?)?;
-        let logits = self.decode.bucket(batch.bucket)?.statics.logits.address();
-        session.run(&mut sampler.sample(logits, views.row_slots.address())?)?;
+        let logits = self.live_logits(&batch)?;
+        let row_slots = views.row_slots.narrow(0, 0, batch.live)?;
+        session.run(&mut sampler.sample(&logits, &row_slots)?)?;
         Ok(sampler.wait()?)
     }
 
@@ -311,10 +316,16 @@ impl DecodeStep {
         session.run(&mut WaitEvent::new(&self.candle_done))?;
         session.run(&mut self.upload(entry, &batch)?)?;
         session.run(&mut self.descriptor(batch.bucket)?)?;
-        let vocab = self.decode.dims().vocab;
-        let logits = self.decode.bucket(batch.bucket)?.statics.logits.address();
-        session.run(&mut readback.copy(logits, batch.live)?)?;
-        Ok(Logits::new(readback.wait()?, vocab))
+        let logits = self.live_logits(&batch)?;
+        session.run(&mut readback.copy(&logits)?)?;
+        Ok(Logits::new(readback.wait()?, logits.dim(1)))
+    }
+
+    /// The f32 `[live, vocab]` view of the logits `batch`'s step writes for its live rows: the
+    /// leading rows of its bucket's logits.
+    fn live_logits(&self, batch: &DecodeBatch) -> Result<Tensor, DecodeStepError> {
+        let bucket = self.decode.bucket(batch.bucket)?;
+        Ok(bucket.statics.logits.narrow(0, 0, batch.live)?)
     }
 
     /// Acquires a staging entry, waiting until the copy that last read its block has finished,
