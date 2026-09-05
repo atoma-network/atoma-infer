@@ -30,7 +30,7 @@ use thiserror::Error;
 use tracing::{info, warn};
 
 use crate::batch::BatchLayout;
-use crate::decode::inputs::Pinned;
+use crate::pinned::Pinned;
 use crate::readback::{Readback, ReadbackCopy, ReadbackError};
 use crate::sampling::inputs::{SamplerInputs, SamplerInputsError};
 use crate::sampling::owners::SlotOwners;

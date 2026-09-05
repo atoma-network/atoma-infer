@@ -14,15 +14,12 @@
 //! The fence descriptor orders the decode step after candle's stream: a prefill runs there, and
 //! the step must not read the cache it wrote until it is written.
 
-use std::ffi::c_void;
-use std::mem::size_of;
-use std::slice;
 use std::sync::Arc;
 
 use atoma_runtime::error::RuntimeError;
 use atoma_runtime::session::{Allocation, Descriptor};
 use atoma_runtime::tensor::{Dtype, Layout, Tensor, TensorError};
-use cudarc::driver::result::{event, free_host, malloc_host, memcpy_htod_async, stream};
+use cudarc::driver::result::{event, memcpy_htod_async, stream};
 use cudarc::driver::sys::{self, CUevent_flags, CUevent_wait_flags};
 use cudarc::driver::{CudaEvent, CudaSlice, CudaStream, DevicePtr};
 use thiserror::Error;
@@ -31,7 +28,7 @@ use tracing::warn;
 use crate::batch::BatchLayout;
 use crate::decode::batch::DecodeBatch;
 use crate::decode::staging::{stage, StagingArrays, StagingError, StagingShape};
-use crate::readback::CACHEABLE_PINNED;
+use crate::pinned::Pinned;
 
 /// Why the inputs could not be allocated, staged or uploaded.
 #[derive(Debug, Error)]
@@ -88,42 +85,6 @@ pub struct InputTensors {
     pub seqlens_k: Tensor,
     pub slot_mapping: Tensor,
     pub block_table: Tensor,
-}
-
-/// A pinned host array, allocated once and freed on drop.
-pub(crate) struct Pinned<T> {
-    ptr: *mut T,
-    len: usize,
-}
-
-impl<T> Pinned<T> {
-    /// `len` values of pinned, cacheable host memory in the current context.
-    pub(crate) fn new(len: usize) -> Result<Self, RuntimeError> {
-        // SAFETY: a driver allocation of the size asked for, freed once, in `Drop`, after every
-        // copy out of it has been waited on.
-        let ptr = unsafe { malloc_host(len * size_of::<T>(), CACHEABLE_PINNED) }?.cast::<T>();
-        Ok(Self { ptr, len })
-    }
-
-    pub(crate) fn as_slice(&self) -> &[T] {
-        // SAFETY: `len` values were allocated at `ptr` and nothing writes them while this borrow
-        // is live: the writer takes `&mut self`.
-        unsafe { slice::from_raw_parts(self.ptr, self.len) }
-    }
-
-    pub(crate) fn as_mut_slice(&mut self) -> &mut [T] {
-        // SAFETY: as above, exclusively through `&mut self`.
-        unsafe { slice::from_raw_parts_mut(self.ptr, self.len) }
-    }
-}
-
-impl<T> Drop for Pinned<T> {
-    fn drop(&mut self) {
-        // SAFETY: the pointer came from `malloc_host` and is freed here alone.
-        if let Err(error) = unsafe { free_host(self.ptr.cast::<c_void>()) } {
-            warn!(%error, "a pinned staging array could not be freed");
-        }
-    }
 }
 
 /// One input: its pinned staging, its device buffer, and the view over the buffer.

@@ -15,6 +15,7 @@ pub mod executor;
 pub mod forward;
 pub mod logits;
 pub mod model;
+pub(crate) mod pinned;
 pub mod readback;
 pub mod sampling;
 

@@ -7,29 +7,23 @@
 //! else: no stream synchronize and no device-wide wait, so whatever else the stream holds behind
 //! the copy is not waited for.
 //!
-//! The buffer is pinned as cacheable host memory, never write-combined: the host reads every
-//! value of every row, and reads from write-combined memory are uncached.
-//!
 //! Two paths reach the buffer. The candle forward copies from a device tensor on candle's stream
 //! and waits in one call. The decode step over runtime tensors enqueues the copy through the seam,
 //! as the last descriptor of a step on the capture stream, and waits on it separately once the step
 //! is enqueued.
 
-use std::ffi::c_void;
-use std::mem::size_of;
 use std::slice;
 use std::sync::Arc;
 
 use atoma_runtime::error::RuntimeError;
 use atoma_runtime::session::{Allocation, Descriptor};
-use cudarc::driver::result::{event, free_host, malloc_host, memcpy_dtoh_async};
+use cudarc::driver::result::{event, memcpy_dtoh_async};
 use cudarc::driver::sys::{self, CUevent_flags};
 use cudarc::driver::{CudaContext, CudaEvent, CudaStream, DevicePtr};
 use thiserror::Error;
 use tracing::warn;
 
-/// `cuMemHostAlloc` flags: pinned, cacheable, mapped for this context alone.
-pub(crate) const CACHEABLE_PINNED: u32 = 0;
+use crate::pinned::Pinned;
 
 /// Why a step's logits could not be read back.
 #[derive(Debug, Error)]
@@ -53,8 +47,8 @@ pub enum ReadbackError {
 
 /// The pinned host buffer a step's rows of `T` are copied into.
 pub struct Readback<T> {
-    /// `max_rows * width` values of pinned host memory, owned here and freed on drop.
-    buffer: *mut T,
+    /// `max_rows * width` values, written by the copy and read after its wait.
+    buffer: Pinned<T>,
     /// Recorded behind every copy; waited on before the host reads, and before the buffer is
     /// freed.
     event: CudaEvent,
@@ -83,11 +77,7 @@ impl<T: Copy> Readback<T> {
             .new_event(Some(CUevent_flags::CU_EVENT_BLOCKING_SYNC))
             .map_err(RuntimeError::from)?;
         context.bind_to_thread().map_err(RuntimeError::from)?;
-        // SAFETY: a driver allocation of the size asked for, freed once, in `Drop`, after the
-        // event has fenced the last copy into it.
-        let buffer = unsafe { malloc_host(max_rows * width * size_of::<T>(), CACHEABLE_PINNED) }
-            .map_err(RuntimeError::from)?
-            .cast::<T>();
+        let buffer = Pinned::new(max_rows * width)?;
         Ok(Self {
             buffer,
             event,
@@ -113,7 +103,7 @@ impl<T: Copy> Readback<T> {
         let len = rows * self.width;
         self.pending = Some(len);
         Ok(ReadbackCopy {
-            host: self.buffer,
+            host: self.buffer.as_mut_ptr(),
             len,
             device,
             event: &self.event,
@@ -132,9 +122,7 @@ impl<T: Copy> Readback<T> {
             return Err(ReadbackError::NoCopyPending);
         };
         self.event.synchronize().map_err(RuntimeError::from)?;
-        // SAFETY: `len` values lie within the buffer, the copy into them has completed, and
-        // nothing writes them while this borrow is live.
-        Ok(unsafe { slice::from_raw_parts(self.buffer, len) })
+        Ok(&self.buffer.as_slice()[..len])
     }
 
     /// Copies `rows` rows of `source` back on `stream` and waits for that copy alone.
@@ -155,9 +143,7 @@ impl<T: Copy> Readback<T> {
             .context()
             .bind_to_thread()
             .map_err(RuntimeError::from)?;
-        // SAFETY: `len` values lie within the buffer, and nothing else reads or writes them: the
-        // last read's borrow of this readback ended before this call.
-        let host = unsafe { slice::from_raw_parts_mut(self.buffer, len) };
+        let host = &mut self.buffer.as_mut_slice()[..len];
         let (device, _reads) = source.device_ptr(stream);
         // SAFETY: `device` addresses the `len` values the stream's earlier work wrote, `host` is
         // `len` pinned values, and the event recorded next fences the copy before the host reads.
@@ -171,14 +157,11 @@ impl<T: Copy> Readback<T> {
 
 impl<T> Drop for Readback<T> {
     fn drop(&mut self) {
-        // The last copy may still be in flight; the event waits for it before the memory goes.
-        // Neither failure can be acted on from a destructor beyond saying so.
+        // The last copy may still be in flight; the event waits for it before the buffer, which
+        // frees itself once this body returns, goes. A failure here cannot be acted on beyond
+        // saying so.
         if let Err(error) = self.event.synchronize() {
             warn!(%error, "the readback's last copy could not be waited on before its buffer goes");
-        }
-        // SAFETY: the pointer came from `malloc_host` and is freed here alone.
-        if let Err(error) = unsafe { free_host(self.buffer.cast::<c_void>()) } {
-            warn!(%error, "the readback's pinned buffer could not be freed");
         }
     }
 }
