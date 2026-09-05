@@ -24,6 +24,7 @@
 //! |---|---|
 //! | [`context`] | Device context: construction, global event-tracking disable, loud no-driver failure |
 //! | [`stream`] | The dedicated capture stream, whose surface has no synchronize and no allocate |
+//! | [`fence`] | The staging fence: one event, signaled through the seam, waited on with or without blocking |
 //! | [`capture`] | Capture lifecycle, end-capture instantiate/discard, the captured graph |
 //! | [`graph_entry`] | Graph-lifetime ownership with load-bearing teardown order |
 //! | [`session`] | The capture session: phase-typed Allocation, Capture and Replay of one graph set |
@@ -38,6 +39,7 @@ pub mod capture;
 pub mod communicator;
 pub mod context;
 pub mod error;
+pub mod fence;
 pub mod graph_entry;
 pub mod session;
 pub mod stream;
