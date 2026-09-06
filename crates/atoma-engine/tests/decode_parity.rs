@@ -1,4 +1,4 @@
-//! Decode parity and capture cleanliness on a device.
+//! Decode parity and the capture check on a device.
 //!
 //! Builds the decode step over runtime tensors beside the candle forward on the same weights and
 //! KV cache, records the step under capture over a dummy run to show the driver accepts it, then
@@ -257,7 +257,7 @@ fn open(model: &ModelConfig) -> Rig {
     }
 }
 
-/// Capture cleanliness: the bucket-of-one step, over a dummy run of one padding row on the dummy
+/// The capture check: the bucket-of-one step, over a dummy run of one padding row on the dummy
 /// block, warms up and records without the driver invalidating it. Returns the Replay phase, the
 /// graph's node count, and how many of its nodes allocate or free memory.
 fn record_bucket_of_one(

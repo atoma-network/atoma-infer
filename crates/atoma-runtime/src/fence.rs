@@ -1,18 +1,19 @@
 //! The staging fence: one event, recorded on the capture stream behind the copy that reads a
-//! staging entry, and waited on by the host before it writes the entry again.
+//! staging entry, and waited on by the host before it writes that staging entry again.
 //!
 //! An upload copies a pinned staging entry to the device asynchronously, so the host must not
-//! write the entry again until that copy has read it. The fence is what says when: its
+//! write the staging entry again until that copy has read it. The fence is what says when: its
 //! [`FenceSignal`] is enqueued through the [`Descriptor`] seam behind the copy, and the host
 //! then asks the fence and nothing else — [`StagingFence::wait`] blocks until the signal has
 //! passed, [`StagingFence::try_wait`] says whether it has without blocking. Neither reaches the
 //! stream, so the capture stream's surface keeps its no-synchronize rule.
 //!
-//! A fence nobody has signaled is passed: a fresh entry is written without a wait. Dropping a
-//! fence does not wait; whoever owns the memory the copy reads waits on the fence before letting
-//! the memory go.
+//! A fence nobody has signaled is passed: a fresh staging entry is written without a wait.
+//! Dropping a fence does not wait; whoever owns the memory the copy reads waits on the fence
+//! before letting the memory go.
 //!
-//! The protocol for one entry; the example compiles on a machine with no GPU and runs on none:
+//! The protocol for one staging entry; the example compiles on a machine with no GPU and runs
+//! on none:
 //!
 //! ```no_run
 //! use atoma_runtime::context::RuntimeContext;
@@ -20,17 +21,17 @@
 //! use atoma_runtime::fence::StagingFence;
 //! use atoma_runtime::session::Allocation;
 //!
-//! fn one_entry() -> Result<(), RuntimeError> {
+//! fn one_staging_entry() -> Result<(), RuntimeError> {
 //!     let ctx = RuntimeContext::new(0)?;
 //!     let allocation = Allocation::new(&ctx)?;
 //!     let fence = StagingFence::new(ctx.cuda())?;
 //!     let replay = allocation.into_capture().into_replay();
-//!     // The upload that reads the entry goes here; the signal follows it on the stream.
+//!     // The upload that reads the staging entry goes here; the signal follows it on the stream.
 //!     replay.run(&mut fence.signal())?;
 //!     if !fence.try_wait()? {
 //!         fence.wait()?;
 //!     }
-//!     // The entry may be written again.
+//!     // The staging entry may be written again.
 //!     Ok(())
 //! }
 //! ```
@@ -44,8 +45,8 @@ use cudarc::driver::{CudaContext, CudaEvent, DriverError};
 use crate::error::RuntimeError;
 use crate::session::Descriptor;
 
-/// The fence guarding one staging entry's reuse: passed once the copy that read the entry has
-/// finished, which is when the host may write the entry again.
+/// The fence guarding one staging entry's reuse: passed once the copy that read the staging entry
+/// has finished, which is when the host may write it again.
 pub struct StagingFence {
     event: CudaEvent,
 }

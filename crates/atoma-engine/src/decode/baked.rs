@@ -2,12 +2,13 @@
 //!
 //! A step over runtime-owned tensors reads and writes fixed device addresses: the views it was
 //! built over name them, and a replay trusts them. Candle owns the weights and the cache, so those
-//! are the addresses that can move; the step's own blocks and the sampler's arrays are owned for as
-//! long as the views over them are read, and are listed with them so the check covers every address
-//! a step bakes. Each address is read from the memory that owns it when the forward is built and,
-//! in a debug build, again before each keyed step; the first that differs ends the step with a
-//! panic naming it, before the step's own work is enqueued. Nothing here needs a device: the
-//! forward reads the addresses and this module compares them.
+//! are the addresses that can move; the device block, the arena, the step's fixed buffers and the
+//! sampler's arrays are owned for as long as the views over them are read, and are listed with
+//! them so the check covers every address a step bakes. Each address is read from the memory that
+//! owns it when the forward is built and, in a debug build, again before each keyed step; the
+//! first that differs ends the step with a panic naming it, before the step's own work is
+//! enqueued. Nothing here needs a device: the forward reads the addresses and this module
+//! compares them.
 
 use std::fmt;
 

@@ -123,8 +123,9 @@ pub struct StagingShape {
 /// runs when there is no live batch to run. Each row is what a padding dummy's row is in a live
 /// step — the padding token at position 0, a key length of one, the block's first KV slot, and a
 /// block table of that one block — so the step computes what it computes for a dummy, and the
-/// only cache it writes is each block's first KV slot. No row samples, so a dummy run stages
-/// nothing for the sampler and reads nothing back.
+/// only cache it writes is each block's first KV slot. No row samples, so no sampler descriptor
+/// runs over a dummy run and nothing is read back; its sampler arrays are staged all the same,
+/// naming no request slot, so its copy-in carries nothing stale.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DummyRun {
     bucket: BucketIdx,

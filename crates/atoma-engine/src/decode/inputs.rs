@@ -373,7 +373,7 @@ impl Drop for DecodeInputs {
         // An upload from any staging entry may still be reading its block; every fence is waited
         // on before the blocks go. A failure here cannot be acted on beyond saying so.
         if let Err(error) = self.ring.wait_all() {
-            warn!(%error, "an input upload could not be waited on before its staging goes");
+            warn!(%error, "a copy-in could not be waited on before its staging goes");
         }
     }
 }

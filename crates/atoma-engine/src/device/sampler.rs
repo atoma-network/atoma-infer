@@ -12,10 +12,10 @@
 //! over where the two arrays landed and over the logits. Each view is held to the staged step's
 //! rows and the dtype the kernel reads, so a view handed to the wrong argument is refused by
 //! name. What comes back is one asynchronous copy of the rows' tokens, through the leading rows
-//! of the row tokens view, fenced by the readback's event and waited on once the step is
-//! enqueued: the host learns what was sampled for detokenisation and finish detection, and the
-//! device never waits for it. The sampled tokens stay in the per-slot array the next step's
-//! gather reads.
+//! of the row tokens view, waited on once the step is enqueued through the readback's own event
+//! and nothing else: the host learns what was sampled for detokenisation and finish detection,
+//! and the device never waits for it. The sampled tokens stay in the per-slot array the next
+//! step's gather reads.
 //!
 //! The candle forward samples through the same state on candle's stream. An eager step gathers
 //! nothing, so [`DeviceSampler::stage_eager`] writes its row slots into the sampler's own pinned

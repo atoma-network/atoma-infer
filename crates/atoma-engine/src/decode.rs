@@ -1,15 +1,16 @@
 //! The decode step over runtime-owned tensors: the host side that needs no device.
 //!
 //! A keyed step command is checked against the bucket its key names, laid out as the fixed
-//! inputs the step reads at the widths the captured graphs bake, and carried to the device
-//! through the descriptor seam. Nothing here needs candle or a compiled kernel, so it builds and
-//! tests without a device; the model step itself sits behind the `cuda` feature.
+//! inputs the step reads at the widths the captured graphs bake, packed into one block, and
+//! carried to the device in one copy-in through the descriptor seam. Nothing here needs candle
+//! or a compiled kernel, so it builds and tests without a device; the model step itself sits
+//! behind the `cuda` feature.
 //!
 //! | Module | Responsibility |
 //! |---|---|
 //! | [`batch`] | A keyed batch held to its bucket, and the buckets the decode step serves |
 //! | [`baked`] | Every address the step bakes, by name, and the check that none of them moved |
-//! | [`staging`] | One step's inputs written into staging at full width, ready to upload |
+//! | [`staging`] | A bucket's seven arrays packed into one block, and what a step or a dummy run writes into them |
 //! | [`inputs`] | The staging ring's blocks, the device block, each bucket's views; the upload and wait descriptors |
 //! | [`ring`] | The staging ring: a fence per staging entry and a cursor; `acquire` waits, `try_acquire` asks |
 
