@@ -58,8 +58,9 @@ impl Dtype {
 /// A host value type and the one [`Dtype`] a view of it has.
 ///
 /// What a copy between host values of `T` and a view checks the view against: a view of another
-/// dtype would fill or drain the wrong number of bytes. Only the types a copy carries implement
-/// it: the `u32` the sampled tokens come back as, and the `f32` a harness reads logits back as.
+/// dtype would fill or drain the wrong number of bytes. Only the types a readback carries
+/// implement it: the `u32` the sampled tokens come back as, and the `f32` a harness reads logits
+/// back as. The half-precision dtypes have no host type here, and no readback is built over one.
 pub trait Element: Copy {
     /// The dtype of a view over values of this type.
     const DTYPE: Dtype;

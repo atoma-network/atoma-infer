@@ -9,13 +9,19 @@
 //! array compared at the bucket's packed offsets, and past the bucket's packed length the block
 //! is still as its allocation zeroed it. A second step, differing in all seven, is staged into
 //! the other staging entry before either upload runs, so each staging entry holds a step of its
-//! own when the first copy reads: what the first readback shows is what the first staging entry
-//! was staged with and not what was staged after it, which is what says a copy-in reaches the
-//! block its staging entry names rather than one fixed block. A dummy run then goes through the
-//! first staging entry again, taken back through the non-blocking half of the staging ring's
-//! protocol. Both copies have been waited on by then, so what that shows is a real fence
-//! answering a query and reading passed — which the staging ring's own tests cannot show over
-//! their fake fence — and not the order of the signal.
+//! own when the first copy reads: each readback shows what its own staging entry was staged
+//! with, and it is the pair of them that says a copy-in does not reach one fixed pinned block —
+//! a `stage` naming block zero instead of the staging entry's leaves the second step in front of
+//! the first readback, and an `upload` naming it leaves the first step in front of the second.
+//! A dummy run then goes through the first staging entry again, taken back through the
+//! non-blocking half of the staging ring's protocol. Both copies have been waited on by then, so
+//! what that shows is a real fence answering a query and reading passed — which the staging
+//! ring's own tests cannot show over their fake fence — and not the order of the signal.
+//!
+//! What none of the three copies pins is which of the two pinned blocks a staging entry names:
+//! swap the blocks wherever a staging entry indexes one and every comparison still passes. The
+//! dummy run pins less still, since the staging ring comes round to the first staging entry for
+//! it, so a `stage_dummy` naming block zero stages the block it would have anyway.
 //!
 //! The order is the second test: it asks the fence while the copy that reads the staging entry
 //! is still in flight. One staging entry, a block table wide enough that its copy takes tens of
@@ -433,10 +439,14 @@ fn what_each_staging_entry_uploads_is_what_the_device_block_holds() {
     let (run, dummy) = dummy_run();
 
     // Both steps are staged before either is uploaded, so both staging entries hold a step of
-    // their own when the first copy reads. That is what makes the first readback say which
-    // pinned block the staging entry named: were the staging and the copy to reach one fixed
-    // block instead, the second step would have overwritten the first there and both readbacks
-    // would show the second, which the first `holds` below refuses.
+    // their own when the first copy reads. It is the pair of readbacks below that says the two
+    // copies did not reach one fixed pinned block: a `stage` naming block zero instead of the
+    // staging entry's leaves the second step in front of the first readback, and an `upload`
+    // naming it leaves the first step in front of the second, so either one reddens a `holds`.
+    // Which of the two pinned blocks a staging entry names is left open: the blocks swapped
+    // wherever a staging entry indexes one keep every comparison green, and so does a
+    // `stage_dummy` naming block zero, since the staging ring comes round to the first staging
+    // entry for the dummy run.
     let first_entry = rig.inputs.acquire().expect("the first staging entry");
     assert_eq!(
         first_entry.index(),
