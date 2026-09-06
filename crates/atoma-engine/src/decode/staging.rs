@@ -166,8 +166,8 @@ const BASE_ALIGNMENT: usize = align_of::<i64>();
 /// Where each of one bucket's seven arrays sits in its packed block, and how long the block is.
 ///
 /// The arrays are laid consecutively at the bucket's rows, in [`StagedInput`]'s order, each
-/// beginning at a multiple of [`ALIGNMENT`]; the block's length is the last array's end, padded
-/// the same way. The layout is the bucket's alone: the largest bucket sizes nothing in it, so a
+/// beginning at a 256-byte boundary; the block's length is the last array's end, padded the
+/// same way. The layout is the bucket's alone: the largest bucket sizes nothing in it, so a
 /// smaller bucket's block is proportionally smaller.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StagingLayout {
