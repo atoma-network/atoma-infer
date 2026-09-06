@@ -126,7 +126,7 @@ pub struct StagingShape {
 /// only cache it writes is each block's first KV slot. No row samples, so no sampler descriptor
 /// runs over a dummy run and nothing is read back; its sampler arrays are staged all the same,
 /// naming no request slot, so its copy-in carries nothing stale.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug)]
 pub struct DummyRun {
     bucket: BucketIdx,
     /// One block per row of the bucket.

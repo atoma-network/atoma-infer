@@ -58,8 +58,8 @@ impl Dtype {
 /// A host value type and the one [`Dtype`] a view of it has.
 ///
 /// What a copy between host values of `T` and a view checks the view against: a view of another
-/// dtype would fill or drain the wrong number of bytes. Only the types the host reads and writes
-/// directly implement it; the half-precision dtypes have no host type here.
+/// dtype would fill or drain the wrong number of bytes. Only the types a copy carries implement
+/// it: the `u32` the sampled tokens come back as, and the `f32` a harness reads logits back as.
 pub trait Element: Copy {
     /// The dtype of a view over values of this type.
     const DTYPE: Dtype;
@@ -71,14 +71,6 @@ impl Element for f32 {
 
 impl Element for u32 {
     const DTYPE: Dtype = Dtype::U32;
-}
-
-impl Element for i32 {
-    const DTYPE: Dtype = Dtype::I32;
-}
-
-impl Element for i64 {
-    const DTYPE: Dtype = Dtype::I64;
 }
 
 /// Rejected layouts, views and tensors.
@@ -544,12 +536,8 @@ mod tests {
         // drains is `len * DTYPE.size_in_bytes()`. The two must agree for every host type.
         assert_eq!(<f32 as Element>::DTYPE, Dtype::F32);
         assert_eq!(<u32 as Element>::DTYPE, Dtype::U32);
-        assert_eq!(<i32 as Element>::DTYPE, Dtype::I32);
-        assert_eq!(<i64 as Element>::DTYPE, Dtype::I64);
         assert_eq!(size_of::<f32>(), <f32 as Element>::DTYPE.size_in_bytes());
         assert_eq!(size_of::<u32>(), <u32 as Element>::DTYPE.size_in_bytes());
-        assert_eq!(size_of::<i32>(), <i32 as Element>::DTYPE.size_in_bytes());
-        assert_eq!(size_of::<i64>(), <i64 as Element>::DTYPE.size_in_bytes());
     }
 
     #[test]

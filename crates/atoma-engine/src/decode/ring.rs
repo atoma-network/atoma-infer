@@ -31,7 +31,7 @@ use thiserror::Error;
 /// construction: two unless configured, so the host writes one staging entry while the device is
 /// still reading the other. Read from configuration as a plain integer, through
 /// [`StagingDepth::new`], so a depth out of range refuses the configuration.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(into = "usize", try_from = "usize")]
 pub struct StagingDepth(NonZeroUsize);
 
