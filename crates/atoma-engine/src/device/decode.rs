@@ -287,7 +287,7 @@ impl DecodeStep {
         let mut addresses = candle_addresses(weights, kv_cache, stream)?;
         addresses.push(BakedAddress {
             name: BakedName::InputBlock,
-            address: self.inputs.device_block_address(stream),
+            address: address(self.inputs.device_block(), stream),
         });
         addresses.push(BakedAddress {
             name: BakedName::Arena,

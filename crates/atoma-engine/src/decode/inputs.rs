@@ -267,13 +267,12 @@ impl DecodeInputs {
         self.packed.shape
     }
 
-    /// The address of the device block, read from the block itself rather than from the copy
-    /// every view was minted at: what the debug check compares that copy against before each
-    /// step.
+    /// The device block every bucket's views are minted over. The block's current address is
+    /// read from here rather than from the copy the views were minted at, which is what the
+    /// debug check compares; its bytes are what a readback of an upload copies out.
     #[must_use]
-    pub fn device_block_address(&self, stream: &Arc<CudaStream>) -> u64 {
-        let (address, _reads) = self.device.device_ptr(stream);
-        address
+    pub fn device_block(&self) -> &CudaSlice<u8> {
+        &self.device
     }
 
     /// The views `bucket`'s step reads the device block through.
@@ -296,6 +295,17 @@ impl DecodeInputs {
     /// Returns [`InputsError::Driver`] when the fence cannot be waited on.
     pub fn acquire(&mut self) -> Result<StagingEntry, InputsError> {
         Ok(self.ring.acquire()?)
+    }
+
+    /// A staging entry whose pinned block the host may write, if the copy that last read the
+    /// block has finished: `None` without waiting while it is still in flight, leaving the same
+    /// staging entry to be asked about again.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InputsError::Driver`] when the fence cannot be queried.
+    pub fn try_acquire(&mut self) -> Result<Option<StagingEntry>, InputsError> {
+        Ok(self.ring.try_acquire()?)
     }
 
     /// Writes `batch`'s inputs from `layout` into `entry`'s pinned block at the bucket's offsets,
