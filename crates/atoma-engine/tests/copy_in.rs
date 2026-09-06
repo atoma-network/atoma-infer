@@ -7,12 +7,15 @@
 //! arrays — the five the model step reads and the two the sampler reads — are staged into one
 //! staging entry's pinned block and uploaded through it; the device block is read back and every
 //! array compared at the bucket's packed offsets, and past the bucket's packed length the block
-//! is still as its allocation zeroed it. A second step with different values in all seven goes
-//! through the other staging entry, so what the second readback shows cannot be what the first
-//! copy left. A dummy run then goes through the first staging entry again, taken back through
-//! the non-blocking half of the staging ring's protocol. Both copies have been waited on by
-//! then, so what that shows is a real fence answering a query and reading passed — which the
-//! staging ring's own tests cannot show over their fake fence — and not the order of the signal.
+//! is still as its allocation zeroed it. A second step, differing in all seven, is staged into
+//! the other staging entry before either upload runs, so each staging entry holds a step of its
+//! own when the first copy reads: what the first readback shows is what the first staging entry
+//! was staged with and not what was staged after it, which is what says a copy-in reaches the
+//! block its staging entry names rather than one fixed block. A dummy run then goes through the
+//! first staging entry again, taken back through the non-blocking half of the staging ring's
+//! protocol. Both copies have been waited on by then, so what that shows is a real fence
+//! answering a query and reading passed — which the staging ring's own tests cannot show over
+//! their fake fence — and not the order of the signal.
 //!
 //! The order is the second test: it asks the fence while the copy that reads the staging entry
 //! is still in flight. One staging entry, a block table wide enough that its copy takes tens of
@@ -429,27 +432,42 @@ fn what_each_staging_entry_uploads_is_what_the_device_block_holds() {
     let (second_layout, second_batch, second) = second_step();
     let (run, dummy) = dummy_run();
 
-    let entry = rig.inputs.acquire().expect("the first staging entry");
-    assert_eq!(entry.index(), 0, "the first acquire takes the first block");
+    // Both steps are staged before either is uploaded, so both staging entries hold a step of
+    // their own when the first copy reads. That is what makes the first readback say which
+    // pinned block the staging entry named: were the staging and the copy to reach one fixed
+    // block instead, the second step would have overwritten the first there and both readbacks
+    // would show the second, which the first `holds` below refuses.
+    let first_entry = rig.inputs.acquire().expect("the first staging entry");
+    assert_eq!(
+        first_entry.index(),
+        0,
+        "the first acquire takes the first block"
+    );
     let arrays = rig
         .inputs
-        .stage(&entry, &first_layout, &first_batch)
+        .stage(&first_entry, &first_layout, &first_batch)
         .expect("the first step stages");
     // The sampler decides these two per step; what one copy carries is what is under test here,
     // so the test writes them itself, as the bucket's rows hold them.
     arrays.row_slots.copy_from_slice(&first.row_slots);
     arrays.gather_slots.copy_from_slice(&first.gather_slots);
-    first.holds(&rig.upload(entry, first_batch.bucket));
 
-    let entry = rig.inputs.acquire().expect("the second staging entry");
-    assert_eq!(entry.index(), 1, "the second acquire takes the other block");
+    // Nothing has signaled either fence yet, so this acquire waits on nothing.
+    let second_entry = rig.inputs.acquire().expect("the second staging entry");
+    assert_eq!(
+        second_entry.index(),
+        1,
+        "the second acquire takes the other block"
+    );
     let arrays = rig
         .inputs
-        .stage(&entry, &second_layout, &second_batch)
+        .stage(&second_entry, &second_layout, &second_batch)
         .expect("the second step stages");
     arrays.row_slots.copy_from_slice(&second.row_slots);
     arrays.gather_slots.copy_from_slice(&second.gather_slots);
-    second.holds(&rig.upload(entry, second_batch.bucket));
+
+    first.holds(&rig.upload(first_entry, first_batch.bucket));
+    second.holds(&rig.upload(second_entry, second_batch.bucket));
 
     // The first staging entry taken back through the non-blocking half of the protocol. Both
     // copies have been waited on, so what this shows is a real fence answering `cuEventQuery`
