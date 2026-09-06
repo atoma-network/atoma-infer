@@ -141,6 +141,7 @@ impl DummyRun {
         Self { bucket, blocks }
     }
 
+    /// The bucket whose rows the run fills.
     #[must_use]
     pub fn bucket(&self) -> BucketIdx {
         self.bucket

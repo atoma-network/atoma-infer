@@ -262,6 +262,8 @@ impl DecodeInputs {
         })
     }
 
+    /// The staging shape the inputs were built at: what every bucket's arrays are staged at and
+    /// their views minted against.
     #[must_use]
     pub fn shape(&self) -> StagingShape {
         self.packed.shape
@@ -409,6 +411,7 @@ pub struct WaitEvent<'a> {
 }
 
 impl<'a> WaitEvent<'a> {
+    /// A wait on `event`, borrowed for as long as the wait lives.
     #[must_use]
     pub fn new(event: &'a CudaEvent) -> Self {
         Self { event }
