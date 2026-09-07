@@ -271,7 +271,7 @@ impl DecodeStep {
 
     /// Every address the step bakes, read from the memory that holds it, in one fixed order:
     /// candle's embedding table, each layer's nine weights, the final norm gain and the head
-    /// projection, each layer's cache, then the input block, the arena and the statics. The
+    /// projection, each layer's cache, then the device block, the arena and the statics. The
     /// forward bakes this reading when it is built and a debug build reads it again before each
     /// keyed step; candle's addresses are the ones that can move, and are read without minting
     /// a view.
