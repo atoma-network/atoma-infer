@@ -29,7 +29,7 @@ pub enum BakedName {
     /// One layer's paged cache, candle's.
     Cache { layer: usize },
     /// The device block every bucket's input views are minted over.
-    InputBlock,
+    DeviceBlock,
     /// The arena every activation is addressed in.
     Arena,
     /// The step's logits.
@@ -48,8 +48,9 @@ pub enum BakedName {
     SamplingRecords,
     /// The sampler's per-slot last sampled tokens.
     SampledTokens,
-    /// The sampler's own row slots, which an eager step samples under.
-    RowSlots,
+    /// The sampler's own row slots, which an eager step samples under. The per-step row slots a
+    /// keyed step samples under are staged into the packed block and are not baked.
+    SamplerRowSlots,
     /// The sampler's row tokens, which the readback copies through.
     RowTokens,
 }
@@ -64,7 +65,7 @@ impl fmt::Display for BakedName {
             BakedName::FinalNormGain => "the final norm gain",
             BakedName::HeadProjection => "the head projection",
             BakedName::Cache { layer } => return write!(f, "layer {layer}'s cache"),
-            BakedName::InputBlock => "the input block",
+            BakedName::DeviceBlock => "the device block",
             BakedName::Arena => "the arena",
             BakedName::Logits => "the logits",
             BakedName::LogSumExp => "the log-sum-exp output",
@@ -74,13 +75,13 @@ impl fmt::Display for BakedName {
             BakedName::SineTable => "the sine table",
             BakedName::SamplingRecords => "the sampling records",
             BakedName::SampledTokens => "the sampled tokens",
-            BakedName::RowSlots => "the sampler's row slots",
+            BakedName::SamplerRowSlots => "the sampler's row slots",
             BakedName::RowTokens => "the row tokens",
         })
     }
 }
 
-/// One baked address: what it is, and where it was read.
+/// One baked address: which memory it names, and the address that memory was at.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BakedAddress {
     pub name: BakedName,
@@ -99,15 +100,15 @@ pub enum BakedError {
     },
     /// Other memory was read at a baked position: the addresses are read again in the order they
     /// were baked, and this reading does not follow it.
-    #[error("position {position} was baked as {baked} and read again as {current}")]
+    #[error("position {position} was baked as {baked} and read again as {read}")]
     OtherName {
         position: usize,
         baked: BakedName,
-        current: BakedName,
+        read: BakedName,
     },
     /// Fewer or more addresses were read again than were baked.
-    #[error("{baked} addresses were baked and {current} were read again")]
-    Count { baked: usize, current: usize },
+    #[error("{baked} addresses were baked and {read} were read again")]
+    Count { baked: usize, read: usize },
 }
 
 /// Every address the step bakes, by name, in the order they were read.
@@ -126,27 +127,27 @@ impl BakedAddresses {
         }
     }
 
-    /// Compares `current`, the baked addresses read again in the order they were baked, against
+    /// Compares `reading`, the baked addresses read again in the order they were baked, against
     /// the baked ones.
     ///
     /// # Errors
     ///
     /// Returns [`BakedError`] for the first address that differs: moved, other memory at its
     /// position, or a reading that ends early or runs on.
-    pub fn check(&self, current: impl IntoIterator<Item = BakedAddress>) -> Result<(), BakedError> {
-        let mut current = current.into_iter();
+    pub fn check(&self, reading: impl IntoIterator<Item = BakedAddress>) -> Result<(), BakedError> {
+        let mut reading = reading.into_iter();
         for (position, baked) in self.addresses.iter().enumerate() {
-            let Some(read) = current.next() else {
+            let Some(read) = reading.next() else {
                 return Err(BakedError::Count {
                     baked: self.addresses.len(),
-                    current: position,
+                    read: position,
                 });
             };
             if read.name != baked.name {
                 return Err(BakedError::OtherName {
                     position,
                     baked: baked.name,
-                    current: read.name,
+                    read: read.name,
                 });
             }
             if read.address != baked.address {
@@ -157,24 +158,24 @@ impl BakedAddresses {
                 });
             }
         }
-        let past_the_baked = current.count();
+        let past_the_baked = reading.count();
         if past_the_baked > 0 {
             return Err(BakedError::Count {
                 baked: self.addresses.len(),
-                current: self.addresses.len() + past_the_baked,
+                read: self.addresses.len() + past_the_baked,
             });
         }
         Ok(())
     }
 
-    /// Checks `current` as [`BakedAddresses::check`] does and panics with the first address that
+    /// Checks `reading` as [`BakedAddresses::check`] does and panics with the first address that
     /// differs, naming it: what a debug build runs before each keyed step.
     ///
     /// # Panics
     ///
     /// Panics with the [`BakedError`] the check returns.
-    pub fn assert_unmoved(&self, current: impl IntoIterator<Item = BakedAddress>) {
-        if let Err(error) = self.check(current) {
+    pub fn assert_unmoved(&self, reading: impl IntoIterator<Item = BakedAddress>) {
+        if let Err(error) = self.check(reading) {
             panic!("{error}");
         }
     }
@@ -292,7 +293,7 @@ mod tests {
                     layer: 3,
                     weight: LayerWeight::K,
                 },
-                current: BakedName::Cache { layer: 0 },
+                read: BakedName::Cache { layer: 0 },
             })
         );
     }
@@ -305,10 +306,7 @@ mod tests {
         // Three of the five, every one where it was baked.
         assert_eq!(
             baked.check(memory.addresses().take(3)),
-            Err(BakedError::Count {
-                baked: 5,
-                current: 3
-            })
+            Err(BakedError::Count { baked: 5, read: 3 })
         );
         // The five, then one more.
         let extra = BakedAddress {
@@ -317,17 +315,10 @@ mod tests {
         };
         assert_eq!(
             baked.check(memory.addresses().chain(iter::once(extra))),
-            Err(BakedError::Count {
-                baked: 5,
-                current: 6
-            })
+            Err(BakedError::Count { baked: 5, read: 6 })
         );
         assert_eq!(
-            BakedError::Count {
-                baked: 5,
-                current: 3
-            }
-            .to_string(),
+            BakedError::Count { baked: 5, read: 3 }.to_string(),
             "5 addresses were baked and 3 were read again"
         );
     }
@@ -423,7 +414,7 @@ mod tests {
             Err(BakedError::OtherName {
                 position: 0,
                 baked: BakedName::EmbeddingTable,
-                current: BakedName::SineTable,
+                read: BakedName::SineTable,
             })
         );
 
@@ -436,7 +427,7 @@ mod tests {
             Err(BakedError::OtherName {
                 position: end,
                 baked: BakedName::RowTokens,
-                current: BakedName::SamplingRecords,
+                read: BakedName::SamplingRecords,
             })
         );
     }
@@ -469,7 +460,7 @@ mod tests {
             (BakedName::Cache { layer: 0 }, "layer 0's cache"),
             (BakedName::Cache { layer: 7 }, "layer 7's cache"),
             (BakedName::Cache { layer: 31 }, "layer 31's cache"),
-            (BakedName::InputBlock, "the input block"),
+            (BakedName::DeviceBlock, "the device block"),
             (BakedName::Arena, "the arena"),
             (BakedName::Logits, "the logits"),
             (BakedName::LogSumExp, "the log-sum-exp output"),
@@ -482,7 +473,7 @@ mod tests {
             (BakedName::SineTable, "the sine table"),
             (BakedName::SamplingRecords, "the sampling records"),
             (BakedName::SampledTokens, "the sampled tokens"),
-            (BakedName::RowSlots, "the sampler's row slots"),
+            (BakedName::SamplerRowSlots, "the sampler's row slots"),
             (BakedName::RowTokens, "the row tokens"),
         ]
     }

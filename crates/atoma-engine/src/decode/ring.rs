@@ -1,22 +1,23 @@
 //! The staging ring: `depth` staging entries, each guarded by a fence, handed out in turn once
 //! the copy that last read the staging entry has finished.
 //!
-//! An upload reads a staging entry asynchronously and signals the staging entry's fence behind
+//! A copy-in reads a staging entry asynchronously and signals the staging entry's fence behind
 //! the copy, so the host must not write the staging entry again until the fence is passed. The
-//! staging ring keeps the fences and a cursor at the staging entry handed out next.
-//! [`StagingRing::acquire`] waits on that staging entry's fence, blocking, hands the staging entry
-//! out and moves the cursor on; [`StagingRing::try_acquire`] asks the fence without blocking and
-//! leaves the cursor where it is while the copy is still in flight. Whoever owns the staging
-//! memory keeps each staging entry's memory indexed by the staging entry, reaches the fence the
-//! upload signals through [`StagingRing::fence`], and waits on every fence through
-//! [`StagingRing::wait_all`] before letting the memory go.
+//! staging ring keeps the fences and a cursor at the staging entry handed out next; the blocks
+//! themselves belong to whoever owns the staging memory. [`StagingRing::acquire`] waits on that
+//! staging entry's fence, blocking, hands the staging entry out and moves the cursor on;
+//! [`StagingRing::try_acquire`] asks the fence without blocking and leaves the cursor where it is
+//! while the copy is still in flight. Whoever owns the staging memory keeps each staging entry's
+//! block indexed by the staging entry, reaches the fence the copy-in signals through
+//! [`StagingRing::fence`], and waits on every fence through [`StagingRing::wait_all`] before
+//! letting the memory go.
 //!
 //! A fence nobody has signaled is passed, and so is one whose copy has finished, so an acquire
 //! that is not overtaking a copy returns at once: it costs one wait on a passed fence, and blocks
 //! only when the host has run ahead of the device by the whole depth.
 //!
-//! [`EntryFence`] is what the staging ring asks of a fence, so the protocol runs on a host with
-//! no GPU over a fake; [`StagingFence`] is the fence in serving.
+//! [`Fence`] is all the staging ring asks of the fence guarding a staging entry, so the protocol
+//! runs on a host with no GPU over a fake; [`StagingFence`] is the fence in serving.
 
 use std::fmt;
 use std::iter;
@@ -40,7 +41,7 @@ impl StagingDepth {
     /// packed size, and the staging ring exists so the host can run one step or a few ahead of
     /// the device, so a deeper staging ring pins memory nobody reaches: a depth above eight is a
     /// typo, refused as zero is.
-    pub const MAX: Self = Self(NonZeroUsize::new(8).unwrap());
+    pub const MAX: Self = Self(NonZeroUsize::new(8).expect("eight is nonzero"));
 
     /// The depth `depth` names, or `None` at zero or above [`StagingDepth::MAX`]: a staging ring
     /// with no staging entry stages nothing, and a deeper one pins memory nobody reaches.
@@ -55,6 +56,7 @@ impl StagingDepth {
         }
     }
 
+    /// The depth as a plain count: how many staging entries the staging ring holds.
     #[must_use]
     pub const fn get(self) -> usize {
         self.0.get()
@@ -102,7 +104,7 @@ pub struct StagingDepthError {
 
 /// What the staging ring asks of the fence guarding one staging entry: a blocking wait and a
 /// non-blocking one, each passed once the copy behind the fence's last signal has finished.
-pub trait EntryFence {
+pub trait Fence {
     type Error;
 
     /// Waits until the fence is passed, blocking the calling thread.
@@ -120,7 +122,7 @@ pub trait EntryFence {
     fn try_wait(&self) -> Result<bool, Self::Error>;
 }
 
-impl EntryFence for StagingFence {
+impl Fence for StagingFence {
     type Error = RuntimeError;
 
     fn wait(&self) -> Result<(), RuntimeError> {
@@ -132,18 +134,19 @@ impl EntryFence for StagingFence {
     }
 }
 
-/// One staging entry the staging ring has handed out: which staging memory the host may write,
-/// and which fence the copy that reads it signals. Minted by the staging ring alone, and neither
-/// `Copy` nor `Clone`: one acquire hands out one staging entry, and whoever uploads through it
-/// takes the only one.
+/// One staging entry the staging ring has handed out: a token naming which of the staging
+/// entries it is. The staging ring holds only the fences, so the token is what the owner of the
+/// staging memory indexes its blocks by, and what reaches this staging entry's fence. Minted by
+/// the staging ring alone, and neither `Copy` nor `Clone`: one acquire hands out one staging
+/// entry, and whoever copies in through it takes the only one.
 #[derive(Debug, PartialEq, Eq)]
 pub struct StagingEntry {
     index: usize,
 }
 
 impl StagingEntry {
-    /// The staging entry's position in the staging ring: the index of its staging memory and of
-    /// its fence.
+    /// The staging entry's position in the staging ring: the index of its fence here, and of its
+    /// block wherever the staging memory is owned.
     #[must_use]
     pub const fn index(&self) -> usize {
         self.index
@@ -158,7 +161,7 @@ pub struct StagingRing<F> {
     cursor: usize,
 }
 
-impl<F: EntryFence> StagingRing<F> {
+impl<F: Fence> StagingRing<F> {
     /// A staging ring of `depth` staging entries, each guarded by a fence `fence` creates, with
     /// the cursor at the first.
     ///
@@ -176,8 +179,9 @@ impl<F: EntryFence> StagingRing<F> {
     }
 
     /// The staging entry at the cursor, once the copy that last read it has finished: waits on
-    /// its fence, blocking, then moves the cursor on. A fence nobody has signaled is passed, so
-    /// the wait returns at once.
+    /// its fence, blocking, then moves the cursor on. The wait returns at once unless a copy is
+    /// still reading the staging entry, since a fence nobody has signaled is passed and so is one
+    /// whose copy has finished.
     ///
     /// # Errors
     ///
@@ -215,7 +219,7 @@ impl<F: EntryFence> StagingRing<F> {
     ///
     /// Returns the first fence's error; the fences after it are not waited on.
     pub fn wait_all(&self) -> Result<(), F::Error> {
-        self.fences.iter().try_for_each(EntryFence::wait)
+        self.fences.iter().try_for_each(Fence::wait)
     }
 
     /// Hands out the staging entry at the cursor and moves the cursor to the next, wrapping.
@@ -277,7 +281,7 @@ mod tests {
         }
     }
 
-    impl EntryFence for FakeFence {
+    impl Fence for FakeFence {
         type Error = FakeFenceError;
 
         fn wait(&self) -> Result<(), FakeFenceError> {

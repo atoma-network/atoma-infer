@@ -7,9 +7,9 @@
 //! sparse copies, one per record, in front of everything else the step copies. The slot each
 //! selected row samples under, and which token rows take their token from the device, are the
 //! sampler's two per-step arrays, and [`DeviceSampler::stage`] writes them where the caller says:
-//! the decode step stages them beside the model's inputs in its packed block, uploads the block
-//! in one copy, and hands [`DeviceSampler::gather`] and [`DeviceSampler::sample`] tensor views
-//! over where the two arrays landed and over the logits. Each view is held to the staged step's
+//! the decode step stages them beside the model's inputs in its packed block, which one copy-in
+//! carries, and hands [`DeviceSampler::gather`] and [`DeviceSampler::sample`] tensor views over
+//! where the two arrays landed and over the logits. Each view is held to the staged step's
 //! rows and the dtype the kernel reads, so a view handed to the wrong argument is refused by
 //! name. What comes back is one asynchronous copy of the rows' tokens, through the leading rows
 //! of the row tokens view, waited on once the step is enqueued through the readback's own event
@@ -113,7 +113,7 @@ pub enum SamplerError {
 pub enum ArraysIn {
     /// The sampler's own pinned pair: an eager step's, uploaded by [`DeviceSampler::run_on`].
     Sampler,
-    /// The caller's staging: a decode step's, uploaded with the step's inputs.
+    /// The caller's staging: a decode step's, copied in with the step's inputs.
     Caller,
 }
 
@@ -144,14 +144,14 @@ impl DeviceArray {
     }
 }
 
-/// A device array viewed as a tensor: the view minted over the array at Allocation, and the
-/// array, owned so the address the view names stays allocated for as long as the view is read.
-struct DeviceTensor {
+/// A device array and the view minted over it at Allocation: the array is owned here, so the
+/// address the view names stays allocated for as long as the view is read.
+struct ViewedArray {
     view: Tensor,
     array: DeviceArray,
 }
 
-impl DeviceTensor {
+impl ViewedArray {
     /// `layout`'s elements, zeroed, on `stream`'s device, viewed as `layout`.
     fn zeroed(
         allocation: &Allocation,
@@ -164,7 +164,8 @@ impl DeviceTensor {
     }
 }
 
-/// A device array of `len` values with the pinned host staging a step writes it from.
+/// A device array of `len` values, and the pinned host memory a step writes before copying it
+/// there.
 struct StagedArray<T> {
     host: Pinned<T>,
     device: DeviceArray,
@@ -222,7 +223,7 @@ pub struct DeviceSampler {
     row_slots: StagedArray<i32>,
     /// u32 `[max_rows]`: the token sampled for each selected row this step, viewed for the
     /// readback to copy the leading rows through.
-    row_tokens: DeviceTensor,
+    row_tokens: ViewedArray,
     readback: Readback<u32>,
     /// Recorded behind every upload from the sampler's own staging; waited on before the staging
     /// is freed.
@@ -263,7 +264,7 @@ impl DeviceSampler {
             pending_records: Vec::new(),
             sampled: DeviceArray::zeroed(stream, slots * size_of::<u32>())?,
             row_slots: StagedArray::new(stream, max_rows)?,
-            row_tokens: DeviceTensor::zeroed(allocation, stream, row_tokens)?,
+            row_tokens: ViewedArray::zeroed(allocation, stream, row_tokens)?,
             readback: Readback::new(allocation, context, max_rows, 1)?,
             uploaded,
             owners: SlotOwners::new(slots),
@@ -282,7 +283,7 @@ impl DeviceSampler {
         [
             (BakedName::SamplingRecords, &self.records.device),
             (BakedName::SampledTokens, &self.sampled),
-            (BakedName::RowSlots, &self.row_slots.device),
+            (BakedName::SamplerRowSlots, &self.row_slots.device),
             (BakedName::RowTokens, &self.row_tokens.array),
         ]
         .map(|(name, array)| BakedAddress {
@@ -402,7 +403,7 @@ impl DeviceSampler {
 
     /// The descriptor that overwrites the gathering token rows of the u32 `token_ids` with the
     /// token last sampled for their slot, as the i32 `gather_slots` name it for every covered
-    /// token row: the array the staged step wrote, viewed where the caller's upload put it on
+    /// token row: the array the staged step wrote, viewed where the caller's copy-in put it on
     /// the device. Both views are the covered token rows exactly.
     ///
     /// # Errors
@@ -431,7 +432,7 @@ impl DeviceSampler {
 
     /// The descriptor that samples every selected row from the f32 `logits`, one row per
     /// selected row a vocabulary wide, under the i32 `row_slots`, one per selected row viewed
-    /// where the staged step's upload put them, and copies the tokens back for
+    /// where the staged step's copy-in put them, and copies the tokens back for
     /// [`DeviceSampler::wait`]. Both views are the selected rows exactly: the caller narrows
     /// them to the live rows.
     ///
@@ -605,7 +606,7 @@ impl Descriptor for Gather {
             stream: stream.cast::<c_void>(),
             ..self.call
         };
-        // SAFETY: the session hands a live stream; the token ids are the step's uploaded inputs
+        // SAFETY: the session hands a live stream; the token ids are the step's copied-in inputs
         // and the slots were staged against this sampler's arrays.
         unsafe { gather(&call) }?;
         Ok(())

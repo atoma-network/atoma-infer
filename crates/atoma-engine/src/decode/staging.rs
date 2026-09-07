@@ -3,8 +3,8 @@
 //!
 //! A bucket stages seven arrays for a step: the five the model step reads (token ids, positions,
 //! key lengths, slot mapping, block table) and the two the sampler reads (row slots, gather
-//! slots). [`StagingLayout::packed`] lays them consecutively at the bucket's rows, each at a
-//! 256-byte boundary, so the bucket's staging is one block, [`StagingLayout::bytes`] long and
+//! slots). [`StagingLayout::packed`] lays them consecutively at the bucket's rows, each at
+//! [`SLOT_ALIGN`], so the bucket's staging is one block, [`StagingLayout::bytes`] long and
 //! proportional to the batch rather than to the largest bucket, that one copy can carry.
 //! [`StagingLayout::carve`] carves the seven arrays out of such a block; [`stage`] writes the
 //! model's five from the batch layout, and [`stage_sampler`] the sampler's two from what the
@@ -32,8 +32,8 @@ use crate::batch::BatchLayout;
 use crate::decode::batch::DecodeBatch;
 use crate::sampling::inputs::SamplerInputs;
 
-/// One of the seven arrays a bucket stages, as the staging names it: the five inputs the model
-/// step reads, then the two the sampler reads.
+/// One of the seven arrays a bucket stages, in the order they are packed: the five inputs the
+/// model step reads, then the two the sampler reads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StagedInput {
     TokenIds,
@@ -104,7 +104,7 @@ pub enum StagingError {
 }
 
 /// How wide the staged arrays are, and the KV geometry a row is written against: the shape
-/// every bucket's inputs are carved from.
+/// every bucket's layout is sized from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StagingShape {
     /// Rows the arrays hold: the largest bucket.
@@ -176,9 +176,9 @@ const _: () = assert!(ALIGNMENT.is_multiple_of(BASE_ALIGNMENT));
 /// Where each of one bucket's seven arrays sits in its packed block, and how long the block is.
 ///
 /// The arrays are laid consecutively at the bucket's rows, in [`StagedInput`]'s order, each
-/// beginning at a 256-byte boundary; the block's length is the last array's end, padded the
-/// same way. The layout is the bucket's alone: the largest bucket sizes nothing in it, so a
-/// smaller bucket's block is proportionally smaller.
+/// beginning at [`SLOT_ALIGN`]; the block's length is the last array's end, padded the same way.
+/// The layout is the bucket's alone: the largest bucket sizes nothing in it, so a smaller
+/// bucket's block is proportionally smaller.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StagingLayout {
     rows: usize,
@@ -343,11 +343,13 @@ impl<'a> Carve<'a> {
 /// The model step's five arrays, each holding at least the bucket's rows.
 #[derive(Debug)]
 pub struct StagingArrays<'a> {
+    /// The token each row computes from.
     pub token_ids: &'a mut [u32],
     /// Each token's position: its context length.
     pub positions: &'a mut [i32],
     /// Each sequence's key length after this step's token.
     pub seqlens_k: &'a mut [i32],
+    /// The KV slot each row's key and value are written to.
     pub slot_mapping: &'a mut [i64],
     /// Row-major, [`StagingShape::block_table_width`] columns per row.
     pub block_table: &'a mut [i32],
@@ -547,7 +549,7 @@ fn first_slot(block: BlockId, block_size: TokenCount) -> i64 {
     i64::try_from(block.index() * block_size.get()).expect("a block's first KV slot fits i64")
 }
 
-/// The gather slot of a row whose token the host's upload serves: negative, as the kernel reads
+/// The gather slot of a row whose token the host's copy-in serves: negative, as the kernel reads
 /// it.
 const KEEP_HOST_TOKEN: i32 = -1;
 

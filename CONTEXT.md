@@ -404,10 +404,11 @@ not per step, and go up as sparse copies of their own in front of it.
 _Avoid_: input upload (for this in the engine), host-to-device transfer, staging copy
 
 **Packed block**:
-One bucket's seven staged arrays laid consecutively, each at a 256-byte boundary: what one
-copy-in carries, at a length that follows the bucket rather than the largest one. A staging
-entry's pinned block and the one device block are each allocated at the largest bucket's packed
-length, and every bucket reads the device block through views minted at its own offsets.
+One bucket's seven staged arrays laid consecutively, each at the alignment CUDA guarantees for
+a device allocation: what one copy-in carries, at a length that follows the bucket rather than the
+largest one. A staging entry's pinned block and the one device block are each allocated at the
+largest bucket's packed length, and every bucket reads the device block through views minted at
+its own offsets.
 _Avoid_: KV block, staging buffer, input buffer (each for this)
 
 **Staging ring**:
@@ -421,7 +422,7 @@ _Avoid_: ring (in prose, for this), staging queue, double buffer, buffer pool
 
 **Staging entry**:
 One place in the staging ring: a pinned packed block and the fence that guards it, named by the
-token an acquire hands out and an upload spends. Whoever owns the staging memory keeps each
+token an acquire hands out and a copy-in spends. Whoever owns the staging memory keeps each
 staging entry's block indexed by that token. Written qualified in prose, where the bare word is
 Entry's; the parameter and binding that carry one are named `entry`.
 _Avoid_: entry (in prose, for this), staging slot, staging buffer
@@ -443,7 +444,7 @@ before an acquire has to wait.
 _Avoid_: ring size, queue depth, staging count
 
 **Dummy run**:
-A bucket's rows filled as padding rows over one KV block each, staged and uploaded through the
+A bucket's rows filled as padding rows over one KV block each, staged and copied in through the
 same acquire and fence as a live step and then run with no sampler descriptor and nothing read
 back: what a capture check or a warmup runs when there is no live batch. Every row is what a
 dummy's row is in a live step, so the only cache it writes is each block's first KV slot. Its
@@ -471,7 +472,7 @@ _Avoid_: offset, rng state, step count
 
 **Gather**:
 Taking a decoding row's input token from what the sampler last drew for its request slot, on the
-device, instead of from the host's upload. What removes the host from between a replay and the
+device, instead of from the host's copy-in. What removes the host from between a replay and the
 next step's input.
 _Avoid_: scatter, copy-back, token fetch
 

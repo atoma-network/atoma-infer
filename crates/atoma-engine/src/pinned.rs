@@ -22,7 +22,10 @@ use atoma_runtime::error::RuntimeError;
 use cudarc::driver::result::{free_host, malloc_host};
 use tracing::warn;
 
-/// `cuMemHostAlloc` flags: pinned, cacheable, mapped for this context alone.
+/// `cuMemHostAlloc` flags: none of them. Not `CU_MEMHOSTALLOC_PORTABLE`, so the memory is pinned
+/// for the allocating context alone; not `CU_MEMHOSTALLOC_WRITECOMBINED`, since the owner reads
+/// what comes back; not `CU_MEMHOSTALLOC_DEVICEMAP`, since no kernel reaches the memory
+/// directly.
 const CACHEABLE_PINNED: u32 = 0;
 
 /// `len` values of pinned host memory, allocated once and freed on drop.
@@ -43,12 +46,16 @@ impl<T> Pinned<T> {
         Ok(Self { ptr, len })
     }
 
+    /// The values, readable for as long as the borrow lives. What a copy wrote through
+    /// [`Pinned::as_mut_ptr`] is read here only once that copy has been waited on.
     pub fn as_slice(&self) -> &[T] {
         // SAFETY: `len` values were allocated at `ptr` and nothing writes them while this borrow
         // is live: the writer takes `&mut self`.
         unsafe { slice::from_raw_parts(self.ptr, self.len) }
     }
 
+    /// The values, writable for as long as the borrow lives: how the owner fills the memory a
+    /// copy to the device reads.
     pub fn as_mut_slice(&mut self) -> &mut [T] {
         // SAFETY: as above, exclusively through `&mut self`.
         unsafe { slice::from_raw_parts_mut(self.ptr, self.len) }

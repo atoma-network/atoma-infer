@@ -5,7 +5,7 @@
 //! carrying one value more than the batch has entries. A step command holds its entries in the
 //! engine's order — live entries, then the padding dummies — so the layout reorders them and keeps
 //! the way back: which logits row each sampling entry reads. Pure host arithmetic, with no device
-//! and no tensor: what is laid out here is uploaded as it stands.
+//! and no tensor: what is laid out here is copied in as it stands.
 //!
 //! The command's dispatch decision and padding count travel with the layout, so a forward that
 //! routes on the decision reads it from the one value it is handed.
