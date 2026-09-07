@@ -79,12 +79,12 @@ pub enum InputsError {
 pub struct BucketViews {
     /// The five the model step reads.
     pub inputs: BucketInputs,
-    /// i32 `[rows]`, minted at the bucket's rows: the slot each selected row samples under. The
-    /// sampler narrows it to the rows the step selects.
+    /// i32 `[tokens]`: the slot each selected row samples under. The caller narrows the view to
+    /// the rows the step selects, which is what the sampler holds it to.
     pub row_slots: Tensor,
-    /// i32 `[rows]`, minted at the bucket's rows: the slot each token row takes its token from,
-    /// or negative to keep the host's. The sampler narrows it to the token rows the gather
-    /// covers, which is not always the count `row_slots` is narrowed to.
+    /// i32 `[tokens]`: the slot each token row takes its token from, or negative to keep the
+    /// host's. The gather reads it whole, at the bucket's rows, which is not always the count
+    /// `row_slots` is narrowed to.
     pub gather_slots: Tensor,
 }
 
