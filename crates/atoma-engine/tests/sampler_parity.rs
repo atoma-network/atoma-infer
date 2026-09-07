@@ -6,8 +6,9 @@
 //! token but for a bounded few that rounding at a cutoff can move, and those must still be tokens
 //! the reference keeps; a seeded request must produce the same tokens whatever batch it is
 //! sampled in, wherever in that batch it sits and whatever slot it occupies; the gather must
-//! overwrite a decoding row's token with what its slot sampled and leave a fresh slot's row to
-//! the host; a step staged where the caller says must sample under the row slots uploaded from
+//! overwrite a decoding row's token with what its slot sampled, leave a fresh slot's row to the
+//! host, and cover the token rows the caller stated rather than the rows the step samples; a
+//! step staged where the caller says must sample under the row slots uploaded from
 //! there; the eager upload must refuse a step staged where the caller says; and a view of other
 //! rows than the staged step's, or of another dtype, must be refused by name.
 //!
@@ -174,22 +175,35 @@ impl Rig {
     }
 
     /// Stages `layout` as a decode step would, uploads `token_ids` as the host would, runs the
-    /// gather over them, and returns the token ids the gather left.
+    /// gather over every one of them, and returns the token ids the gather left.
     fn gather(&mut self, layout: &BatchLayout, token_ids: &[u32]) -> Vec<u32> {
+        self.gather_covering(layout, token_ids, token_ids.len())
+    }
+
+    /// Stages `layout` as a decode step would with the gather covering `gather_rows` leading
+    /// token rows, uploads `token_ids` as the host would, runs the gather, and returns the token
+    /// ids it left. The two views are the stated rows exactly, as the sampler requires; the
+    /// readback covers every uploaded row, so a gather reaching past the rows it was given shows
+    /// up in the tail.
+    fn gather_covering(
+        &mut self,
+        layout: &BatchLayout,
+        token_ids: &[u32],
+        gather_rows: usize,
+    ) -> Vec<u32> {
         self.stream
             .memcpy_htod(token_ids, &mut self.token_ids)
             .expect("the token ids upload");
-        self.stage_as_decode_step(layout, token_ids.len());
-        let rows = token_ids.len();
+        self.stage_as_decode_step(layout, gather_rows);
         let ids = self
             .views
             .token_ids
-            .narrow(0, 0, rows)
+            .narrow(0, 0, gather_rows)
             .expect("within the rig's rows");
         let slots = self
             .views
             .gather_slots
-            .narrow(0, 0, rows)
+            .narrow(0, 0, gather_rows)
             .expect("within the rig's rows");
         // SAFETY: the stream is the sampler's, and the token ids and the gather slots are live on
         // its device.
@@ -546,6 +560,39 @@ fn the_gather_takes_a_decoding_rows_token_from_its_slot_and_leaves_a_fresh_slots
         gathered,
         [sampled[0], sampled[1], 999],
         "the decoding rows take their slots' tokens; the fresh slot's row keeps the host's"
+    );
+}
+
+#[test]
+#[ignore = "needs a device and the CUDA toolkit; run scripts/sampler-parity.sh"]
+fn the_gather_covers_the_token_rows_the_caller_stated_and_not_the_rows_the_step_samples() {
+    let mut rig = Rig::open();
+    let mut random = Lcg(0x6A7E_2026_0907);
+    let rows: Vec<Vec<f32>> = (0..3).map(|_| random_row(&mut random)).collect();
+    let decoding = vec![
+        entry(1, 3, SamplingParams::default()),
+        entry(2, 5, SamplingParams::default()),
+        entry(3, 7, SamplingParams::default()),
+    ];
+    let sampled = rig.sample(&layout(decoding.clone()), &rows);
+
+    // All three slots sampled last step, so all three would gather. The caller states a gather
+    // over the first two token rows, as one holding fewer token rows than the batch samples
+    // does, which is the only step where the rows the gather covers and the rows the step
+    // samples are different numbers.
+    let uploaded = [999, 999, 999];
+    let gathered = rig.gather_covering(&layout(decoding), &uploaded, 2);
+
+    println!("=============== gather over the stated rows ===============");
+    println!("sampled:              {sampled:?}");
+    println!("uploaded:             {uploaded:?}");
+    println!("gathered:             {gathered:?}");
+    assert_eq!(
+        gathered,
+        [sampled[0], sampled[1], 999],
+        "the two token rows the caller stated take their slots' tokens and the row past them \
+         keeps the host's: a gather running over the rows the step samples instead would reach \
+         a third row it was given no slot for"
     );
 }
 
