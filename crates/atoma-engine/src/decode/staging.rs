@@ -3,8 +3,8 @@
 //!
 //! A bucket stages seven arrays for a step: the five the model step reads (token ids, positions,
 //! key lengths, slot mapping, block table) and the two the sampler reads (row slots, gather
-//! slots). [`StagingLayout::packed`] lays them consecutively at the bucket's rows, each at a
-//! 256-byte boundary, so the bucket's staging is one block, [`StagingLayout::bytes`] long and
+//! slots). [`StagingLayout::packed`] lays them consecutively at the bucket's rows, each at an
+//! [`ALIGNMENT`] boundary, so the bucket's staging is one block, [`StagingLayout::bytes`] long and
 //! proportional to the batch rather than to the largest bucket, that one copy can carry.
 //! [`StagingLayout::carve`] carves the seven arrays out of such a block; [`stage`] writes the
 //! model's five from the batch layout, and [`stage_sampler`] the sampler's two from what the
@@ -176,7 +176,7 @@ const _: () = assert!(ALIGNMENT.is_multiple_of(BASE_ALIGNMENT));
 /// Where each of one bucket's seven arrays sits in its packed block, and how long the block is.
 ///
 /// The arrays are laid consecutively at the bucket's rows, in [`StagedInput`]'s order, each
-/// beginning at a 256-byte boundary; the block's length is the last array's end, padded the
+/// beginning at an [`ALIGNMENT`] boundary; the block's length is the last array's end, padded the
 /// same way. The layout is the bucket's alone: the largest bucket sizes nothing in it, so a
 /// smaller bucket's block is proportionally smaller.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

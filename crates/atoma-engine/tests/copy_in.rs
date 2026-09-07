@@ -25,11 +25,11 @@
 //!
 //! The order is the second test: it asks the fence while the copy that reads the staging entry
 //! is still in flight. One staging entry, a block table wide enough that its copy takes tens of
-//! microseconds on the fastest link a host has to a device, and eight queries, each in the few
-//! microseconds after its own copy-in with nothing waited on in between. Every one of the eight
-//! must read not passed, which is true only of a signal enqueued behind the copy.
+//! microseconds on the fastest link a host has to a device, and [`FENCE_QUERIES`] queries, each
+//! in the few microseconds after its own copy-in with nothing waited on in between. Every one of
+//! them must read not passed, which is true only of a signal enqueued behind the copy.
 //!
-//! The third test times `acquire` over a thousand staged copy-ins with no other wait, which is
+//! The third test times `acquire` over [`ACQUIRES`] staged copy-ins with no other wait, which is
 //! the host running ahead of the device by the whole staging depth, and holds its p99 to a bound.
 //!
 //! All three open the device, and the third measures a latency on it, so they are run one at
