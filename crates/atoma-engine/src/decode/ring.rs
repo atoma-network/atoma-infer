@@ -55,6 +55,7 @@ impl StagingDepth {
         }
     }
 
+    /// The depth as a plain count: how many staging entries the staging ring holds.
     #[must_use]
     pub const fn get(self) -> usize {
         self.0.get()

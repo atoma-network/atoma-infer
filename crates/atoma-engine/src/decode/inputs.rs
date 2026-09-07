@@ -77,6 +77,7 @@ pub enum InputsError {
 /// step's five inputs, and the sampler's two per-step arrays.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BucketViews {
+    /// The five the model step reads.
     pub inputs: BucketInputs,
     /// i32 `[tokens]`: the slot each selected row samples under.
     pub row_slots: Tensor,

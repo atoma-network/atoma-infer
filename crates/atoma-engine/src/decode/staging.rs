@@ -343,11 +343,13 @@ impl<'a> Carve<'a> {
 /// The model step's five arrays, each holding at least the bucket's rows.
 #[derive(Debug)]
 pub struct StagingArrays<'a> {
+    /// The token each row computes from.
     pub token_ids: &'a mut [u32],
     /// Each token's position: its context length.
     pub positions: &'a mut [i32],
     /// Each sequence's key length after this step's token.
     pub seqlens_k: &'a mut [i32],
+    /// The KV slot each row's key and value are written to.
     pub slot_mapping: &'a mut [i64],
     /// Row-major, [`StagingShape::block_table_width`] columns per row.
     pub block_table: &'a mut [i32],

@@ -45,12 +45,16 @@ impl<T> Pinned<T> {
         Ok(Self { ptr, len })
     }
 
+    /// The values, readable for as long as the borrow lives. What a copy wrote through
+    /// [`Pinned::as_mut_ptr`] is read here only once that copy has been waited on.
     pub fn as_slice(&self) -> &[T] {
         // SAFETY: `len` values were allocated at `ptr` and nothing writes them while this borrow
         // is live: the writer takes `&mut self`.
         unsafe { slice::from_raw_parts(self.ptr, self.len) }
     }
 
+    /// The values, writable for as long as the borrow lives: how the owner fills the memory a
+    /// copy to the device reads.
     pub fn as_mut_slice(&mut self) -> &mut [T] {
         // SAFETY: as above, exclusively through `&mut self`.
         unsafe { slice::from_raw_parts_mut(self.ptr, self.len) }
