@@ -145,8 +145,7 @@ impl DeviceArray {
 }
 
 /// A device array and the view minted over it at Allocation: the array is owned here, so the
-/// address the view names stays allocated for as long as the view is read. Named for the array
-/// rather than the view, since a tensor view never owns what it names.
+/// address the view names stays allocated for as long as the view is read.
 struct ViewedArray {
     view: Tensor,
     array: DeviceArray,

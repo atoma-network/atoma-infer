@@ -22,9 +22,10 @@ use atoma_runtime::error::RuntimeError;
 use cudarc::driver::result::{free_host, malloc_host};
 use tracing::warn;
 
-/// `cuMemHostAlloc` flags: none of them, which is pinned and cacheable memory this context
-/// alone reaches. Neither `CU_MEMHOSTALLOC_WRITECOMBINED`, since the owner reads what comes
-/// back, nor `CU_MEMHOSTALLOC_DEVICEMAP`, since no kernel reaches the memory directly.
+/// `cuMemHostAlloc` flags: none of them. Not `CU_MEMHOSTALLOC_PORTABLE`, so the memory is pinned
+/// for the allocating context alone; not `CU_MEMHOSTALLOC_WRITECOMBINED`, since the owner reads
+/// what comes back; not `CU_MEMHOSTALLOC_DEVICEMAP`, since no kernel reaches the memory
+/// directly.
 const CACHEABLE_PINNED: u32 = 0;
 
 /// `len` values of pinned host memory, allocated once and freed on drop.

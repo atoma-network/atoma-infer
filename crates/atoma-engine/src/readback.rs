@@ -28,7 +28,7 @@ use tracing::warn;
 
 use crate::pinned::Pinned;
 
-/// Why what a step produced could not be read back.
+/// Why a step's rows could not be read back.
 #[derive(Debug, Error)]
 pub enum ReadbackError {
     /// The caller selected more rows than the readback was sized for.
