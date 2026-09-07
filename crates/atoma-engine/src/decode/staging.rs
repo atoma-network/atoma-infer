@@ -277,21 +277,21 @@ impl StagingLayout {
         let rows = self.rows;
         // `packed` fit `rows * width` four-byte block table entries in a `usize`.
         let table_len = rows * self.block_table_width;
-        let mut carver = Carver {
+        let mut carve = Carve {
             rest: block,
             end: 0,
         };
         Ok(BucketArrays {
             inputs: StagingArrays {
-                token_ids: carver.take(self.token_ids, rows),
-                positions: carver.take(self.positions, rows),
-                seqlens_k: carver.take(self.seqlens_k, rows),
-                slot_mapping: carver.take(self.slot_mapping, rows),
-                block_table: carver.take(self.block_table, table_len),
+                token_ids: carve.take(self.token_ids, rows),
+                positions: carve.take(self.positions, rows),
+                seqlens_k: carve.take(self.seqlens_k, rows),
+                slot_mapping: carve.take(self.slot_mapping, rows),
+                block_table: carve.take(self.block_table, table_len),
             },
             sampler: SamplerArrays {
-                row_slots: carver.take(self.row_slots, rows),
-                gather_slots: carver.take(self.gather_slots, rows),
+                row_slots: carve.take(self.row_slots, rows),
+                gather_slots: carve.take(self.gather_slots, rows),
             },
         })
     }
@@ -303,15 +303,16 @@ impl Plain for u32 {}
 impl Plain for i32 {}
 impl Plain for i64 {}
 
-/// Walks a block from front to back, handing out each array as a typed slice over its bytes.
-struct Carver<'a> {
+/// One carve in progress: how far through the block it has got, and what is left of it. Hands
+/// out each array as a typed slice over its bytes, front to back.
+struct Carve<'a> {
     /// The block past everything handed out so far.
     rest: &'a mut [u8],
     /// The block offset `rest` begins at: the end of everything handed out so far.
     end: usize,
 }
 
-impl<'a> Carver<'a> {
+impl<'a> Carve<'a> {
     /// `len` values of `T` at `offset` from the block's base. The layout put `offset` at or past
     /// the previous array's end and at a multiple of [`ALIGNMENT`], and the carve checked the
     /// base and the block's length, so the splits cannot fail.
