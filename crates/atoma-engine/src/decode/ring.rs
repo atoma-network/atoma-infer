@@ -4,13 +4,13 @@
 //! A copy-in reads a staging entry asynchronously and signals the staging entry's fence behind
 //! the copy, so the host must not write the staging entry again until the fence is passed. The
 //! staging ring keeps the fences and a cursor at the staging entry handed out next; the blocks
-//! themselves belong to whoever owns the staging memory.
-//! [`StagingRing::acquire`] waits on that staging entry's fence, blocking, hands the staging entry
-//! out and moves the cursor on; [`StagingRing::try_acquire`] asks the fence without blocking and
-//! leaves the cursor where it is while the copy is still in flight. Whoever owns the staging
-//! memory keeps each staging entry's block indexed by the staging entry, reaches the fence the
-//! copy-in signals through [`StagingRing::fence`], and waits on every fence through
-//! [`StagingRing::wait_all`] before letting the memory go.
+//! themselves belong to whoever owns the staging memory. [`StagingRing::acquire`] waits on that
+//! staging entry's fence, blocking, hands the staging entry out and moves the cursor on;
+//! [`StagingRing::try_acquire`] asks the fence without blocking and leaves the cursor where it is
+//! while the copy is still in flight. Whoever owns the staging memory keeps each staging entry's
+//! block indexed by the staging entry, reaches the fence the copy-in signals through
+//! [`StagingRing::fence`], and waits on every fence through [`StagingRing::wait_all`] before
+//! letting the memory go.
 //!
 //! A fence nobody has signaled is passed, and so is one whose copy has finished, so an acquire
 //! that is not overtaking a copy returns at once: it costs one wait on a passed fence, and blocks

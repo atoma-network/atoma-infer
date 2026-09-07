@@ -10,11 +10,11 @@
 //! that takes each decoding row's token from what the device sampled for its slot, the model
 //! step, and the sample, which leaves the tokens on the device and reads them back; then one host
 //! wait. Nothing is captured here. Going through the descriptor seam is what lets a later capture
-//! record the gather, the model step and the sample unchanged; the record upload and the
-//! copy-in are the host's
-//! copies of what changed and stay in front of the graph. A dummy run — a bucket's rows as
-//! padding rows over one block each — is staged and copied in the same way, with no sampler
-//! descriptor and no readback: what a capture check or a warmup runs when there is no live batch.
+//! record the gather, the model step and the sample unchanged; the record upload and the copy-in
+//! are the host's copies of what changed and stay in front of the graph. A dummy run — a bucket's
+//! rows as padding rows over one block each — is staged and copied in the same way, with no
+//! sampler descriptor and no readback: what a capture check or a warmup runs when there is no
+//! live batch.
 //!
 //! The step's outputs reach the sampler and the readback as tensor views narrowed to the live
 //! rows: the bucket's logits and the sampler's row tokens are viewed once, at Allocation, over
