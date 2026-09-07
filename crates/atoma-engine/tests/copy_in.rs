@@ -122,9 +122,11 @@ const ACQUIRES: usize = 1024;
 /// The p99 an `acquire` must stay under, in microseconds, unless `COPY_IN_ACQUIRE_P99_MICROS`
 /// says otherwise.
 ///
-/// Provisional: no rig has run this test yet, so nothing has measured what an acquire costs
-/// when the host runs ahead of the device by the whole staging depth. Record the measured p99
-/// here, with the device it was measured on, from the first rig run.
+/// Measured on an A100-SXM4-40GB, at [`DEPTH`], over five runs of [`ACQUIRES`] each: a p99 of
+/// 3.1 to 3.9 microseconds from an unoptimized build and 6.0 to 6.2 from an optimized one, the
+/// optimized build the higher of the two. The max is not bounded and ranged from 13 to 32
+/// microseconds over the same runs. The bound stays at 20, three times the highest p99
+/// measured, so that a host slower to its device than this one does not redden the test.
 const DEFAULT_ACQUIRE_P99_MICROS: f64 = 20.0;
 
 /// The device, the session the uploads run on, and the inputs under test.
