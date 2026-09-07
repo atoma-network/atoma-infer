@@ -25,7 +25,7 @@ use std::slice;
 
 use atoma_core::request::PADDING_TOKEN;
 use atoma_core::types::{BlockId, RequestSlot, TokenCount};
-use atoma_runtime::arena::BucketIdx;
+use atoma_runtime::arena::{BucketIdx, SLOT_ALIGN};
 use thiserror::Error;
 
 use crate::batch::BatchLayout;
@@ -158,15 +158,20 @@ impl DummyRun {
     }
 }
 
-/// Each array in a packed block begins at a multiple of this many bytes: the alignment a device
-/// allocation of its own would have, so a kernel handed a view into the block sees what it would
-/// see over a buffer of its own.
-const ALIGNMENT: usize = 256;
+/// Each array in a packed block begins at a multiple of this many bytes: the alignment CUDA
+/// guarantees for a device allocation, so a kernel handed a view into the block reads it exactly
+/// as it would read a buffer of its own. The same guarantee the arena aligns its slots to, and
+/// held here as one value so the two cannot drift apart.
+const ALIGNMENT: usize = SLOT_ALIGN;
 
 /// What a block's base must be aligned to for the carve: the widest element staged, the slot
 /// mapping's `i64`. Every offset is a multiple of [`ALIGNMENT`], so a base aligned to this aligns
 /// every array.
 const BASE_ALIGNMENT: usize = align_of::<i64>();
+
+/// A base aligned to [`BASE_ALIGNMENT`] aligns every array only while the offsets step by a
+/// multiple of it, which is what makes the carve's alignment check on the base sufficient.
+const _: () = assert!(ALIGNMENT.is_multiple_of(BASE_ALIGNMENT));
 
 /// Where each of one bucket's seven arrays sits in its packed block, and how long the block is.
 ///
