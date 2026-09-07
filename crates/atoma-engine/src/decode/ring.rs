@@ -16,8 +16,8 @@
 //! that is not overtaking a copy returns at once: it costs one wait on a passed fence, and blocks
 //! only when the host has run ahead of the device by the whole depth.
 //!
-//! [`StagingEntryFence`] is what the staging ring asks of a fence, so the protocol runs on a host
-//! with no GPU over a fake; [`StagingFence`] is the fence in serving.
+//! [`Fence`] is all the staging ring asks of the fence guarding a staging entry, so the protocol
+//! runs on a host with no GPU over a fake; [`StagingFence`] is the fence in serving.
 
 use std::fmt;
 use std::iter;
@@ -104,7 +104,7 @@ pub struct StagingDepthError {
 
 /// What the staging ring asks of the fence guarding one staging entry: a blocking wait and a
 /// non-blocking one, each passed once the copy behind the fence's last signal has finished.
-pub trait StagingEntryFence {
+pub trait Fence {
     type Error;
 
     /// Waits until the fence is passed, blocking the calling thread.
@@ -122,7 +122,7 @@ pub trait StagingEntryFence {
     fn try_wait(&self) -> Result<bool, Self::Error>;
 }
 
-impl StagingEntryFence for StagingFence {
+impl Fence for StagingFence {
     type Error = RuntimeError;
 
     fn wait(&self) -> Result<(), RuntimeError> {
@@ -161,7 +161,7 @@ pub struct StagingRing<F> {
     cursor: usize,
 }
 
-impl<F: StagingEntryFence> StagingRing<F> {
+impl<F: Fence> StagingRing<F> {
     /// A staging ring of `depth` staging entries, each guarded by a fence `fence` creates, with
     /// the cursor at the first.
     ///
@@ -219,7 +219,7 @@ impl<F: StagingEntryFence> StagingRing<F> {
     ///
     /// Returns the first fence's error; the fences after it are not waited on.
     pub fn wait_all(&self) -> Result<(), F::Error> {
-        self.fences.iter().try_for_each(StagingEntryFence::wait)
+        self.fences.iter().try_for_each(Fence::wait)
     }
 
     /// Hands out the staging entry at the cursor and moves the cursor to the next, wrapping.
@@ -281,7 +281,7 @@ mod tests {
         }
     }
 
-    impl StagingEntryFence for FakeFence {
+    impl Fence for FakeFence {
         type Error = FakeFenceError;
 
         fn wait(&self) -> Result<(), FakeFenceError> {
