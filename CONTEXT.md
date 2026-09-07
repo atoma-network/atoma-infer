@@ -404,8 +404,8 @@ not per step, and go up as sparse copies of their own in front of it.
 _Avoid_: input upload (for this in the engine), host-to-device transfer, staging copy
 
 **Packed block**:
-One bucket's seven staged arrays laid consecutively, each at the alignment CUDA guarantees a
-device allocation: what one copy-in carries, at a length that follows the bucket rather than the
+One bucket's seven staged arrays laid consecutively, each at the alignment CUDA guarantees for
+a device allocation: what one copy-in carries, at a length that follows the bucket rather than the
 largest one. A staging entry's pinned block and the one device block are each allocated at the
 largest bucket's packed length, and every bucket reads the device block through views minted at
 its own offsets.
