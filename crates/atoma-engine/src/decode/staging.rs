@@ -119,13 +119,17 @@ pub struct StagingShape {
     pub block_size: TokenCount,
 }
 
-/// A bucket's rows run as padding rows, over one KV block each: what a capture check or a warmup
-/// runs when there is no live batch to run. Each row is what a padding dummy's row is in a live
-/// step — the padding token at position 0, a key length of one, the block's first KV slot, and a
-/// block table of that one block — so the step computes what it computes for a dummy, and the
-/// only cache it writes is each block's first KV slot. No row samples, so no sampler descriptor
-/// runs over a dummy run and nothing is read back; its sampler arrays are staged all the same,
-/// naming no request slot, so its copy-in carries nothing stale.
+/// A bucket's rows filled as padding rows, over one KV block each: what a capture check or a
+/// warmup runs when there is no live batch.
+///
+/// Each row holds what a dummy's row holds in a live step: the padding token at position 0, a
+/// key length of one, the block's first KV slot, and a block table of that one block. The step
+/// therefore does the same work for these rows as it does for a dummy's row in a live step. It
+/// writes one KV slot per block, the first, and no other cache.
+///
+/// A dummy run samples no rows. No sampler descriptor runs over it, and it reads nothing back.
+/// It stages its sampler arrays, but they name no request slot, so its copy-in carries nothing
+/// stale.
 #[derive(Debug)]
 pub struct DummyRun {
     bucket: BucketIdx,
