@@ -60,6 +60,10 @@ captured_max_requests = 32
 # pinned to. Rank zero owns the engine's rings and samples; every further rank follows it, and
 # more than one rank needs a build with the `nccl` feature.
 ranks = [ { core = 2, device = 0 } ]
+# How many staging entries the staging ring holds: the host writes one step's inputs into one
+# staging entry while the device is still reading the last step's. Two unless set, and between 1
+# and 8; each staging entry pins host memory sized for the largest bucket.
+staging_depth = 2
 
 # Where the model comes from and how it is loaded.
 [model]

@@ -108,6 +108,7 @@ pub fn spawn_ranks(
             max_model_len: engine.scheduler.max_model_len,
             block_size: engine.scheduler.block_size,
             dtype: model.dtype,
+            staging_depth: executor.staging_depth,
         },
         #[cfg(feature = "nccl")]
         collective: Id::new().map_err(|error| StartupError::Collective { status: error.0 })?,
@@ -194,5 +195,5 @@ fn open_forward(rank: Rank, ordinal: DeviceOrdinal, plan: &RankPlan) -> Result<C
         #[cfg(not(feature = "nccl"))]
         decode_step,
         session,
-    ))
+    )?)
 }

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Decode parity and capture cleanliness on a CUDA rig: runs the ignored integration test that
+# Decode parity and the capture check on a CUDA rig: runs the ignored integration test that
 # builds the decode step over runtime tensors beside the candle forward on the same weights and
 # KV cache, records the step under capture, and compares the two forwards' logits over decode
 # steps of varying ids, lengths and block tables.

@@ -538,7 +538,7 @@ mod tests {
     use super::*;
     use crate::dims::test_support::llama_8b;
     use crate::layer::{LayerOffset, QkvColumns, LLAMA_OPS};
-    use crate::llama::slots::{Bucket, LayerWeights, SlotSources, StepStatics};
+    use crate::llama::slots::{Bucket, BucketInputs, LayerWeights, SlotSources, StepStatics};
 
     const LAYERS: usize = 2;
     const LADDER: [usize; 2] = [1, 8];
@@ -596,17 +596,23 @@ mod tests {
         AttentionPlan::new(dims, tokens, PAGE_BLOCK, BLOCK_COLUMNS, SMS).unwrap()
     }
 
+    /// A bucket's inputs at `tokens` rows, each at its own address.
+    fn inputs(tokens: usize) -> BucketInputs {
+        BucketInputs {
+            token_ids: view(0x8000_0000, &[tokens], Dtype::U32),
+            positions: view(0x8001_0000, &[tokens], Dtype::I32),
+            seqlens_k: view(0x8002_0000, &[tokens], Dtype::I32),
+            slot_mapping: view(0x8003_0000, &[tokens], Dtype::I64),
+            block_table: view(0x8004_0000, &[tokens, BLOCK_COLUMNS], Dtype::I32),
+        }
+    }
+
     fn statics(dims: &LlamaDims) -> StepStatics {
         let max = *LADDER.iter().max().unwrap();
         let shape = plan(dims, max).shape();
         let splits = plan(dims, 1).num_splits;
         let rotary = [dims.rope.max_position, dims.head_dim / 2];
         StepStatics {
-            token_ids: view(0x7000_0000, &[max], Dtype::U32),
-            positions: view(0x7001_0000, &[max], Dtype::I32),
-            seqlens_k: view(0x7002_0000, &[max], Dtype::I32),
-            slot_mapping: view(0x7003_0000, &[max], Dtype::I64),
-            block_table: view(0x7004_0000, &[max, BLOCK_COLUMNS], Dtype::I32),
             logits: view(LOGITS, &[max, dims.vocab], Dtype::F32),
             softmax_lse: view(0x7200_0000, &[shape.softmax_lse_len()], Dtype::F32),
             lse_accum: view(0x7300_0000, &[shape.lse_accum_len(splits)], Dtype::F32),
@@ -648,7 +654,7 @@ mod tests {
                     index: BucketIdx(index),
                     tokens,
                 };
-                BucketSlots::resolve(&sources, bucket, plan(&dims, tokens)).unwrap()
+                BucketSlots::resolve(&sources, bucket, plan(&dims, tokens), inputs(tokens)).unwrap()
             })
             .collect();
         let decode =

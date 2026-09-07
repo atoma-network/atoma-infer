@@ -14,6 +14,13 @@ _Avoid_: trace, record (as nouns)
 Launching a previously captured graph executable for one step.
 _Avoid_: playback, re-run
 
+**Capture check**:
+Recording a step under capture over a dummy run to show the driver accepts it: the recording is
+not invalidated, and no node of the graph it produces allocates or frees memory. It needs no live
+batch, since the dummy run fills the bucket's rows. The warmup pass every recording consumes runs
+inside it and is not another name for it.
+_Avoid_: capture cleanliness, capture smoke test
+
 **Capture session**:
 The value that carries one graph set through the three session phases, with consuming
 transitions between them. It lives and dies on the executor thread that runs it; the executor
@@ -29,6 +36,15 @@ _Avoid_: phase (unqualified), stage, mode
 The first session phase. Allocation fixes every device address and binds every stream and
 communicator. Nothing is captured in it.
 _Avoid_: setup, init, startup
+
+**Baked address**:
+A device address a step's descriptors pass to the device unchanged, fixed in the Allocation
+phase: a recording bakes it into the graph's nodes, so a replay reads exactly the memory the step
+was built over. The set is every weight and cache view candle owns, the device block a copy-in
+lands in, the arena, the step's fixed buffers and the sampler's arrays. The forward reads it by
+name when it is built, and a debug build reads it again before each keyed step and panics naming
+the first address that moved.
+_Avoid_: frozen address, cached pointer, pinned address (which is pinned host memory)
 
 **Descriptor**:
 A description of device work the capture session enqueues onto the capture stream. Its one
@@ -288,8 +304,11 @@ _Avoid_: schedule, scheduler output, scheduler step, plan
 
 **Entry**:
 One row of a Scheduled: a sequence, its query length, and whether it samples. An entry samples
-only when its query reaches the sequence's total; a non-final prefill chunk does not.
-_Avoid_: scheduled tokens, scheduled sequence, batch item
+only when its query reaches the sequence's total; a non-final prefill chunk does not. Unqualified,
+the term is this one: the staging ring's is always a staging entry, and the runtime's graph set
+has graph entries of its own.
+_Avoid_: scheduled tokens, scheduled sequence, batch item, staging entry (which is where a step's
+copy-in is written)
 
 **Batch layout**:
 A step command laid out as the arrays the model forward takes: prefills first, then decodes,
@@ -363,7 +382,8 @@ _Avoid_: lag, buffer depth, backpressure (which is what the channel does not app
 **Ring**:
 One of the two single-producer single-consumer rings between the engine thread and the
 executor thread: step commands one way, step results the other. Rings are not channels.
-_Avoid_: channel (for these), queue, pipe
+Unqualified, the term is this one; the staging ring is always written qualified.
+_Avoid_: channel (for these), queue, pipe, staging ring (which holds a step's staging entries)
 
 **Step command**:
 Everything the executor acts on for one step: entries with context and sequence lengths, block
@@ -374,6 +394,61 @@ _Avoid_: execute model request, model input, batch (for the command)
 What the executor returns for one step: each sampling entry's token and whatever the engine
 needs to advance request state.
 _Avoid_: model output, step output, sampler output
+
+**Copy-in**:
+The one copy per step that carries the host's per-step arrays to the device: the model's five
+inputs and the sampler's two, packed into one block and copied from a staging entry into the
+device block in front of the step. Named against the readback, which is the one copy the
+other way. A slot's sampling record is not in it — records are written when a slot changes hands,
+not per step, and go up as sparse copies of their own in front of it.
+_Avoid_: input upload (for this in the engine), host-to-device transfer, staging copy
+
+**Packed block**:
+One bucket's seven staged arrays laid consecutively, each at a 256-byte boundary: what one
+copy-in carries, at a length that follows the bucket rather than the largest one. A staging
+entry's pinned block and the one device block are each allocated at the largest bucket's packed
+length, and every bucket reads the device block through views minted at its own offsets.
+_Avoid_: KV block, staging buffer, input buffer (each for this)
+
+**Staging ring**:
+The staging entries a step's copy-in is written into, handed out in turn: a cursor names the one
+handed out next, and an acquire waits on that staging entry's fence before handing it out and
+moving the cursor on. Its non-blocking form leaves the cursor where it is while the copy that
+last read the staging entry is still in flight. Written qualified in prose, where "ring" alone is
+one of the two between the engine thread and the executor thread; the module that holds it is
+`ring`.
+_Avoid_: ring (in prose, for this), staging queue, double buffer, buffer pool
+
+**Staging entry**:
+One place in the staging ring: a pinned packed block and the fence that guards it, named by the
+token an acquire hands out and an upload spends. Whoever owns the staging memory keeps each
+staging entry's block indexed by that token. Written qualified in prose, where the bare word is
+Entry's; the parameter and binding that carry one are named `entry`.
+_Avoid_: entry (in prose, for this), staging slot, staging buffer
+
+**Staging fence**:
+What says when the host may write a staging entry again: one event, signaled through the
+descriptor seam behind the copy that reads the staging entry, and waited on by the host with or
+without blocking. A fence nobody has signaled is passed, so a staging entry no copy has read is
+written without a wait; no wait reaches a stream, so the capture stream keeps its no-synchronize
+rule. The fence, and not the host wait that ends a step, is what makes the reuse safe: it is what
+still holds when the host runs ahead of the device.
+_Avoid_: barrier, sync point, semaphore
+
+**Staging depth**:
+How many staging entries the staging ring holds: two unless configured, never zero, and at most
+eight, since each staging entry pins host memory sized for the largest bucket. What bounds how
+many copy-ins can be in flight at once, and so how far a host could run ahead of the device
+before an acquire has to wait.
+_Avoid_: ring size, queue depth, staging count
+
+**Dummy run**:
+A bucket's rows filled as padding rows over one KV block each, staged and uploaded through the
+same acquire and fence as a live step and then run with no sampler descriptor and nothing read
+back: what a capture check or a warmup runs when there is no live batch. Every row is what a
+dummy's row is in a live step, so the only cache it writes is each block's first KV slot. Its
+sampler arrays are written too, naming no request slot, so its copy-in carries nothing stale.
+_Avoid_: padding batch, fake batch, dummy step
 
 **Readback**:
 The one device-to-host copy per step that brings the sampled tokens to the host: into a pinned

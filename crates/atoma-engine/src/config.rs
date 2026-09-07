@@ -8,6 +8,8 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use validator::{Validate, ValidationError};
 
+use crate::decode::ring::StagingDepth;
+
 /// Where the model comes from and how its weights are loaded.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Validate)]
 #[serde(deny_unknown_fields)]
@@ -102,6 +104,11 @@ pub struct ExecutorConfig {
     /// One entry per rank, in rank order: the first is rank zero, which owns the engine's rings.
     #[validate(length(min = 1, message = "executor.ranks is empty; name at least one rank"))]
     pub ranks: Vec<RankConfig>,
+    /// How many staging entries the staging ring holds: two unless set, so the host writes one
+    /// step's inputs while the device is still reading the last step's. Between one and
+    /// [`StagingDepth::MAX`]; a depth outside that refuses the configuration.
+    #[serde(default)]
+    pub staging_depth: StagingDepth,
 }
 
 /// What one rank owns: its device, and the core its thread is pinned to.
@@ -224,6 +231,7 @@ mod tests {
         CoreId, DeviceOrdinal, Dtype, ExecutorConfig, ModelConfig, ModelId, PromptTemplate,
         RankConfig,
     };
+    use crate::decode::ring::StagingDepth;
 
     fn from_toml<T: DeserializeOwned>(source: &str) -> Result<T, Box<figment::Error>> {
         Figment::new()
@@ -285,6 +293,28 @@ mod tests {
     }
 
     #[test]
+    fn the_staging_depth_is_two_unless_configured() {
+        let config: ExecutorConfig = from_toml("ranks = [{ device = 0, core = 2 }]").unwrap();
+        assert_eq!(config.staging_depth.get(), 2);
+
+        let config: ExecutorConfig =
+            from_toml("ranks = [{ device = 0, core = 2 }]\nstaging_depth = 3").unwrap();
+        assert_eq!(config.staging_depth.get(), 3);
+    }
+
+    #[test]
+    fn a_staging_depth_of_zero_or_above_the_deepest_is_refused_by_name() {
+        for depth in [0, 9] {
+            let source = format!("ranks = [{{ device = 0, core = 2 }}]\nstaging_depth = {depth}");
+            let error = from_toml::<ExecutorConfig>(&source)
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("staging_depth"), "depth {depth}: {error}");
+            assert!(error.contains("between 1 and 8"), "depth {depth}: {error}");
+        }
+    }
+
+    #[test]
     fn both_configurations_round_trip_through_serde() {
         let model = ModelConfig {
             id: ModelId::new("org/model"),
@@ -298,9 +328,13 @@ mod tests {
 
         let executor = ExecutorConfig {
             ranks: vec![rank(0, 2)],
+            staging_depth: StagingDepth::new(4).unwrap(),
         };
         let json = serde_json::to_string(&executor).unwrap();
-        assert_eq!(json, r#"{"ranks":[{"device":0,"core":2}]}"#);
+        assert_eq!(
+            json,
+            r#"{"ranks":[{"device":0,"core":2}],"staging_depth":4}"#
+        );
         assert_eq!(
             serde_json::from_str::<ExecutorConfig>(&json).unwrap(),
             executor
@@ -322,7 +356,10 @@ dtype = "int8""#
 
     #[test]
     fn an_executor_with_no_ranks_is_refused() {
-        let config = ExecutorConfig { ranks: Vec::new() };
+        let config = ExecutorConfig {
+            ranks: Vec::new(),
+            staging_depth: StagingDepth::default(),
+        };
         let error = config.validate().unwrap_err().to_string();
         assert!(error.contains("at least one rank"), "{error}");
     }
@@ -331,12 +368,14 @@ dtype = "int8""#
     fn ranks_sharing_a_device_or_a_core_are_refused_by_name() {
         let shared_device = ExecutorConfig {
             ranks: vec![rank(0, 2), rank(0, 3)],
+            staging_depth: StagingDepth::default(),
         };
         let error = shared_device.validate().unwrap_err().to_string();
         assert!(error.contains("device 0 more than once"), "{error}");
 
         let shared_core = ExecutorConfig {
             ranks: vec![rank(0, 2), rank(1, 2)],
+            staging_depth: StagingDepth::default(),
         };
         let error = shared_core.validate().unwrap_err().to_string();
         assert!(error.contains("core 2 more than once"), "{error}");
