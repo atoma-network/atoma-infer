@@ -3,9 +3,10 @@
 //!
 //! A bucket stages seven arrays for a step: the five the model step reads (token ids, positions,
 //! key lengths, slot mapping, block table) and the two the sampler reads (row slots, gather
-//! slots). [`StagingLayout::packed`] lays them consecutively at the bucket's rows, each at an
-//! [`ALIGNMENT`] boundary, so the bucket's staging is one block, [`StagingLayout::bytes`] long and
-//! proportional to the batch rather than to the largest bucket, that one copy can carry.
+//! slots). [`StagingLayout::packed`] lays them consecutively at the bucket's rows, each at the
+//! alignment CUDA guarantees a device allocation, so the bucket's staging is one block,
+//! [`StagingLayout::bytes`] long and proportional to the batch rather than to the largest
+//! bucket, that one copy can carry.
 //! [`StagingLayout::carve`] carves the seven arrays out of such a block; [`stage`] writes the
 //! model's five from the batch layout, and [`stage_sampler`] the sampler's two from what the
 //! sampler decided for the step. [`stage_dummy`] writes all seven for a [`DummyRun`]: every row
@@ -32,8 +33,8 @@ use crate::batch::BatchLayout;
 use crate::decode::batch::DecodeBatch;
 use crate::sampling::inputs::SamplerInputs;
 
-/// One of the seven arrays a bucket stages, as the staging names it: the five inputs the model
-/// step reads, then the two the sampler reads.
+/// One of the seven arrays a bucket stages, in the order they are packed: the five inputs the
+/// model step reads, then the two the sampler reads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StagedInput {
     TokenIds,
@@ -176,9 +177,9 @@ const _: () = assert!(ALIGNMENT.is_multiple_of(BASE_ALIGNMENT));
 /// Where each of one bucket's seven arrays sits in its packed block, and how long the block is.
 ///
 /// The arrays are laid consecutively at the bucket's rows, in [`StagedInput`]'s order, each
-/// beginning at an [`ALIGNMENT`] boundary; the block's length is the last array's end, padded the
-/// same way. The layout is the bucket's alone: the largest bucket sizes nothing in it, so a
-/// smaller bucket's block is proportionally smaller.
+/// beginning at the alignment CUDA guarantees a device allocation; the block's length is the last
+/// array's end, padded the same way. The layout is the bucket's alone: the largest bucket sizes
+/// nothing in it, so a smaller bucket's block is proportionally smaller.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StagingLayout {
     rows: usize,

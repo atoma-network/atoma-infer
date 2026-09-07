@@ -100,11 +100,11 @@ pub enum BakedError {
     },
     /// Other memory was read at a baked position: the addresses are read again in the order they
     /// were baked, and this reading does not follow it.
-    #[error("position {position} was baked as {baked} and read again as {current}")]
+    #[error("position {position} was baked as {baked} and read again as {read}")]
     OtherName {
         position: usize,
         baked: BakedName,
-        current: BakedName,
+        read: BakedName,
     },
     /// Fewer or more addresses were read again than were baked.
     #[error("{baked} addresses were baked and {current} were read again")]
@@ -147,7 +147,7 @@ impl BakedAddresses {
                 return Err(BakedError::OtherName {
                     position,
                     baked: baked.name,
-                    current: read.name,
+                    read: read.name,
                 });
             }
             if read.address != baked.address {
@@ -293,7 +293,7 @@ mod tests {
                     layer: 3,
                     weight: LayerWeight::K,
                 },
-                current: BakedName::Cache { layer: 0 },
+                read: BakedName::Cache { layer: 0 },
             })
         );
     }
@@ -424,7 +424,7 @@ mod tests {
             Err(BakedError::OtherName {
                 position: 0,
                 baked: BakedName::EmbeddingTable,
-                current: BakedName::SineTable,
+                read: BakedName::SineTable,
             })
         );
 
@@ -437,7 +437,7 @@ mod tests {
             Err(BakedError::OtherName {
                 position: end,
                 baked: BakedName::RowTokens,
-                current: BakedName::SamplingRecords,
+                read: BakedName::SamplingRecords,
             })
         );
     }

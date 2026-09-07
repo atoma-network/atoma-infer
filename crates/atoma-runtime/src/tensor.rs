@@ -14,7 +14,7 @@
 //! declared and need no witness: they name bytes that were already fixed.
 //!
 //! [`Element`] ties a host value type to the dtype its views have, so a copy between host values
-//! and a view can hold the view to the type the host reads or writes.
+//! and a view can check the view carries the type the host reads or writes.
 
 use cudarc::driver::sys;
 use thiserror::Error;
@@ -533,7 +533,7 @@ mod tests {
     }
 
     #[test]
-    fn a_host_elements_size_is_its_dtypes() {
+    fn a_host_element_is_the_width_of_the_dtype_it_names() {
         // The copy of `len` host values is `len * size_of::<T>()` bytes; the view it fills or
         // drains is `len * DTYPE.size_in_bytes()`. The two must agree for every host type.
         assert_eq!(<f32 as Element>::DTYPE, Dtype::F32);

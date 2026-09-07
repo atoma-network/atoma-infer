@@ -165,7 +165,8 @@ impl ViewedArray {
     }
 }
 
-/// A device array of `len` values with the pinned host staging a step writes it from.
+/// A device array of `len` values, and the pinned host memory a step writes before copying it
+/// there.
 struct StagedArray<T> {
     host: Pinned<T>,
     device: DeviceArray,
