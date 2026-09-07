@@ -29,7 +29,7 @@ pub enum BakedName {
     /// One layer's paged cache, candle's.
     Cache { layer: usize },
     /// The device block every bucket's input views are minted over.
-    InputBlock,
+    DeviceBlock,
     /// The arena every activation is addressed in.
     Arena,
     /// The step's logits.
@@ -48,8 +48,9 @@ pub enum BakedName {
     SamplingRecords,
     /// The sampler's per-slot last sampled tokens.
     SampledTokens,
-    /// The sampler's own row slots, which an eager step samples under.
-    RowSlots,
+    /// The sampler's own row slots, which an eager step samples under. The per-step row slots a
+    /// keyed step samples under are staged into the packed block and are not baked.
+    SamplerRowSlots,
     /// The sampler's row tokens, which the readback copies through.
     RowTokens,
 }
@@ -64,7 +65,7 @@ impl fmt::Display for BakedName {
             BakedName::FinalNormGain => "the final norm gain",
             BakedName::HeadProjection => "the head projection",
             BakedName::Cache { layer } => return write!(f, "layer {layer}'s cache"),
-            BakedName::InputBlock => "the input block",
+            BakedName::DeviceBlock => "the device block",
             BakedName::Arena => "the arena",
             BakedName::Logits => "the logits",
             BakedName::LogSumExp => "the log-sum-exp output",
@@ -74,7 +75,7 @@ impl fmt::Display for BakedName {
             BakedName::SineTable => "the sine table",
             BakedName::SamplingRecords => "the sampling records",
             BakedName::SampledTokens => "the sampled tokens",
-            BakedName::RowSlots => "the sampler's row slots",
+            BakedName::SamplerRowSlots => "the sampler's row slots",
             BakedName::RowTokens => "the row tokens",
         })
     }
@@ -469,7 +470,7 @@ mod tests {
             (BakedName::Cache { layer: 0 }, "layer 0's cache"),
             (BakedName::Cache { layer: 7 }, "layer 7's cache"),
             (BakedName::Cache { layer: 31 }, "layer 31's cache"),
-            (BakedName::InputBlock, "the input block"),
+            (BakedName::DeviceBlock, "the device block"),
             (BakedName::Arena, "the arena"),
             (BakedName::Logits, "the logits"),
             (BakedName::LogSumExp, "the log-sum-exp output"),
@@ -482,7 +483,7 @@ mod tests {
             (BakedName::SineTable, "the sine table"),
             (BakedName::SamplingRecords, "the sampling records"),
             (BakedName::SampledTokens, "the sampled tokens"),
-            (BakedName::RowSlots, "the sampler's row slots"),
+            (BakedName::SamplerRowSlots, "the sampler's row slots"),
             (BakedName::RowTokens, "the row tokens"),
         ]
     }

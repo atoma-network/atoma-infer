@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 #
 # The per-step copy-in on a CUDA rig: runs the ignored integration tests that stage a step's
-# seven arrays into a staging entry's pinned block, upload the bucket's packed length through
+# seven arrays into a staging entry's pinned block, copy the bucket's packed length in through
 # the staging entry's fence, read the device block back and compare every array; do the same
 # for a second step through the other staging entry and for a dummy run through the first;
 # ask a staging entry's fence, eight times over, while the copy that reads it is still in
 # flight, which it must answer not passed every time; and time `acquire` over a thousand
-# staged uploads the host runs ahead of, printing the max and the p99.
+# staged copy-ins the host runs ahead of, printing the max and the p99.
 #
 # Needs a device and a CUDA 12.x toolkit; no checkpoint and no model.
 #

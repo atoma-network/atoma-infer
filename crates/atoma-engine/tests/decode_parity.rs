@@ -271,10 +271,10 @@ fn record_bucket_of_one(
     capture
         .warm_up(
             &mut decode_step
-                .upload(entry, run.bucket())
+                .copy_in(entry, run.bucket())
                 .expect("bucket 0 is served"),
         )
-        .expect("the upload runs eagerly");
+        .expect("the copy-in runs eagerly");
     capture
         .warm_up(&mut decode_step.descriptor(run.bucket()).expect("bucket 0"))
         .expect("the step warms up");

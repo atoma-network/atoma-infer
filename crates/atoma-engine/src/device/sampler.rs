@@ -144,14 +144,15 @@ impl DeviceArray {
     }
 }
 
-/// A device array viewed as a tensor: the view minted over the array at Allocation, and the
-/// array, owned so the address the view names stays allocated for as long as the view is read.
-struct DeviceTensor {
+/// A device array and the view minted over it at Allocation: the array is owned here, so the
+/// address the view names stays allocated for as long as the view is read. Named for the array
+/// rather than the view, since a tensor view never owns what it names.
+struct ViewedArray {
     view: Tensor,
     array: DeviceArray,
 }
 
-impl DeviceTensor {
+impl ViewedArray {
     /// `layout`'s elements, zeroed, on `stream`'s device, viewed as `layout`.
     fn zeroed(
         allocation: &Allocation,
@@ -222,7 +223,7 @@ pub struct DeviceSampler {
     row_slots: StagedArray<i32>,
     /// u32 `[max_rows]`: the token sampled for each selected row this step, viewed for the
     /// readback to copy the leading rows through.
-    row_tokens: DeviceTensor,
+    row_tokens: ViewedArray,
     readback: Readback<u32>,
     /// Recorded behind every upload from the sampler's own staging; waited on before the staging
     /// is freed.
@@ -263,7 +264,7 @@ impl DeviceSampler {
             pending_records: Vec::new(),
             sampled: DeviceArray::zeroed(stream, slots * size_of::<u32>())?,
             row_slots: StagedArray::new(stream, max_rows)?,
-            row_tokens: DeviceTensor::zeroed(allocation, stream, row_tokens)?,
+            row_tokens: ViewedArray::zeroed(allocation, stream, row_tokens)?,
             readback: Readback::new(allocation, context, max_rows, 1)?,
             uploaded,
             owners: SlotOwners::new(slots),
@@ -282,7 +283,7 @@ impl DeviceSampler {
         [
             (BakedName::SamplingRecords, &self.records.device),
             (BakedName::SampledTokens, &self.sampled),
-            (BakedName::RowSlots, &self.row_slots.device),
+            (BakedName::SamplerRowSlots, &self.row_slots.device),
             (BakedName::RowTokens, &self.row_tokens.array),
         ]
         .map(|(name, array)| BakedAddress {

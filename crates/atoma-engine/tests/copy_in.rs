@@ -5,14 +5,14 @@
 //! No checkpoint and no model: the inputs are built over a context, a stream and a session of
 //! their own, so what is measured is the staging and the copy and nothing else. A step's seven
 //! arrays — the five the model step reads and the two the sampler reads — are staged into one
-//! staging entry's pinned block and uploaded through it; the device block is read back and every
+//! staging entry's pinned block and copied in through it; the device block is read back and every
 //! array compared at the bucket's packed offsets, and past the bucket's packed length the block
 //! is still as its allocation zeroed it. A second step, differing in all seven, is staged into
-//! the other staging entry before either upload runs, so each staging entry holds a step of its
+//! the other staging entry before either copy-in runs, so each staging entry holds a step of its
 //! own when the first copy reads: each readback shows what its own staging entry was staged
 //! with, and it is the pair of them that says a copy-in does not reach one fixed pinned block —
 //! a `stage` naming block zero instead of the staging entry's leaves the second step in front of
-//! the first readback, and an `upload` naming it leaves the first step in front of the second.
+//! the first readback, and a `copy_in` naming it leaves the first step in front of the second.
 //! A dummy run then goes through the first staging entry again, taken back through the
 //! non-blocking half of the staging ring's protocol. Both copies have been waited on by then, so
 //! what that shows is a real fence answering a query and reading passed — which the staging
@@ -26,10 +26,10 @@
 //! The order is the second test: it asks the fence while the copy that reads the staging entry
 //! is still in flight. One staging entry, a block table wide enough that its copy takes tens of
 //! microseconds on the fastest link a host has to a device, and eight queries, each in the few
-//! microseconds after its own upload with nothing waited on in between. Every one of the eight
+//! microseconds after its own copy-in with nothing waited on in between. Every one of the eight
 //! must read not passed, which is true only of a signal enqueued behind the copy.
 //!
-//! The third test times `acquire` over a thousand staged uploads with no other wait, which is
+//! The third test times `acquire` over a thousand staged copy-ins with no other wait, which is
 //! the host running ahead of the device by the whole staging depth, and holds its p99 to a bound.
 //!
 //! All three open the device, and the third measures a latency on it, so they are run one at
@@ -129,7 +129,7 @@ const ACQUIRES: usize = 1024;
 /// measured, so that a host slower to its device than this one does not redden the test.
 const DEFAULT_ACQUIRE_P99_MICROS: f64 = 20.0;
 
-/// The device, the session the uploads run on, and the inputs under test.
+/// The device, the session the copy-ins run on, and the inputs under test.
 struct Rig {
     inputs: DecodeInputs,
     session: Replay,
@@ -152,14 +152,14 @@ impl Rig {
     }
 
     /// Opens device zero and builds the inputs for [`LADDER`]'s buckets at `shape` over a staging
-    /// ring of `depth`, then leaves the Allocation phase: only uploads remain.
+    /// ring of `depth`, then leaves the Allocation phase: only copy-ins remain.
     fn over(shape: StagingShape, depth: StagingDepth) -> Self {
         let context = RuntimeContext::new(0).expect("device 0 opens");
         let allocation = Allocation::new(&context).expect("the session opens");
         let stream = context.cuda().default_stream();
         let inputs = DecodeInputs::new(&allocation, &stream, shape, &buckets(), depth)
             .expect("the staging ring pins its blocks and the device block allocates");
-        // The block was allocated on this stream and the uploads run on the capture stream, so
+        // The block was allocated on this stream and the copy-ins run on the capture stream, so
         // the two are joined here, in the Allocation phase, as the decode step joins them.
         stream.synchronize().expect("the allocations land");
         Self {
@@ -171,12 +171,14 @@ impl Rig {
 
     /// Uploads `bucket`'s packed length from `entry`'s pinned block, waits for the copy, and
     /// reads the whole device block back.
-    fn upload(&self, entry: StagingEntry, bucket: BucketIdx) -> Vec<u8> {
-        let mut upload = self
+    fn copy_in(&self, entry: StagingEntry, bucket: BucketIdx) -> Vec<u8> {
+        let mut copy_in = self
             .inputs
-            .upload(entry, bucket)
+            .copy_in(entry, bucket)
             .expect("the bucket is one the inputs stage for");
-        self.session.run(&mut upload).expect("the upload enqueues");
+        self.session
+            .run(&mut copy_in)
+            .expect("the copy-in enqueues");
         self.session.synchronize().expect("the copy lands");
         let block = self
             .stream
@@ -215,7 +217,7 @@ impl Staged {
             assert_eq!(
                 &block[at..at + expected.len()],
                 expected,
-                "the {input} uploaded"
+                "the {input} copied in"
             );
         };
         held(TOKEN_IDS_AT, &words(&self.token_ids), "token ids");
@@ -363,7 +365,7 @@ fn first_rows() -> Vec<CommandEntry> {
     vec![entry(1, 3, 9, &[10]), entry(2, 20, 7, &[20, 21])]
 }
 
-/// The step the fence test uploads: the first step's two rows keyed at [`WIDE_WIDTH`], whose
+/// The step the fence test copies in: the first step's two rows keyed at [`WIDE_WIDTH`], whose
 /// block table is the whole of what makes the copy long. Nothing reads this one back, so what
 /// the rows hold does not matter.
 fn wide_step() -> (BatchLayout, DecodeBatch) {
@@ -402,7 +404,7 @@ fn dummy_run() -> (DummyRun, Staged) {
         // A padding row's token goes to its block's first KV slot.
         slot_mapping: [15 * 16, 3 * 16],
         blocks: [vec![15], vec![3]],
-        // No row samples and every row keeps the token the host uploaded.
+        // No row samples and every row keeps the token the host staged.
         row_slots: [-1, -1],
         gather_slots: [-1, -1],
     };
@@ -434,16 +436,16 @@ fn bound_from_env(name: &str, default: f64) -> f64 {
 
 #[test]
 #[ignore = "needs a device and the CUDA toolkit; run scripts/copy-in.sh"]
-fn what_each_staging_entry_uploads_is_what_the_device_block_holds() {
+fn what_each_staging_entry_copies_in_is_what_the_device_block_holds() {
     let mut rig = Rig::open();
     let (first_layout, first_batch, first) = first_step();
     let (second_layout, second_batch, second) = second_step();
     let (run, dummy) = dummy_run();
 
-    // Both steps are staged before either is uploaded, so both staging entries hold a step of
+    // Both steps are staged before either is copied in, so both staging entries hold a step of
     // their own when the first copy reads. It is the pair of readbacks below that says the two
     // copies did not reach one fixed pinned block: a `stage` naming block zero instead of the
-    // staging entry's leaves the second step in front of the first readback, and an `upload`
+    // staging entry's leaves the second step in front of the first readback, and a `copy_in`
     // naming it leaves the first step in front of the second, so either one reddens a `holds`.
     // Which of the two pinned blocks a staging entry names is left open: the blocks swapped
     // wherever a staging entry indexes one keep every comparison green, and so does a
@@ -478,8 +480,8 @@ fn what_each_staging_entry_uploads_is_what_the_device_block_holds() {
     arrays.row_slots.copy_from_slice(&second.row_slots);
     arrays.gather_slots.copy_from_slice(&second.gather_slots);
 
-    first.holds(&rig.upload(first_entry, first_batch.bucket));
-    second.holds(&rig.upload(second_entry, second_batch.bucket));
+    first.holds(&rig.copy_in(first_entry, first_batch.bucket));
+    second.holds(&rig.copy_in(second_entry, second_batch.bucket));
 
     // The first staging entry taken back through the non-blocking half of the protocol. Both
     // copies have been waited on, so what this shows is a real fence answering `cuEventQuery`
@@ -498,7 +500,7 @@ fn what_each_staging_entry_uploads_is_what_the_device_block_holds() {
     rig.inputs
         .stage_dummy(&entry, &run)
         .expect("the dummy run stages");
-    dummy.holds(&rig.upload(entry, run.bucket()));
+    dummy.holds(&rig.copy_in(entry, run.bucket()));
 }
 
 #[test]
@@ -516,11 +518,11 @@ fn a_staging_entry_does_not_come_free_while_the_copy_reading_it_is_in_flight() {
         rig.inputs
             .stage(&entry, &layout, &batch)
             .expect("the step stages");
-        let mut upload = rig
+        let mut copy_in = rig
             .inputs
-            .upload(entry, batch.bucket)
+            .copy_in(entry, batch.bucket)
             .expect("the bucket is one the inputs stage for");
-        rig.session.run(&mut upload).expect("the upload enqueues");
+        rig.session.run(&mut copy_in).expect("the copy-in enqueues");
         // Asked in the few microseconds it takes to reach here, with nothing waited on in
         // between: the copy has megabytes left to move, so a fence signaled behind it cannot be
         // passed. A staging entry handed back anyway is dropped, and the staging ring offers the
@@ -561,7 +563,7 @@ fn acquiring_a_staging_entry_stays_under_its_bound_while_the_host_runs_ahead() {
     let depth = DEPTH.get();
     let mut acquires: Vec<Duration> = Vec::with_capacity(ACQUIRES);
 
-    // Nothing waits on the device between one upload and the next, so once the staging ring
+    // Nothing waits on the device between one copy-in and the next, so once the staging ring
     // has come round every acquire asks a fence whose copy may still be in flight.
     for _ in 0..ACQUIRES {
         let started = Instant::now();
@@ -570,11 +572,11 @@ fn acquiring_a_staging_entry_stays_under_its_bound_while_the_host_runs_ahead() {
         rig.inputs
             .stage(&entry, &layout, &batch)
             .expect("the step stages");
-        let mut upload = rig
+        let mut copy_in = rig
             .inputs
-            .upload(entry, batch.bucket)
+            .copy_in(entry, batch.bucket)
             .expect("the bucket is one the inputs stage for");
-        rig.session.run(&mut upload).expect("the upload enqueues");
+        rig.session.run(&mut copy_in).expect("the copy-in enqueues");
     }
     rig.session.synchronize().expect("the last copies land");
 

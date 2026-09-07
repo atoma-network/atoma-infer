@@ -547,7 +547,7 @@ fn first_slot(block: BlockId, block_size: TokenCount) -> i64 {
     i64::try_from(block.index() * block_size.get()).expect("a block's first KV slot fits i64")
 }
 
-/// The gather slot of a row whose token the host's upload serves: negative, as the kernel reads
+/// The gather slot of a row whose token the host's copy-in serves: negative, as the kernel reads
 /// it.
 const KEEP_HOST_TOKEN: i32 = -1;
 

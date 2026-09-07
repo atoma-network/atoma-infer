@@ -5,14 +5,15 @@
 //! into tensor views, allocates the arena, the step's fixed buffers and the cuBLAS workspace,
 //! resolves every usable bucket's slot tables, and holds the step descriptor over them. A step is
 //! then six descriptors on the capture stream: the wait on candle's stream, the sampler's record
-//! upload, the upload of the bucket's packed block (the five inputs and the sampler's two
+//! upload, the copy-in of the bucket's packed block (the five inputs and the sampler's two
 //! per-step arrays in one copy, with the staging entry's fence signaled behind it), the gather
 //! that takes each decoding row's token from what the device sampled for its slot, the model
 //! step, and the sample, which leaves the tokens on the device and reads them back; then one host
 //! wait. Nothing is captured here. Going through the descriptor seam is what lets a later capture
-//! record the gather, the model step and the sample unchanged; the two uploads are the host's
+//! record the gather, the model step and the sample unchanged; the record upload and the
+//! copy-in are the host's
 //! copies of what changed and stay in front of the graph. A dummy run — a bucket's rows as
-//! padding rows over one block each — is staged and uploaded the same way, with no sampler
+//! padding rows over one block each — is staged and copied in the same way, with no sampler
 //! descriptor and no readback: what a capture check or a warmup runs when there is no live batch.
 //!
 //! The step's outputs reach the sampler and the readback as tensor views narrowed to the live
@@ -56,7 +57,7 @@ use crate::batch::BatchLayout;
 use crate::config::Dtype as ConfiguredDtype;
 use crate::decode::baked::{BakedAddress, BakedName};
 use crate::decode::batch::{Checked, DecodeBatch, DecodeBatchError, DecodeBuckets};
-use crate::decode::inputs::{DecodeInputs, InputsError, Upload, WaitEvent};
+use crate::decode::inputs::{CopyIn, DecodeInputs, InputsError, WaitEvent};
 use crate::decode::ring::{StagingDepth, StagingEntry};
 use crate::decode::staging::{DummyRun, StagingShape};
 use crate::device::sampler::{DeviceSampler, SamplerError};
@@ -286,7 +287,7 @@ impl DecodeStep {
     ) -> Result<Vec<BakedAddress>, DecodeStepError> {
         let mut addresses = candle_addresses(weights, kv_cache, stream)?;
         addresses.push(BakedAddress {
-            name: BakedName::InputBlock,
+            name: BakedName::DeviceBlock,
             address: address(self.inputs.device_block(), stream),
         });
         addresses.push(BakedAddress {
@@ -313,7 +314,7 @@ impl DecodeStep {
 
     /// Runs `batch`'s step through `session` and samples it: a staging entry acquired and the
     /// inputs and the sampler staged into its block, then the wait on candle's stream, the
-    /// sampler's record upload, the block's upload, the gather, the model step and the sample
+    /// sampler's record upload, the block's copy-in, the gather, the model step and the sample
     /// enqueued in that order, then the host wait on the sampled tokens. The batch states that
     /// every entry computes one token, so its rows are the token rows the gather covers. A rank
     /// with no sampler runs the same step without the sampler's descriptors and waits for it
@@ -334,7 +335,7 @@ impl DecodeStep {
         let arrays = self.inputs.stage(&entry, layout, &batch)?;
         let Some(sampler) = sampler else {
             session.run(&mut WaitEvent::new(&self.candle_done))?;
-            session.run(&mut self.upload(entry, batch.bucket)?)?;
+            session.run(&mut self.copy_in(entry, batch.bucket)?)?;
             session.run(&mut self.descriptor(batch.bucket)?)?;
             session.synchronize()?;
             return Ok(&[]);
@@ -343,7 +344,7 @@ impl DecodeStep {
         let views = self.inputs.bucket(batch.bucket)?;
         session.run(&mut WaitEvent::new(&self.candle_done))?;
         session.run(&mut sampler.upload_records()?)?;
-        session.run(&mut self.upload(entry, batch.bucket)?)?;
+        session.run(&mut self.copy_in(entry, batch.bucket)?)?;
         session.run(&mut sampler.gather(&views.inputs.token_ids, &views.gather_slots)?)?;
         session.run(&mut self.descriptor(batch.bucket)?)?;
         let logits = self.live_logits(&batch)?;
@@ -369,7 +370,7 @@ impl DecodeStep {
     ) -> Result<Logits<'a>, DecodeStepError> {
         let entry = self.stage(layout, &batch)?;
         session.run(&mut WaitEvent::new(&self.candle_done))?;
-        session.run(&mut self.upload(entry, batch.bucket)?)?;
+        session.run(&mut self.copy_in(entry, batch.bucket)?)?;
         session.run(&mut self.descriptor(batch.bucket)?)?;
         let logits = self.live_logits(&batch)?;
         session.run(&mut readback.copy(&logits)?)?;
@@ -403,7 +404,7 @@ impl DecodeStep {
 
     /// Acquires a staging entry, waiting until the copy that last read its block has finished,
     /// and writes `run`'s rows into it as padding rows, the sampler's two arrays naming no
-    /// request slot: a dummy run's staging, which [`DecodeStep::upload`] carries to the device
+    /// request slot: a dummy run's staging, which [`DecodeStep::copy_in`] carries to the device
     /// as it carries a step's.
     ///
     /// # Errors
@@ -422,15 +423,15 @@ impl DecodeStep {
     /// # Errors
     ///
     /// Returns [`DecodeStepError::Inputs`] when the inputs were not built for `bucket`.
-    pub fn upload(
+    pub fn copy_in(
         &self,
         entry: StagingEntry,
         bucket: BucketIdx,
-    ) -> Result<Upload<'_>, DecodeStepError> {
-        Ok(self.inputs.upload(entry, bucket)?)
+    ) -> Result<CopyIn<'_>, DecodeStepError> {
+        Ok(self.inputs.copy_in(entry, bucket)?)
     }
 
-    /// The descriptor that enqueues `bucket`'s model step over the uploaded inputs.
+    /// The descriptor that enqueues `bucket`'s model step over the inputs copied in.
     ///
     /// # Errors
     ///

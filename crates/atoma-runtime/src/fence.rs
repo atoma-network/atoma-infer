@@ -1,7 +1,7 @@
 //! The staging fence: one event, recorded on the capture stream behind the copy that reads a
 //! staging entry, and waited on by the host before it writes that staging entry again.
 //!
-//! An upload copies a pinned staging entry to the device asynchronously, so the host must not
+//! A copy-in reads a pinned staging entry to the device asynchronously, so the host must not
 //! write the staging entry again until that copy has read it. The fence is what says when: its
 //! [`FenceSignal`] is enqueued through the [`Descriptor`] seam behind the copy, and the host
 //! then asks the fence and nothing else — [`StagingFence::wait`] blocks until the signal has
@@ -26,7 +26,7 @@
 //!     let allocation = Allocation::new(&ctx)?;
 //!     let fence = StagingFence::new(ctx.cuda())?;
 //!     let replay = allocation.into_capture().into_replay();
-//!     // The upload that reads the staging entry goes here; the signal follows it on the stream.
+//!     // The copy that reads the staging entry goes here; the signal follows it on the stream.
 //!     replay.run(&mut fence.signal())?;
 //!     if !fence.try_wait()? {
 //!         fence.wait()?;

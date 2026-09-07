@@ -6,12 +6,12 @@
 //! five the model step reads and the two the sampler reads. The staging ring holds `depth`
 //! pinned blocks, one fence each, and the device holds one block, all of the largest bucket's
 //! packed length. Before a step the host acquires a staging entry and writes the bucket's arrays
-//! into the staging entry's pinned block at the bucket's offsets; the upload descriptor then
+//! into the staging entry's pinned block at the bucket's offsets; the copy-in descriptor then
 //! copies the bucket's packed length to the device block in one asynchronous copy and signals
 //! the staging entry's fence behind it. Every bucket reads the device block through views minted
 //! once, in the Allocation session phase, at the bucket's own offsets, so no address a step
 //! reads follows the batch. A dummy run is staged the same way, every row a padding row, and
-//! uploaded through the same staging entry and fence.
+//! copied in through the same staging entry and fence.
 //!
 //! Reuse of a pinned block is what the fence guards: the staging ring hands a staging entry out
 //! again only once the copy that last read its block has finished, and the blocks are freed only
@@ -44,7 +44,7 @@ use crate::decode::staging::{
 };
 use crate::pinned::Pinned;
 
-/// Why the inputs could not be allocated, staged or uploaded.
+/// Why the inputs could not be allocated, staged or copied in.
 #[derive(Debug, Error)]
 pub enum InputsError {
     /// A batch of a bucket the inputs were not built for: the engine and the executor disagree
@@ -271,7 +271,7 @@ impl DecodeInputs {
 
     /// The device block every bucket's views are minted over. The block's current address is
     /// read from here rather than from the copy the views were minted at, which is what the
-    /// debug check compares; its bytes are what a readback of an upload copies out.
+    /// debug check compares; its bytes are what a readback of a copy-in copies out.
     #[must_use]
     pub fn device_block(&self) -> &CudaSlice<u8> {
         &self.device
@@ -329,7 +329,7 @@ impl DecodeInputs {
     }
 
     /// Writes `run`'s rows into `entry`'s pinned block at the bucket's offsets as padding rows,
-    /// the sampler's two arrays naming no request slot: a dummy run's staging, uploaded as a
+    /// the sampler's two arrays naming no request slot: a dummy run's staging, copied in as a
     /// step's is.
     ///
     /// # Errors
@@ -344,25 +344,25 @@ impl DecodeInputs {
 
     /// The descriptor that copies `bucket`'s packed length from `entry`'s pinned block to the
     /// device block in one copy and signals the staging entry's fence behind it. Taking the
-    /// staging entry is the only way to upload, so every copy is fenced, a dummy run's as a
+    /// staging entry is the only way to copy in, so every copy is fenced, a dummy run's as a
     /// step's.
     ///
     /// # Errors
     ///
     /// Returns [`InputsError::UnknownBucket`] when the inputs were not built for `bucket`.
-    // The staging entry is taken by value on purpose: one acquire hands out one, and the upload
+    // The staging entry is taken by value on purpose: one acquire hands out one, and the copy-in
     // is its one use.
     #[allow(clippy::needless_pass_by_value)]
-    pub fn upload(
+    pub fn copy_in(
         &self,
         entry: StagingEntry,
         bucket: BucketIdx,
-    ) -> Result<Upload<'_>, InputsError> {
+    ) -> Result<CopyIn<'_>, InputsError> {
         // As in `stage`: the staging entry indexes a block.
         let source = self
             .packed
             .staged(self.blocks[entry.index()].as_slice(), bucket)?;
-        Ok(Upload {
+        Ok(CopyIn {
             source,
             destination: self.device_address,
             signal: self.ring.fence(&entry).signal(),
@@ -372,7 +372,7 @@ impl DecodeInputs {
 
 impl Drop for DecodeInputs {
     fn drop(&mut self) {
-        // An upload from any staging entry may still be reading its block; every fence is waited
+        // A copy-in from any staging entry may still be reading its block; every fence is waited
         // on before the blocks go. A failure here cannot be acted on beyond saying so.
         if let Err(error) = self.ring.wait_all() {
             warn!(%error, "a copy-in could not be waited on before its staging goes");
@@ -380,15 +380,15 @@ impl Drop for DecodeInputs {
     }
 }
 
-/// The upload of one bucket's packed block: one copy to the device block, then the signal of the
+/// The copy-in of one bucket's packed block: one copy to the device block, then the signal of the
 /// staging entry's fence.
-pub struct Upload<'a> {
+pub struct CopyIn<'a> {
     source: &'a [u8],
     destination: u64,
     signal: FenceSignal<'a>,
 }
 
-impl Descriptor for Upload<'_> {
+impl Descriptor for CopyIn<'_> {
     type Error = InputsError;
 
     unsafe fn enqueue(&mut self, stream: sys::CUstream) -> Result<(), InputsError> {
@@ -606,7 +606,7 @@ mod tests {
     }
 
     #[test]
-    fn the_upload_carries_the_buckets_packed_length_and_no_more() {
+    fn the_copy_in_carries_the_buckets_packed_length_and_no_more() {
         let packed = packed();
         let mut block = Block::sized(packed.block_bytes);
         let (_, one) = dispatched(vec![entry(1, 3, vec![9], &[10], true)]);
@@ -616,7 +616,7 @@ mod tests {
         ]);
 
         // Bucket 1 packs 1792 bytes and bucket 2 packs 2048: the 2560-byte block is never copied
-        // whole. A dummy run uploads by its bucket through the same call.
+        // whole. A dummy run copies in by its bucket through the same call.
         assert_eq!(
             packed.staged(block.bytes(), one.bucket).unwrap().len(),
             1792
