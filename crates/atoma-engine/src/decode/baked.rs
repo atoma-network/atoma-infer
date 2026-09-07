@@ -80,7 +80,7 @@ impl fmt::Display for BakedName {
     }
 }
 
-/// One baked address: what it is, and where it was read.
+/// One baked address: which memory it names, and the address that memory was at.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BakedAddress {
     pub name: BakedName,

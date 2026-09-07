@@ -28,10 +28,10 @@ use tracing::warn;
 
 use crate::pinned::Pinned;
 
-/// Why a step's logits could not be read back.
+/// Why what a step produced could not be read back.
 #[derive(Debug, Error)]
 pub enum ReadbackError {
-    /// The forward selected more rows than the readback was sized for.
+    /// The caller selected more rows than the readback was sized for.
     #[error("{rows} rows were selected but the readback holds {max_rows} at most")]
     TooManyRows { rows: usize, max_rows: usize },
     /// The source is not `rows` rows of the readback's width.

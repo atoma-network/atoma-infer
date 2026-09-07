@@ -104,7 +104,7 @@ pub enum StagingError {
 }
 
 /// How wide the staged arrays are, and the KV geometry a row is written against: the shape
-/// every bucket's inputs are carved from.
+/// every bucket's layout is sized from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StagingShape {
     /// Rows the arrays hold: the largest bucket.
