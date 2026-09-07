@@ -107,8 +107,8 @@ pub enum BakedError {
         read: BakedName,
     },
     /// Fewer or more addresses were read again than were baked.
-    #[error("{baked} addresses were baked and {current} were read again")]
-    Count { baked: usize, current: usize },
+    #[error("{baked} addresses were baked and {read} were read again")]
+    Count { baked: usize, read: usize },
 }
 
 /// Every address the step bakes, by name, in the order they were read.
@@ -127,20 +127,20 @@ impl BakedAddresses {
         }
     }
 
-    /// Compares `current`, the baked addresses read again in the order they were baked, against
+    /// Compares `reading`, the baked addresses read again in the order they were baked, against
     /// the baked ones.
     ///
     /// # Errors
     ///
     /// Returns [`BakedError`] for the first address that differs: moved, other memory at its
     /// position, or a reading that ends early or runs on.
-    pub fn check(&self, current: impl IntoIterator<Item = BakedAddress>) -> Result<(), BakedError> {
-        let mut current = current.into_iter();
+    pub fn check(&self, reading: impl IntoIterator<Item = BakedAddress>) -> Result<(), BakedError> {
+        let mut reading = reading.into_iter();
         for (position, baked) in self.addresses.iter().enumerate() {
-            let Some(read) = current.next() else {
+            let Some(read) = reading.next() else {
                 return Err(BakedError::Count {
                     baked: self.addresses.len(),
-                    current: position,
+                    read: position,
                 });
             };
             if read.name != baked.name {
@@ -158,24 +158,24 @@ impl BakedAddresses {
                 });
             }
         }
-        let past_the_baked = current.count();
+        let past_the_baked = reading.count();
         if past_the_baked > 0 {
             return Err(BakedError::Count {
                 baked: self.addresses.len(),
-                current: self.addresses.len() + past_the_baked,
+                read: self.addresses.len() + past_the_baked,
             });
         }
         Ok(())
     }
 
-    /// Checks `current` as [`BakedAddresses::check`] does and panics with the first address that
+    /// Checks `reading` as [`BakedAddresses::check`] does and panics with the first address that
     /// differs, naming it: what a debug build runs before each keyed step.
     ///
     /// # Panics
     ///
     /// Panics with the [`BakedError`] the check returns.
-    pub fn assert_unmoved(&self, current: impl IntoIterator<Item = BakedAddress>) {
-        if let Err(error) = self.check(current) {
+    pub fn assert_unmoved(&self, reading: impl IntoIterator<Item = BakedAddress>) {
+        if let Err(error) = self.check(reading) {
             panic!("{error}");
         }
     }
@@ -306,10 +306,7 @@ mod tests {
         // Three of the five, every one where it was baked.
         assert_eq!(
             baked.check(memory.addresses().take(3)),
-            Err(BakedError::Count {
-                baked: 5,
-                current: 3
-            })
+            Err(BakedError::Count { baked: 5, read: 3 })
         );
         // The five, then one more.
         let extra = BakedAddress {
@@ -318,17 +315,10 @@ mod tests {
         };
         assert_eq!(
             baked.check(memory.addresses().chain(iter::once(extra))),
-            Err(BakedError::Count {
-                baked: 5,
-                current: 6
-            })
+            Err(BakedError::Count { baked: 5, read: 6 })
         );
         assert_eq!(
-            BakedError::Count {
-                baked: 5,
-                current: 3
-            }
-            .to_string(),
+            BakedError::Count { baked: 5, read: 3 }.to_string(),
             "5 addresses were baked and 3 were read again"
         );
     }
