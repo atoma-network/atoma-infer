@@ -391,7 +391,7 @@ impl DecodeStep {
     ///
     /// Returns [`DecodeStepError::Inputs`] when the fence cannot be waited on or the layout
     /// cannot be staged.
-    pub fn stage(
+    fn stage(
         &mut self,
         layout: &BatchLayout,
         batch: &DecodeBatch,
