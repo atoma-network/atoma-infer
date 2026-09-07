@@ -4,7 +4,7 @@
 //! only through its offset lookup. This module is the one place that lookup becomes a tensor
 //! view: for each bucket, for each arena row, one `[tokens, width]` view per role, and the query,
 //! key and value column views of the fused row. Beside them sit the weights, the paged cache
-//! halves, the bucket's inputs where their upload lands, and the step's fixed buffers — the
+//! halves, the bucket's inputs where their copy-in lands, and the step's fixed buffers — the
 //! logits read after every step, the attention workspace — each checked against the model's
 //! dimensions when the table is built. What the step enqueues is then a walk over these tables:
 //! no address arithmetic, no lookup and no check inside a recording.
@@ -419,7 +419,7 @@ pub struct StepStatics {
     pub rotary: RotaryTensors,
 }
 
-/// One bucket's inputs: the views the host's upload lands in, each of exactly the bucket's rows.
+/// One bucket's inputs: the views the host's copy-in lands in, each of exactly the bucket's rows.
 /// Minted at Allocation by whoever places the rows, and taken as given here: checked against the
 /// plan, never cut from a larger buffer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

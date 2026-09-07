@@ -66,8 +66,8 @@ impl Lcg {
 }
 
 /// The device, its stream and the sampler under test, with a buffer for the logits, one for the
-/// token ids a step would upload, and one for each of the sampler's two per-step arrays where a
-/// decode step's upload would put them, each viewed at its full rows as a decode step's views
+/// token ids a step would copy in, and one for each of the sampler's two per-step arrays where a
+/// decode step's copy-in would put them, each viewed at its full rows as a decode step's views
 /// are minted.
 struct Rig {
     sampler: DeviceSampler,
@@ -143,7 +143,7 @@ impl Rig {
     }
 
     /// Stages `layout` where the caller says, covering its token rows with the gather, uploads
-    /// the two arrays to the rig's buffers as a decode step's block upload would, and enqueues
+    /// the two arrays to the rig's buffers as a decode step's block copy-in would, and enqueues
     /// the record upload.
     fn stage_as_decode_step(&mut self, layout: &BatchLayout, gather_rows: usize) {
         let mut row_slots = vec![0; MAX_ROWS.get()];

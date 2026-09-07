@@ -472,7 +472,7 @@ _Avoid_: offset, rng state, step count
 
 **Gather**:
 Taking a decoding row's input token from what the sampler last drew for its request slot, on the
-device, instead of from the host's upload. What removes the host from between a replay and the
+device, instead of from the host's copy-in. What removes the host from between a replay and the
 next step's input.
 _Avoid_: scatter, copy-back, token fetch
 

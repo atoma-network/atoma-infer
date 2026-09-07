@@ -109,10 +109,10 @@ const WIDE_COPY_BYTES: usize = 4 * 256 + ROWS * WIDE_WIDTH * 4 + 2 * 256;
 /// Staging entries the fence test runs at: one, so the staging entry a copy is reading is the
 /// staging entry the next query asks about.
 const FENCE_DEPTH: StagingDepth = StagingDepth::new(1).expect("nonzero");
-/// Uploads the fence test asks the fence after: a fixed count, so nothing spins, and eight of
-/// them, so a fence signaled ahead of its copy has to win eight races between the host reaching
-/// the query and the driver retiring the record, rather than one. Every one of the eight must
-/// read not passed: a copy this size cannot land inside the microseconds the host spends
+/// The copy-ins the fence test asks the fence after: a fixed count, so nothing spins, and eight
+/// of them, so a fence signaled ahead of its copy has to win eight races between the host
+/// reaching the query and the driver retiring the record, rather than one. Every one of the eight
+/// must read not passed: a copy this size cannot land inside the microseconds the host spends
 /// getting to the query, so a single passed query is the signal in the wrong place.
 const FENCE_QUERIES: usize = 8;
 
@@ -169,7 +169,7 @@ impl Rig {
         }
     }
 
-    /// Uploads `bucket`'s packed length from `entry`'s pinned block, waits for the copy, and
+    /// Copies `bucket`'s packed length in from `entry`'s pinned block, waits for the copy, and
     /// reads the whole device block back.
     fn copy_in(&self, entry: StagingEntry, bucket: BucketIdx) -> Vec<u8> {
         let mut copy_in = self

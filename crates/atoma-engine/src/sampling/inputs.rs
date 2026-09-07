@@ -1,7 +1,7 @@
 //! What the sampler puts on the device before a step, decided on the host from the batch layout
 //! and the mirror of what each request slot holds: the records to write, because their slots
 //! changed hands; the slot each selected row samples under; and the rows that take their token
-//! from the device rather than from the host's upload.
+//! from the device rather than from the host's copy-in.
 //!
 //! Which rows those are is the caller's to state, never this module's to derive: only a batch
 //! every entry of which computes one token has a token row per entry, and that is what the
@@ -46,7 +46,7 @@ pub struct SamplerInputs {
     pub row_slots: Vec<RequestSlot>,
     /// One entry per token row the caller said the gather covers: the slot whose last sampled
     /// token is the row's input, so the row takes it from the device; none for a row the host's
-    /// upload serves, which is one whose request no step has sampled for yet. Empty when the
+    /// copy-in serves, which is one whose request no step has sampled for yet. Empty when the
     /// caller covers none.
     pub gather: Vec<Option<RequestSlot>>,
 }
@@ -55,7 +55,7 @@ impl SamplerInputs {
     /// Decides `layout`'s step against `owners`, claiming every selected row's slot for its
     /// request and marking each as sampled for. `gather_rows` is how many leading token rows the
     /// gather covers, which only a caller holding a batch of one token per entry may state; a
-    /// caller that states none uploads every token.
+    /// caller that states none copies in every token.
     ///
     /// # Errors
     ///
@@ -164,7 +164,7 @@ mod tests {
     }
 
     #[test]
-    fn a_row_gathers_once_a_step_has_sampled_for_its_slot_whatever_the_host_uploads() {
+    fn a_row_gathers_once_a_step_has_sampled_for_its_slot_whatever_the_host_copies_in() {
         let mut owners = SlotOwners::new(8);
         SamplerInputs::for_step(&decodes(), &mut owners, Some(3)).unwrap();
         let mut layout = decodes();
