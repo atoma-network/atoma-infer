@@ -23,7 +23,7 @@
 //!
 //! | Module | Responsibility |
 //! |---|---|
-//! | [`context`] | Device context: construction, global event-tracking disable, loud no-driver failure |
+//! | [`context`] | Device context: construction, global event-tracking disable, free memory, loud no-driver failure |
 //! | [`stream`] | The dedicated capture stream, whose surface has no synchronize and no allocate |
 //! | [`fence`] | The staging fence: one event, signaled through the seam, waited on with or without blocking |
 //! | [`capture`] | Capture lifecycle, end-capture instantiate/discard, the captured graph |

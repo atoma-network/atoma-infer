@@ -16,7 +16,8 @@ use thiserror::Error;
 
 use crate::capture::CaptureState;
 
-/// Errors from the capture substrate, classified per driver status.
+/// Errors from the capture substrate: driver statuses the taxonomy names, this crate's own
+/// refusals, and a read named for its call where the taxonomy names nothing.
 #[derive(Debug, Error)]
 pub enum RuntimeError {
     #[error(
@@ -93,6 +94,14 @@ pub enum RuntimeError {
         "driver call failed ({0:?}): not a capture-classified status; consult the CUDA driver docs"
     )]
     Driver(CUresult),
+
+    #[error(
+        "free device memory could not be read ({0:?}): a status this taxonomy does not name, \
+         which may come from the cuMemGetInfo call, from the context bind cudarc runs ahead of \
+         it, or from an earlier operation whose status cudarc deferred onto this one; consult \
+         the CUDA driver docs, and restart the process if it repeats"
+    )]
+    FreeMemoryUnreadable(CUresult),
 
     #[error(
         "begin_capture while a capture is already active on this stream; end or discard the \
@@ -235,6 +244,18 @@ mod tests {
         let mid_capture = RuntimeError::SyncWhileCapturing(CaptureState::Active);
         assert!(mid_capture.to_string().contains("Active"));
         assert!(mid_capture.to_string().contains("discard"));
+    }
+
+    #[test]
+    fn a_failed_memory_reading_names_the_call_and_the_fix() {
+        let unreadable = RuntimeError::FreeMemoryUnreadable(CUresult::CUDA_ERROR_DEINITIALIZED);
+        assert!(unreadable.to_string().contains("cuMemGetInfo"));
+        assert!(unreadable.to_string().contains("CUDA_ERROR_DEINITIALIZED"));
+        assert!(unreadable.to_string().contains("restart the process"));
+        // The call is one of three sources the message may not close over: the bind cudarc runs
+        // ahead of it, and an earlier operation whose status it deferred, reach an operator here
+        // too.
+        assert!(unreadable.to_string().contains("deferred"));
     }
 
     #[test]
