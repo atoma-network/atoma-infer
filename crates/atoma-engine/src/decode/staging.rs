@@ -1,16 +1,18 @@
 //! A bucket's staged arrays packed into one block, and one step's inputs written into them at
 //! full width.
 //!
-//! A bucket stages seven arrays for a step: the five the model step reads (token ids, positions,
-//! key lengths, slot mapping, block table) and the two the sampler reads (row slots, gather
-//! slots). [`StagingLayout::packed`] lays them consecutively at the bucket's rows, each at
-//! [`SLOT_ALIGN`], so the bucket's staging is one block, [`StagingLayout::bytes`] long and
+//! A bucket stages eight arrays for a step: the five the model step reads (token ids, positions,
+//! key lengths, slot mapping, block table), the two the sampler reads (row slots, gather slots) and
+//! the live-row count, one `u32` holding the rows the step samples. [`StagingLayout::packed`] lays
+//! them consecutively, each at [`SLOT_ALIGN`]: the seven at the bucket's rows, then the count's one
+//! value. The bucket's staging is therefore one block, [`StagingLayout::bytes`] long and
 //! proportional to the batch rather than to the largest bucket, that one copy can carry.
-//! [`StagingLayout::carve`] carves the seven arrays out of such a block; [`stage`] writes the
-//! model's five from the batch layout, and [`stage_sampler`] the sampler's two from what the
-//! sampler decided for the step. [`stage_dummy`] writes all seven for a [`DummyRun`]: every row
-//! a padding row over one block, and the sampler's two naming no request slot, which is what a
-//! capture check or a warmup runs when there is no live batch.
+//! [`StagingLayout::carve`] carves the eight arrays out of such a block; [`stage`] writes the
+//! model's five from the batch layout, and [`stage_sampler`] the sampler's two and the count from
+//! what the sampler decided for the step. [`stage_dummy`] writes all eight for a [`DummyRun`]:
+//! every row a padding row over one block, the sampler's two naming no request slot and a
+//! live-row count of zero, which is what a capture check or a warmup runs when there is no live
+//! batch.
 //!
 //! The block table is staged at the full width a sequence can reach, never at the layout's
 //! batch-local width: the width is baked into the attention launch, so it cannot follow the
@@ -32,8 +34,8 @@ use crate::batch::BatchLayout;
 use crate::decode::batch::DecodeBatch;
 use crate::sampling::inputs::SamplerInputs;
 
-/// One of the seven arrays a bucket stages, in the order they are packed: the five inputs the
-/// model step reads, then the two the sampler reads.
+/// One of the eight arrays a bucket stages, in the order they are packed: the five inputs the
+/// model step reads, then the two the sampler reads and the live-row count.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StagedInput {
     TokenIds,
@@ -45,6 +47,8 @@ pub enum StagedInput {
     RowSlots,
     /// The slot each token row takes its token from, or negative to keep the host's.
     GatherSlots,
+    /// How many leading rows of the step sample: one value, whatever the bucket's rows.
+    LiveRows,
 }
 
 impl fmt::Display for StagedInput {
@@ -57,6 +61,7 @@ impl fmt::Display for StagedInput {
             StagedInput::BlockTable => "block table",
             StagedInput::RowSlots => "row slots",
             StagedInput::GatherSlots => "gather slots",
+            StagedInput::LiveRows => "live rows",
         })
     }
 }
@@ -79,6 +84,8 @@ pub enum StagingError {
     },
     #[error("{value} in the {input} does not fit the kernel's 32-bit input")]
     Overflow { input: StagedInput, value: i64 },
+    #[error("a step of {rows} rows does not fit the {input} array's 32-bit value")]
+    RowsPastWord { input: StagedInput, rows: usize },
     #[error("position {position} is past the rotary tables, which cover {max_position} positions")]
     PositionPastTables {
         position: usize,
@@ -107,7 +114,7 @@ pub enum StagingError {
 /// every bucket's layout is sized from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StagingShape {
-    /// Rows the arrays hold: the largest bucket.
+    /// Rows each array but the live-row count holds: the largest bucket.
     pub max_tokens: usize,
     /// Columns of the block table: the blocks a sequence of the model's maximum length holds,
     /// covering whole key tiles of the attention kernel.
@@ -128,8 +135,8 @@ pub struct StagingShape {
 /// writes one KV slot per block, the first, and no other cache.
 ///
 /// A dummy run samples no rows. No sampler descriptor runs over it, and it reads nothing back.
-/// It stages its sampler arrays, but they name no request slot, so its copy-in carries nothing
-/// stale.
+/// It stages its sampler arrays, but the two name no request slot and the live-row count is
+/// zero, so its copy-in carries nothing stale.
 #[derive(Debug)]
 pub struct DummyRun {
     bucket: BucketIdx,
@@ -173,12 +180,13 @@ const BASE_ALIGNMENT: usize = align_of::<i64>();
 /// multiple of it, which is what makes the carve's alignment check on the base sufficient.
 const _: () = assert!(ALIGNMENT.is_multiple_of(BASE_ALIGNMENT));
 
-/// Where each of one bucket's seven arrays sits in its packed block, and how long the block is.
+/// Where each of one bucket's eight arrays sits in its packed block, and how long the block is.
 ///
-/// The arrays are laid consecutively at the bucket's rows, in [`StagedInput`]'s order, each
-/// beginning at [`SLOT_ALIGN`]; the block's length is the last array's end, padded the same way.
-/// The layout is the bucket's alone: the largest bucket sizes nothing in it, so a smaller
-/// bucket's block is proportionally smaller.
+/// The arrays are laid consecutively in [`StagedInput`]'s order, each beginning at
+/// [`SLOT_ALIGN`]: the seven at the bucket's rows, then the live-row count's one value. The
+/// block's length is the last array's end, padded the same way. The layout is the bucket's
+/// alone: the largest bucket sizes nothing in it, so a smaller bucket's block is proportionally
+/// smaller.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StagingLayout {
     rows: usize,
@@ -190,6 +198,7 @@ pub struct StagingLayout {
     block_table: usize,
     row_slots: usize,
     gather_slots: usize,
+    live_rows: usize,
     bytes: usize,
 }
 
@@ -204,23 +213,24 @@ impl StagingLayout {
         let width = shape.block_table_width;
         let unaddressable = StagingError::BlockUnaddressable { rows, width };
         let mut end = 0;
-        let mut place = |row_bytes: usize| -> Result<usize, StagingError> {
+        let mut place = |values: usize, value_bytes: usize| -> Result<usize, StagingError> {
             let offset = end;
-            end = rows
-                .checked_mul(row_bytes)
+            end = values
+                .checked_mul(value_bytes)
                 .and_then(|bytes| bytes.checked_add(offset))
                 .and_then(|array_end| array_end.checked_next_multiple_of(ALIGNMENT))
                 .ok_or(unaddressable)?;
             Ok(offset)
         };
-        let token_ids = place(size_of::<u32>())?;
-        let positions = place(size_of::<i32>())?;
-        let seqlens_k = place(size_of::<i32>())?;
-        let slot_mapping = place(size_of::<i64>())?;
+        let token_ids = place(rows, size_of::<u32>())?;
+        let positions = place(rows, size_of::<i32>())?;
+        let seqlens_k = place(rows, size_of::<i32>())?;
+        let slot_mapping = place(rows, size_of::<i64>())?;
         let table_row_bytes = width.checked_mul(size_of::<i32>()).ok_or(unaddressable)?;
-        let block_table = place(table_row_bytes)?;
-        let row_slots = place(size_of::<i32>())?;
-        let gather_slots = place(size_of::<i32>())?;
+        let block_table = place(rows, table_row_bytes)?;
+        let row_slots = place(rows, size_of::<i32>())?;
+        let gather_slots = place(rows, size_of::<i32>())?;
+        let live_rows = place(1, size_of::<u32>())?;
         Ok(Self {
             rows,
             block_table_width: width,
@@ -231,11 +241,12 @@ impl StagingLayout {
             block_table,
             row_slots,
             gather_slots,
+            live_rows,
             bytes: end,
         })
     }
 
-    /// Rows every array holds: the bucket.
+    /// Rows each array but the live-row count holds: the bucket.
     #[must_use]
     pub fn rows(&self) -> usize {
         self.rows
@@ -252,6 +263,7 @@ impl StagingLayout {
             StagedInput::BlockTable => self.block_table,
             StagedInput::RowSlots => self.row_slots,
             StagedInput::GatherSlots => self.gather_slots,
+            StagedInput::LiveRows => self.live_rows,
         }
     }
 
@@ -261,7 +273,8 @@ impl StagingLayout {
         self.bytes
     }
 
-    /// Carves the seven arrays out of `block`, each at its offset and the bucket's rows long.
+    /// Carves the eight arrays out of `block`, each at its offset: the seven at the bucket's
+    /// rows, and the live-row count one value long.
     ///
     /// # Errors
     ///
@@ -297,6 +310,7 @@ impl StagingLayout {
             sampler: SamplerArrays {
                 row_slots: carve.take(self.row_slots, rows),
                 gather_slots: carve.take(self.gather_slots, rows),
+                live_rows: carve.take_one(self.live_rows),
             },
         })
     }
@@ -338,6 +352,12 @@ impl<'a> Carve<'a> {
         // exclusively borrowed for `'a`; every byte pattern is a `T`, as `Plain` says.
         unsafe { slice::from_raw_parts_mut(array.as_mut_ptr().cast::<T>(), len) }
     }
+
+    /// The one value of `T` at `offset` from the block's base: [`Carve::take`] of one value,
+    /// which hands out an array with that value in it.
+    fn take_one<T: Plain>(&mut self, offset: usize) -> &'a mut T {
+        &mut self.take::<T>(offset, 1)[0]
+    }
 }
 
 /// The model step's five arrays, each holding at least the bucket's rows.
@@ -355,17 +375,19 @@ pub struct StagingArrays<'a> {
     pub block_table: &'a mut [i32],
 }
 
-/// The sampler's two per-step arrays, one value per row of the bucket, as the kernels index
-/// them.
+/// The sampler's two per-step arrays, one value per row of the bucket as the kernels index
+/// them, and the word its live-row count is staged into.
 #[derive(Debug)]
 pub struct SamplerArrays<'a> {
     /// The slot each selected row samples under.
     pub row_slots: &'a mut [i32],
     /// The slot each token row takes its token from, or negative to keep the host's.
     pub gather_slots: &'a mut [i32],
+    /// How many leading rows of the step sample.
+    pub live_rows: &'a mut u32,
 }
 
-/// One bucket's seven arrays over its block: the model step's and the sampler's.
+/// One bucket's eight arrays over its block: the model step's and the sampler's.
 #[derive(Debug)]
 pub struct BucketArrays<'a> {
     pub inputs: StagingArrays<'a>,
@@ -444,12 +466,13 @@ pub fn stage(
 
 /// Writes `inputs`' two arrays into the leading rows of `arrays`, as the kernels index them: the
 /// slot of every selected row, and for every covered token row the slot it takes its token from,
-/// or a negative value where the host's token stands.
+/// or a negative value where the host's token stands. The row slots past the rows that sample
+/// name no request slot, and the live-row count holds how many rows do.
 ///
 /// # Errors
 ///
-/// Returns [`StagingError`] when an array is shorter than the rows it stages, or a slot does not
-/// fit the kernel's index.
+/// Returns [`StagingError`] when an array is shorter than the rows it stages, a slot does not
+/// fit the kernel's index, or the step samples more rows than the live-row count's word holds.
 pub fn stage_sampler(
     inputs: &SamplerInputs,
     arrays: SamplerArrays<'_>,
@@ -457,20 +480,24 @@ pub fn stage_sampler(
     let SamplerArrays {
         row_slots,
         gather_slots,
+        live_rows,
     } = arrays;
-    holds(
-        StagedInput::RowSlots,
-        row_slots.len(),
-        inputs.row_slots.len(),
-    )?;
+    let rows = inputs.row_slots.len();
+    holds(StagedInput::RowSlots, row_slots.len(), rows)?;
     holds(
         StagedInput::GatherSlots,
         gather_slots.len(),
         inputs.gather.len(),
     )?;
+    let live = u32::try_from(rows).map_err(|_| StagingError::RowsPastWord {
+        input: StagedInput::LiveRows,
+        rows,
+    })?;
     for (staged, slot) in row_slots.iter_mut().zip(&inputs.row_slots) {
         *staged = slot_index(StagedInput::RowSlots, *slot)?;
     }
+    row_slots[rows..].fill(NO_REQUEST_SLOT);
+    *live_rows = live;
     for (staged, slot) in gather_slots.iter_mut().zip(&inputs.gather) {
         *staged = match slot {
             Some(slot) => slot_index(StagedInput::GatherSlots, *slot)?,
@@ -484,7 +511,7 @@ pub fn stage_sampler(
 /// position 0 with a key length of one, the row's block's first KV slot as its slot, and the
 /// block alone in its block table row, zero past it. The sampler's two arrays name no request
 /// slot for any row: the gather keeps the host's padding token, as it does for a live step's
-/// padding rows, and nothing samples.
+/// padding rows, and nothing samples, which the live-row count of zero says too.
 ///
 /// # Errors
 ///
@@ -506,10 +533,12 @@ pub fn stage_dummy(
                 slot_mapping,
                 block_table,
             },
-        sampler: SamplerArrays {
-            row_slots,
-            gather_slots,
-        },
+        sampler:
+            SamplerArrays {
+                row_slots,
+                gather_slots,
+                live_rows,
+            },
     } = arrays;
     fits(StagedInput::TokenIds, token_ids.len(), rows, rows)?;
     fits(StagedInput::Positions, positions.len(), rows, rows)?;
@@ -539,6 +568,7 @@ pub fn stage_dummy(
     }
     row_slots[..rows].fill(NO_REQUEST_SLOT);
     gather_slots[..rows].fill(KEEP_HOST_TOKEN);
+    *live_rows = 0;
     Ok(())
 }
 
@@ -643,7 +673,7 @@ mod tests {
     }
 
     #[test]
-    fn a_buckets_seven_arrays_are_packed_in_order_each_at_a_256_byte_boundary() {
+    fn a_buckets_eight_arrays_are_packed_in_order_each_at_a_256_byte_boundary() {
         let wide = StagingShape {
             max_tokens: 128,
             block_table_width: 64,
@@ -661,13 +691,17 @@ mod tests {
         assert_eq!(staging.offset(StagedInput::BlockTable), 2560);
         assert_eq!(staging.offset(StagedInput::RowSlots), 28160);
         assert_eq!(staging.offset(StagedInput::GatherSlots), 28672);
-        assert_eq!(staging.bytes(), 29184);
+        // The live-row count is one value however many rows the bucket has, so it takes one
+        // alignment at every bucket.
+        assert_eq!(staging.offset(StagedInput::LiveRows), 29184);
+        assert_eq!(staging.bytes(), 29440);
 
         // One row of anything is under 256 bytes, so every array takes one alignment.
         let one = StagingLayout::packed(shape(), 1).unwrap();
         assert_eq!(one.offset(StagedInput::BlockTable), 1024);
         assert_eq!(one.offset(StagedInput::GatherSlots), 1536);
-        assert_eq!(one.bytes(), 1792);
+        assert_eq!(one.offset(StagedInput::LiveRows), 1792);
+        assert_eq!(one.bytes(), 2048);
     }
 
     #[test]
@@ -682,11 +716,12 @@ mod tests {
             ..wide
         };
 
-        // Bucket 8: 32-byte rows pad to 256 each, the 64-wide table is 8 * 256 = 2048 bytes.
-        assert_eq!(StagingLayout::packed(wide, 8).unwrap().bytes(), 3584);
+        // Bucket 8: 32-byte rows pad to 256 each, the 64-wide table is 8 * 256 = 2048 bytes,
+        // and the live-row count's word takes an alignment of its own.
+        assert_eq!(StagingLayout::packed(wide, 8).unwrap().bytes(), 3840);
         // Bucket 32: 128-byte rows pad to 256, the slot mapping's 256 fit exactly, the table is
         // 32 * 256 = 8192.
-        assert_eq!(StagingLayout::packed(wide, 32).unwrap().bytes(), 9728);
+        assert_eq!(StagingLayout::packed(wide, 32).unwrap().bytes(), 9984);
         assert_eq!(
             StagingLayout::packed(widest, 8).unwrap(),
             StagingLayout::packed(wide, 8).unwrap(),
@@ -715,10 +750,12 @@ mod tests {
         inputs.block_table[4 * WIDTH - 1] = 0x5555_5555;
         sampler.row_slots[3] = 0x6666_6666;
         sampler.gather_slots[3] = 0x7777_7777;
+        *sampler.live_rows = 0x8888_8888;
 
         // Each array's last value lands at its offset plus three rows (31 for the table), at its
-        // element's width; every other byte of the block is as the storage set it.
-        let mut expected = vec![0x5A; 1792];
+        // element's width, and the live-row count is one value at its own offset; every other
+        // byte of the block is as the storage set it.
+        let mut expected = vec![0x5A; 2048];
         expected[12..16].fill(0x11);
         expected[256 + 12..256 + 16].fill(0x22);
         expected[512 + 12..512 + 16].fill(0x33);
@@ -726,6 +763,7 @@ mod tests {
         expected[1024 + 124..1024 + 128].fill(0x55);
         expected[1280 + 12..1280 + 16].fill(0x66);
         expected[1536 + 12..1536 + 16].fill(0x77);
+        expected[1792..1796].fill(0x88);
         assert_eq!(block.bytes(), expected);
     }
 
@@ -748,15 +786,15 @@ mod tests {
         let mut block = Block::sized(staging.bytes());
 
         assert_eq!(
-            staging.carve(&mut block.bytes()[..1791]).unwrap_err(),
+            staging.carve(&mut block.bytes()[..2047]).unwrap_err(),
             StagingError::BlockTooShort {
-                len: 1791,
+                len: 2047,
                 rows: 4,
-                needed: 1792
+                needed: 2048
             }
         );
         assert!(
-            staging.carve(&mut block.bytes()[..1792]).is_ok(),
+            staging.carve(&mut block.bytes()[..2048]).is_ok(),
             "a block of exactly the layout's length carves"
         );
     }
@@ -948,6 +986,7 @@ mod tests {
             sampler.gather_slots, [-1; 4],
             "every row keeps the host's padding token"
         );
+        assert_eq!(*sampler.live_rows, 0, "no row samples");
     }
 
     #[test]
@@ -997,13 +1036,19 @@ mod tests {
             dummies.sampler.gather_slots[1..],
             "a padding row keeps the host's token on both sides"
         );
+        assert_eq!(
+            live.sampler.row_slots[1..],
+            dummies.sampler.row_slots[1..],
+            "a padding row names no request slot on either side"
+        );
         assert_ne!(
             live.inputs.token_ids[0], dummies.inputs.token_ids[0],
             "the live row is a decode, the dummy run's row 0 a padding row"
         );
         assert_eq!(
-            dummies.sampler.row_slots, [-1; 4],
-            "the live step leaves a padding row's row slot; a dummy run names no request slot"
+            (*live.sampler.live_rows, *dummies.sampler.live_rows),
+            (1, 0),
+            "the live step's one row samples; the dummy run's rows do not"
         );
     }
 
@@ -1078,7 +1123,7 @@ mod tests {
     }
 
     #[test]
-    fn the_samplers_two_arrays_are_written_as_the_kernels_index_them_and_rows_past_the_step_kept() {
+    fn the_samplers_two_arrays_are_written_as_the_kernels_index_them_and_the_rows_past_named() {
         let staging = StagingLayout::packed(shape(), MAX_TOKENS).unwrap();
         let mut block = Block::sized(staging.bytes());
         let BucketArrays { sampler, .. } = staging.carve(block.bytes()).unwrap();
@@ -1089,7 +1134,11 @@ mod tests {
         stage_sampler(&sampler_inputs(&[3, 5], &[Some(3), None, Some(5)]), sampler).unwrap();
 
         let BucketArrays { sampler, .. } = staging.carve(block.bytes()).unwrap();
-        assert_eq!(sampler.row_slots, [3, 5, 7, 7], "one slot per selected row");
+        assert_eq!(
+            sampler.row_slots,
+            [3, 5, -1, -1],
+            "one slot per selected row, and no request slot past them"
+        );
         assert_eq!(
             sampler.gather_slots,
             [3, -1, 5, 7],
@@ -1098,16 +1147,55 @@ mod tests {
     }
 
     #[test]
+    fn the_live_row_count_staged_is_the_rows_the_step_samples() {
+        let staging = StagingLayout::packed(shape(), MAX_TOKENS).unwrap();
+        let mut block = Block::sized(staging.bytes());
+
+        // Two rows sample where four gather: a padded step's dummy rows take their token from
+        // the device without sampling.
+        let BucketArrays { sampler, .. } = staging.carve(block.bytes()).unwrap();
+        let two_of_four = sampler_inputs(&[3, 5], &[Some(3), Some(5), None, None]);
+        stage_sampler(&two_of_four, sampler).unwrap();
+        let BucketArrays { sampler, .. } = staging.carve(block.bytes()).unwrap();
+        assert_eq!(*sampler.live_rows, 2, "two of the four rows sample");
+
+        // The same block staged again for a step of one: neither the count nor a row slot past
+        // it is left as the wider step wrote it.
+        let BucketArrays { sampler, .. } = staging.carve(block.bytes()).unwrap();
+        stage_sampler(&sampler_inputs(&[9], &[None]), sampler).unwrap();
+        let BucketArrays { sampler, .. } = staging.carve(block.bytes()).unwrap();
+        assert_eq!(*sampler.live_rows, 1, "one selected row samples");
+        assert_eq!(sampler.row_slots, [9, -1, -1, -1]);
+    }
+
+    #[test]
+    fn a_dummy_run_leaves_a_live_row_count_of_zero_where_a_step_staged_one() {
+        let staging = StagingLayout::packed(shape(), MAX_TOKENS).unwrap();
+        let mut block = Block::sized(staging.bytes());
+        let BucketArrays { sampler, .. } = staging.carve(block.bytes()).unwrap();
+        stage_sampler(&sampler_inputs(&[3, 5, 6, 8], &[None; 4]), sampler).unwrap();
+
+        let arrays = staging.carve(block.bytes()).unwrap();
+        stage_dummy(&dummy_run([10, 20, 21, 22]), shape(), arrays).unwrap();
+
+        let BucketArrays { sampler, .. } = staging.carve(block.bytes()).unwrap();
+        assert_eq!(*sampler.live_rows, 0, "a dummy run samples no row");
+    }
+
+    #[test]
     fn an_eager_step_that_gathers_nothing_needs_no_gather_array() {
+        let mut live = 0;
         let mut row_slots = [7; 2];
         let arrays = SamplerArrays {
             row_slots: &mut row_slots,
             gather_slots: &mut [],
+            live_rows: &mut live,
         };
 
         stage_sampler(&sampler_inputs(&[4, 2], &[]), arrays).unwrap();
 
         assert_eq!(row_slots, [4, 2]);
+        assert_eq!(live, 2, "both rows sample");
     }
 
     #[test]
@@ -1122,6 +1210,7 @@ mod tests {
                 SamplerArrays {
                     row_slots: &mut short,
                     gather_slots: &mut long,
+                    live_rows: &mut 0,
                 }
             )
             .unwrap_err(),
@@ -1137,6 +1226,7 @@ mod tests {
                 SamplerArrays {
                     row_slots: &mut long,
                     gather_slots: &mut short,
+                    live_rows: &mut 0,
                 }
             )
             .unwrap_err(),
@@ -1153,6 +1243,7 @@ mod tests {
                 SamplerArrays {
                     row_slots: &mut exact,
                     gather_slots: &mut [0; 3],
+                    live_rows: &mut 0,
                 }
             )
             .is_ok(),
@@ -1172,6 +1263,7 @@ mod tests {
                 SamplerArrays {
                     row_slots: &mut row_slots,
                     gather_slots: &mut gather_slots,
+                    live_rows: &mut 0,
                 }
             )
             .unwrap_err(),
@@ -1186,6 +1278,7 @@ mod tests {
                 SamplerArrays {
                     row_slots: &mut row_slots,
                     gather_slots: &mut gather_slots,
+                    live_rows: &mut 0,
                 }
             )
             .unwrap_err(),

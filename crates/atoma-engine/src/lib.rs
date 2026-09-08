@@ -7,11 +7,11 @@
 //! settled.
 //!
 //! For a keyed step, the arrays the host writes anew every step go up in one copy: the model's
-//! five inputs and the sampler's two per-step arrays, packed into one block, written into a
-//! staging entry the staging ring hands out, and copied to the device in front of the step's
-//! work. The staging entry's fence, signaled behind that copy, is what says when the host may
-//! write the staging entry again, and the staging ring's depth bounds how many of those copies
-//! can be in flight at once.
+//! five inputs, the sampler's two per-step arrays and its live-row count, packed into one block,
+//! written into a staging entry the staging ring hands out, and copied to the device in front of
+//! the step's work. The staging entry's fence, signaled behind that copy, is what says when the
+//! host may write the staging entry again, and the staging ring's depth bounds how many of those
+//! copies can be in flight at once.
 
 pub mod batch;
 pub mod config;

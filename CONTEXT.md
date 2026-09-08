@@ -397,14 +397,14 @@ _Avoid_: model output, step output, sampler output
 
 **Copy-in**:
 The one copy per step that carries the host's per-step arrays to the device: the model's five
-inputs and the sampler's two, packed into one block and copied from a staging entry into the
-device block in front of the step. Named against the readback, which is the one copy the
-other way. A slot's sampling record is not in it — records are written when a slot changes hands,
-not per step, and go up as sparse copies of their own in front of it.
+inputs, the sampler's two and its live-row count, packed into one block and copied from a staging
+entry into the device block in front of the step. Named against the readback, which is the one
+copy the other way. A slot's sampling record is not in it — records are written when a slot
+changes hands, not per step, and go up as sparse copies of their own in front of it.
 _Avoid_: input upload (for this in the engine), host-to-device transfer, staging copy
 
 **Packed block**:
-One bucket's seven staged arrays laid consecutively, each at the alignment CUDA guarantees for
+One bucket's eight staged arrays laid consecutively, each at the alignment CUDA guarantees for
 a device allocation: what one copy-in carries, at a length that follows the bucket rather than the
 largest one. A staging entry's pinned block and the one device block are each allocated at the
 largest bucket's packed length, and every bucket reads the device block through views minted at
@@ -448,7 +448,8 @@ A bucket's rows filled as padding rows over one KV block each, staged and copied
 same acquire and fence as a live step and then run with no sampler descriptor and nothing read
 back: what a capture check or a warmup runs when there is no live batch. Every row is what a
 dummy's row is in a live step, so the only cache it writes is each block's first KV slot. Its
-sampler arrays are written too, naming no request slot, so its copy-in carries nothing stale.
+sampler arrays are written too — the two naming no request slot and the live-row count zero — so
+its copy-in carries nothing stale.
 _Avoid_: padding batch, fake batch, dummy step
 
 **Readback**:

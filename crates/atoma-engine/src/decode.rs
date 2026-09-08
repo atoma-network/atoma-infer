@@ -10,7 +10,7 @@
 //! |---|---|
 //! | [`batch`] | A keyed batch held to its bucket, and the buckets the decode step serves |
 //! | [`baked`] | Every address the step bakes, by name, and the check that none of them moved |
-//! | [`staging`] | A bucket's seven arrays packed into one block, and what a step or a dummy run writes into them |
+//! | [`staging`] | A bucket's eight arrays packed into one block, and what a step or a dummy run writes into them |
 //! | [`inputs`] | The staging ring's blocks, the device block, each bucket's views; the copy-in and wait descriptors |
 //! | [`ring`] | The staging ring: a fence per staging entry and a cursor; `acquire` waits, `try_acquire` asks |
 

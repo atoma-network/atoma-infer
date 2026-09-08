@@ -157,6 +157,9 @@ impl Rig {
                 SamplerArrays {
                     row_slots: &mut row_slots,
                     gather_slots: &mut gather_slots,
+                    // A decode step's block holds its live-row count beside the two arrays;
+                    // nothing here reads it, so it is staged into a word of its own.
+                    live_rows: &mut 0,
                 },
             )
             .expect("the layout stages");
@@ -658,6 +661,7 @@ fn the_eager_upload_refuses_a_step_staged_where_the_caller_says() {
             SamplerArrays {
                 row_slots: &mut row_slots,
                 gather_slots: &mut gather_slots,
+                live_rows: &mut 0,
             },
         )
         .expect("the layout stages");

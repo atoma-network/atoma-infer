@@ -2,16 +2,16 @@
 //! device block every bucket's views are minted over, and the descriptors that carry a step from
 //! one to the other.
 //!
-//! A bucket's seven arrays are packed into one block, as [`StagingLayout`] lays them out: the
-//! five the model step reads and the two the sampler reads. The staging ring holds `depth`
-//! pinned blocks, one fence each, and the device holds one block, all of the largest bucket's
-//! packed length. Before a step the host acquires a staging entry and writes the bucket's arrays
-//! into the staging entry's pinned block at the bucket's offsets; the copy-in descriptor then
-//! copies the bucket's packed length to the device block in one asynchronous copy and signals
+//! A bucket's eight arrays are packed into one block, as [`StagingLayout`] lays them out: the five
+//! the model step reads, the two the sampler reads and its live-row count. The staging ring holds
+//! `depth` pinned blocks, one fence each, and the device holds one block, all of the largest
+//! bucket's packed length. Before a step the host acquires a staging entry and writes the bucket's
+//! arrays into the staging entry's pinned block at the bucket's offsets; the copy-in descriptor
+//! then copies the bucket's packed length to the device block in one asynchronous copy and signals
 //! the staging entry's fence behind it. Every bucket reads the device block through views minted
-//! once, in the Allocation session phase, at the bucket's own offsets, so no address a step
-//! reads follows the batch. A dummy run is staged the same way, every row a padding row, and
-//! copied in through the same staging entry and fence.
+//! once, in the Allocation session phase, at the bucket's own offsets, so no address a step reads
+//! follows the batch. A dummy run is staged the same way, every row a padding row, and copied in
+//! through the same staging entry and fence.
 //!
 //! Reuse of a pinned block is what the fence guards: the staging ring hands a staging entry out
 //! again only once the copy that last read its block has finished, and the blocks are freed only
@@ -74,7 +74,7 @@ pub enum InputsError {
 }
 
 /// One bucket's views over the device block, each at the bucket's packed offset: the model
-/// step's five inputs, and the sampler's two per-step arrays.
+/// step's five inputs, and the sampler's two per-step arrays and its live-row count.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BucketViews {
     /// The five the model step reads.
@@ -86,12 +86,14 @@ pub struct BucketViews {
     /// host's. The gather reads it whole, at the bucket's rows, which is not always the count
     /// `row_slots` is narrowed to.
     pub gather_slots: Tensor,
+    /// u32 `[1]`: how many leading rows of the step sample, one value whatever the bucket's rows.
+    pub live_rows: Tensor,
 }
 
 impl BucketViews {
     /// The views of the bucket `packed` lays out, over the block at `base`: each array's view
-    /// is minted by `mint` at the array's offset, with the array's dtype at the bucket's rows and
-    /// the block table `width` wide.
+    /// is minted by `mint` at the array's offset, with the array's dtype at the bucket's rows,
+    /// the block table `width` wide and the live-row count one value.
     fn minted(
         base: u64,
         packed: &StagingLayout,
@@ -115,6 +117,7 @@ impl BucketViews {
             },
             row_slots: view(StagedInput::RowSlots, &[rows], Dtype::I32)?,
             gather_slots: view(StagedInput::GatherSlots, &[rows], Dtype::I32)?,
+            live_rows: view(StagedInput::LiveRows, &[1], Dtype::U32)?,
         })
     }
 }
@@ -156,7 +159,8 @@ impl PackedBuckets {
     }
 
     /// Writes `batch`'s inputs from `layout` into `block` at its bucket's offsets, and hands
-    /// back the sampler's two arrays, carved from the same block, for the sampler to write.
+    /// back the sampler's two arrays and its live-row count, carved from the same block, for the
+    /// sampler to write.
     fn stage<'a>(
         &self,
         block: &'a mut [u8],
@@ -169,7 +173,8 @@ impl PackedBuckets {
     }
 
     /// Writes `run`'s rows into `block` at its bucket's offsets as padding rows, the sampler's
-    /// two arrays included, once the run names one block per row of the bucket.
+    /// two arrays and its live-row count included, once the run names one block per row of the
+    /// bucket.
     fn stage_dummy(&self, block: &mut [u8], run: &DummyRun) -> Result<(), InputsError> {
         let packed = self.layout(run.bucket())?;
         if run.rows() != packed.rows() {
@@ -314,7 +319,8 @@ impl DecodeInputs {
     }
 
     /// Writes `batch`'s inputs from `layout` into `entry`'s pinned block at the bucket's offsets,
-    /// and hands back the sampler's two arrays in the same block for the sampler to write.
+    /// and hands back the sampler's two arrays and its live-row count in the same block for the
+    /// sampler to write.
     ///
     /// # Errors
     ///
@@ -332,8 +338,8 @@ impl DecodeInputs {
     }
 
     /// Writes `run`'s rows into `entry`'s pinned block at the bucket's offsets as padding rows,
-    /// the sampler's two arrays naming no request slot: a dummy run's staging, copied in as a
-    /// step's is.
+    /// the sampler's two arrays naming no request slot and its live-row count zero: a dummy
+    /// run's staging, copied in as a step's is.
     ///
     /// # Errors
     ///
@@ -515,7 +521,8 @@ mod tests {
         let at = |view: Tensor| (view.address() - BASE, view.dims().to_vec(), view.dtype());
 
         // Bucket 2 at width 64: each 8-byte array pads to 256, the 16-byte slot mapping too, the
-        // block table's 2 * 64 * 4 = 512 bytes end at 1536, and the sampler's two follow.
+        // block table's 2 * 64 * 4 = 512 bytes end at 1536, the sampler's two follow, then its
+        // live-row count.
         let two = &views[1];
         assert_eq!(at(two.inputs.token_ids), (0, vec![2], Dtype::U32));
         assert_eq!(at(two.inputs.positions), (256, vec![2], Dtype::I32));
@@ -524,6 +531,7 @@ mod tests {
         assert_eq!(at(two.inputs.block_table), (1024, vec![2, 64], Dtype::I32));
         assert_eq!(at(two.row_slots), (1536, vec![2], Dtype::I32));
         assert_eq!(at(two.gather_slots), (1792, vec![2], Dtype::I32));
+        assert_eq!(at(two.live_rows), (2048, vec![1], Dtype::U32));
 
         // Bucket 4's block table is 1024 bytes, so its sampler arrays sit 512 further on; bucket
         // 1's is 256, so they sit 256 nearer.
@@ -533,20 +541,22 @@ mod tests {
         );
         assert_eq!(at(views[2].row_slots), (2048, vec![4], Dtype::I32));
         assert_eq!(at(views[2].gather_slots), (2304, vec![4], Dtype::I32));
+        assert_eq!(at(views[2].live_rows), (2560, vec![1], Dtype::U32));
         assert_eq!(
             at(views[0].inputs.block_table),
             (1024, vec![1, 64], Dtype::I32)
         );
         assert_eq!(at(views[0].row_slots), (1280, vec![1], Dtype::I32));
         assert_eq!(at(views[0].gather_slots), (1536, vec![1], Dtype::I32));
+        assert_eq!(at(views[0].live_rows), (1792, vec![1], Dtype::U32));
     }
 
     #[test]
     fn the_device_block_is_the_largest_buckets_packed_length() {
         // Bucket 4 at width 64: four 256-byte arrays, a 1024-byte block table, then two more
-        // 256-byte arrays; buckets 1 and 2 pack 1792 and 2048, so the block is neither a sum nor
-        // the first bucket's.
-        assert_eq!(packed().block_bytes, 2560);
+        // 256-byte arrays and the live-row count's; buckets 1 and 2 pack 2048 and 2304, so the
+        // block is neither a sum nor the first bucket's.
+        assert_eq!(packed().block_bytes, 2816);
     }
 
     #[test]
@@ -568,11 +578,12 @@ mod tests {
         );
         sampler.row_slots[1] = 0x6666_6666;
         sampler.gather_slots[0] = 0x7777_7777;
+        *sampler.live_rows = 0x8888_8888;
 
         // Bucket 2's offsets: token ids at 0, positions at 256, key lengths at 512, slot
         // mapping at 768, block table rows at 1024 and 1280, row slots at 1536, gather slots at
-        // 1792; a key length is the context plus this token, a slot is the block times the
-        // block size plus the offset.
+        // 1792, the live-row count at 2048; a key length is the context plus this token, a slot
+        // is the block times the block size plus the offset.
         let bytes = block.bytes();
         assert_eq!(
             bytes[..8],
@@ -603,8 +614,9 @@ mod tests {
         );
         assert_eq!(bytes[1540..1544], [0x66; 4]);
         assert_eq!(bytes[1792..1796], [0x77; 4]);
+        assert_eq!(bytes[2048..2052], [0x88; 4]);
         assert!(
-            bytes[2048..2560].iter().all(|&byte| byte == 0x5A),
+            bytes[2304..2816].iter().all(|&byte| byte == 0x5A),
             "past bucket 2's packed length the block is as the storage set it"
         );
     }
@@ -619,22 +631,22 @@ mod tests {
             entry(2, 3, vec![9], &[20], true),
         ]);
 
-        // Bucket 1 packs 1792 bytes and bucket 2 packs 2048: the 2560-byte block is never copied
+        // Bucket 1 packs 2048 bytes and bucket 2 packs 2304: the 2816-byte block is never copied
         // whole. A dummy run copies in by its bucket through the same call.
         assert_eq!(
             packed.staged(block.bytes(), one.bucket).unwrap().len(),
-            1792
+            2048
         );
         assert_eq!(
             packed.staged(block.bytes(), two.bucket).unwrap().len(),
-            2048
+            2304
         );
         assert!(matches!(
-            packed.staged(&block.bytes()[..2047], two.bucket),
+            packed.staged(&block.bytes()[..2303], two.bucket),
             Err(InputsError::Staging(StagingError::BlockTooShort {
-                len: 2047,
+                len: 2303,
                 rows: 2,
-                needed: 2048
+                needed: 2304
             }))
         ));
     }
@@ -681,7 +693,7 @@ mod tests {
 
         // Bucket 2's offsets, as above; four-token blocks, so block 15's first slot is 60 and
         // block 3's is 12; each table row is its block then zero to the width; the sampler's
-        // two arrays name no request slot.
+        // two arrays name no request slot and its live-row count is zero.
         let bytes = block.bytes();
         let twice = |value: [u8; 4]| [value, value].concat();
         assert_eq!(bytes[..8], twice(PADDING_TOKEN.to_ne_bytes()));
@@ -697,8 +709,9 @@ mod tests {
         assert!(bytes[1284..1536].iter().all(|&byte| byte == 0));
         assert_eq!(bytes[1536..1544], twice((-1i32).to_ne_bytes()));
         assert_eq!(bytes[1792..1800], twice((-1i32).to_ne_bytes()));
+        assert_eq!(bytes[2048..2052], 0u32.to_ne_bytes());
         assert!(
-            bytes[2048..2560].iter().all(|&byte| byte == 0x5A),
+            bytes[2304..2816].iter().all(|&byte| byte == 0x5A),
             "past bucket 2's packed length the block is as the storage set it"
         );
     }
@@ -724,7 +737,7 @@ mod tests {
             );
         }
         assert!(
-            block.bytes()[..2048].iter().all(|&byte| byte == 0x5A),
+            block.bytes()[..2304].iter().all(|&byte| byte == 0x5A),
             "a refused dummy run writes nothing"
         );
     }

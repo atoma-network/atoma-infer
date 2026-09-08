@@ -81,7 +81,7 @@ slots, the draw frequencies against the distribution the filters leave, and the 
 decoding row's token from its slot. It needs a device and the toolkit, no checkpoint and no model,
 and prints its own evidence block.
 
-`scripts/copy-in.sh` runs the per-step copy-in: a step's seven arrays staged into a staging
+`scripts/copy-in.sh` runs the per-step copy-in: a step's eight arrays staged into a staging
 entry's pinned block and copied in with one copy, the device block read back and every array
 compared, the same for a second step through the other staging entry and for a dummy run, a
 staging entry's fence asked eight times over while the copy that reads it is still in flight

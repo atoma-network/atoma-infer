@@ -6,7 +6,8 @@
 //! the slots that changed hands are staged in the sampler's own pinned memory and uploaded as
 //! sparse copies, one per record, in front of everything else the step copies. The slot each
 //! selected row samples under, and which token rows take their token from the device, are the
-//! sampler's two per-step arrays, and [`DeviceSampler::stage`] writes them where the caller says:
+//! sampler's two per-step arrays, and [`DeviceSampler::stage`] writes them, with the count of
+//! rows that sample, where the caller says:
 //! the decode step stages them beside the model's inputs in its packed block, which one copy-in
 //! carries, and hands [`DeviceSampler::gather`] and [`DeviceSampler::sample`] tensor views over
 //! where the two arrays landed and over the logits. Each view is held to the staged step's
@@ -334,6 +335,10 @@ impl DeviceSampler {
             SamplerArrays {
                 row_slots: self.row_slots.host.as_mut_slice(),
                 gather_slots: &mut [],
+                // An eager step's sample launches over the rows it names, and nothing carries
+                // this word to the device: a live-row count reaches it in a bucket's packed
+                // block alone.
+                live_rows: &mut 0,
             },
         )?;
         self.staged = Some(StagedStep::of(&inputs, ArraysIn::Sampler));
