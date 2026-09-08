@@ -18,7 +18,7 @@ use crate::request::{
     egress, EgressReceiver, FinishReason, NewRequest, Priority, RequestEvent, SamplingParams,
     StopCriteria, Usage,
 };
-use crate::scheduler::{AdmissionPolicy, SchedulerConfig};
+use crate::scheduler::{AdmissionPolicy, SchedulerConfig, SchedulerError};
 use crate::step::StepResult;
 use crate::test_support::{contract as capture_contract, requests, tokens};
 use crate::types::RequestId;
@@ -469,6 +469,34 @@ fn a_bucket_ladder_the_reservation_cannot_pad_to_is_refused() {
         Engine::new(&too_small, &contract()).unwrap_err(),
         EngineError::Padding(_)
     ));
+}
+
+/// The pool covers the reservation, but what the reservation leaves cannot hold one request of
+/// the maximum model length. The engine refuses with the scheduler's error rather than dropping
+/// the reservation's leases: they go back to the pool before the error returns.
+#[test]
+fn a_pool_the_reservation_leaves_too_small_is_refused() {
+    // Blocks a maximum-length request needs; the pool holds the dummies' blocks and one fewer.
+    let needed = 2;
+    let mut starved = config(8, 8);
+    starved.scheduler.max_model_len = tokens(needed * BLOCK_SIZE);
+    starved.block_count = u32::try_from(MAX_BATCH + needed - 1).unwrap();
+
+    assert_eq!(
+        Engine::new(&starved, &contract()).unwrap_err(),
+        EngineError::Scheduler(SchedulerError::PoolTooSmallForMaxModelLength {
+            needed,
+            free: needed - 1,
+        }),
+        "counted over what the dummies leave, not over the pool as configured"
+    );
+
+    let mut covered = starved.clone();
+    covered.block_count += 1;
+    assert!(
+        Engine::new(&covered, &contract()).is_ok(),
+        "one more block covers the dummies and a maximum-length request together"
+    );
 }
 
 /// Spawns the engine with a long idle deadline and the mock executor on its own thread.

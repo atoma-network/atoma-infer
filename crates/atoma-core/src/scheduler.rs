@@ -68,10 +68,22 @@ impl Scheduler {
     ///
     /// Returns [`SchedulerError::PoolTooSmallForMaxModelLength`] when it does not.
     pub fn new(config: SchedulerConfig, pool: BlockPool) -> Result<Self, SchedulerError> {
+        Self::build(config, pool).map_err(|(error, _pool)| error)
+    }
+
+    /// Builds a scheduler over `pool`, handing `pool` back with the error so a caller holding
+    /// leases taken from it can surrender them before it goes.
+    fn build(
+        config: SchedulerConfig,
+        pool: BlockPool,
+    ) -> Result<Self, (SchedulerError, BlockPool)> {
         let needed = config.max_model_len.get().div_ceil(config.block_size.get());
         let free = pool.free_count();
         if free < needed {
-            return Err(SchedulerError::PoolTooSmallForMaxModelLength { needed, free });
+            return Err((
+                SchedulerError::PoolTooSmallForMaxModelLength { needed, free },
+                pool,
+            ));
         }
         let budget = TokenBudget::new(config.token_budget, config.max_batch);
         Ok(Self {
@@ -179,13 +191,20 @@ impl Scheduler {
     /// # Errors
     ///
     /// Returns [`SchedulerError::PoolTooSmallForMaxModelLength`] when what the reservation left
-    /// of the pool cannot hold one maximum-length request.
+    /// of the pool cannot hold one maximum-length request. The reservation returns to the pool
+    /// before the error does, so no lease is dropped unsurrendered.
     pub fn with_padding(
         config: SchedulerConfig,
         pool: BlockPool,
         reservation: PaddingReservation,
     ) -> Result<Self, SchedulerError> {
-        let mut scheduler = Self::new(config, pool)?;
+        let mut scheduler = match Self::build(config, pool) {
+            Ok(scheduler) => scheduler,
+            Err((error, mut pool)) => {
+                reservation.release(&mut pool);
+                return Err(error);
+            }
+        };
         for block in reservation.block_ids() {
             let id = RequestId::new(scheduler.next_request_id);
             scheduler.next_request_id += 1;
