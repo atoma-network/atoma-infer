@@ -28,6 +28,7 @@
 //! | [`fence`] | The staging fence: one event, signaled through the seam, waited on with or without blocking |
 //! | [`capture`] | Capture lifecycle, end-capture instantiate/discard, the captured graph |
 //! | [`graph_entry`] | Graph-lifetime ownership with load-bearing teardown order |
+//! | [`graph_memory`] | Graph memory as a fixed term plus a marginal term per graph, fitted over per-graph readings |
 //! | [`session`] | The capture session: phase-typed Allocation, Capture and Replay of one graph set |
 //! | `communicator` | The NCCL communicator behind a surface that reaches no stream (`nccl` feature only) |
 //! | [`arena`] | Activation addresses as a pure function of (bucket, layer, role) |
@@ -42,6 +43,7 @@ pub mod context;
 pub mod error;
 pub mod fence;
 pub mod graph_entry;
+pub mod graph_memory;
 pub mod session;
 pub mod stream;
 pub mod tensor;
