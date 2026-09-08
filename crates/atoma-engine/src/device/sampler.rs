@@ -7,20 +7,20 @@
 //! sparse copies, one per record, in front of everything else the step copies. The slot each
 //! selected row samples under, and which token rows take their token from the device, are the
 //! sampler's two per-step arrays, and [`DeviceSampler::stage`] writes them, with the count of
-//! rows that sample, where the caller says:
-//! the decode step stages them beside the model's inputs in its packed block, which one copy-in
-//! carries, and hands [`DeviceSampler::gather`] and [`DeviceSampler::sample`] tensor views over
-//! where the two arrays and the count landed and over the logits. Each view is held to the
-//! staged step's rows and the dtype the kernel reads, so a view handed to the wrong argument is
-//! refused by name. The sample describes the launch alone, bounded by the count that came up
-//! with the arrays — the kernel returns for a row at or past it, reading neither its logits nor
-//! its slot — and leaves each live row's token on the device;
-//! [`DeviceSampler::read_tokens`] describes the one asynchronous copy that brings them back,
-//! through the leading rows of the row tokens view — the staged step's rows and no others —
-//! enqueued behind the sample and waited on once the step is enqueued through the readback's own
-//! event and nothing else: the host learns what was sampled for detokenisation and finish
-//! detection, and the device never waits for it. The sampled tokens stay in the per-slot array
-//! the next step's gather reads.
+//! rows that sample, where the caller says: the decode step stages them beside the model's
+//! inputs in its packed block, which one copy-in carries, and hands [`DeviceSampler::gather`]
+//! and [`DeviceSampler::sample`] tensor views over where the two arrays and the count landed
+//! and over the logits. Each view is held to the staged step's rows and the dtype the kernel
+//! reads, so a view handed to the wrong argument is refused by name, and each descriptor holds
+//! the sampler borrowed for its life, so it cannot outlive the staged step whose rows it names.
+//! The sample describes the launch alone, bounded by the count that came up with the arrays —
+//! the kernel returns for a row at or past it, reading neither its logits nor its slot — and
+//! leaves each live row's token on the device; [`DeviceSampler::read_tokens`] describes the one
+//! asynchronous copy that brings them back, through the leading rows of the row tokens view —
+//! the staged step's rows and no others — enqueued behind the sample and waited on once the
+//! step is enqueued through the readback's own event and nothing else: the host learns what was
+//! sampled for detokenisation and finish detection, and the device never waits for it. The
+//! sampled tokens stay in the per-slot array the next step's gather reads.
 //!
 //! The candle forward samples through the same state on candle's stream. An eager step gathers
 //! nothing, so [`DeviceSampler::stage_eager`] writes its row slots and its live-row count into
@@ -35,6 +35,7 @@
 
 use std::ffi::c_void;
 use std::fmt;
+use std::marker::PhantomData;
 use std::mem::size_of;
 use std::ptr;
 use std::sync::Arc;
@@ -457,7 +458,7 @@ impl DeviceSampler {
         &self,
         token_ids: &Tensor,
         gather_slots: &Tensor,
-    ) -> Result<Gather, SamplerError> {
+    ) -> Result<Gather<'_>, SamplerError> {
         let staged = self.staged.ok_or(SamplerError::NoStepStaged)?;
         let rows = &[staged.gather_rows];
         let token_ids = check_view("token ids", token_ids, Dtype::U32, rows)?;
@@ -470,6 +471,7 @@ impl DeviceSampler {
                 n_rows: staged.gather_rows,
                 stream: ptr::null_mut(),
             },
+            _while_staged: PhantomData,
         })
     }
 
@@ -490,7 +492,7 @@ impl DeviceSampler {
         logits: &Tensor,
         row_slots: &Tensor,
         live_rows: &Tensor,
-    ) -> Result<Sample, SamplerError> {
+    ) -> Result<Sample<'_>, SamplerError> {
         let staged = self.staged.ok_or(SamplerError::NoStepStaged)?;
         self.sample_at(SampleAddresses {
             logits: check_view("logits", logits, Dtype::F32, &[staged.rows, self.vocab])?,
@@ -501,7 +503,7 @@ impl DeviceSampler {
 
     /// The sample of the staged step's rows from `at`, over the sampler's own records, sampled
     /// tokens and row tokens.
-    fn sample_at(&self, at: SampleAddresses) -> Result<Sample, SamplerError> {
+    fn sample_at(&self, at: SampleAddresses) -> Result<Sample<'_>, SamplerError> {
         let staged = self.staged.ok_or(SamplerError::NoStepStaged)?;
         let tokens = self.staged_tokens(staged.rows)?;
         let SampleAddresses {
@@ -520,7 +522,10 @@ impl DeviceSampler {
             n_rows: staged.rows,
             stream: ptr::null_mut(),
         };
-        Ok(Sample { call })
+        Ok(Sample {
+            call,
+            _while_staged: PhantomData,
+        })
     }
 
     /// The descriptor that copies the staged step's tokens to the host, through the leading rows
@@ -528,7 +533,9 @@ impl DeviceSampler {
     /// asynchronous copy for [`DeviceSampler::wait`]. It is the caller's to enqueue behind the
     /// sample, on the stream the sample is enqueued on; describing it is already what
     /// [`DeviceSampler::wait`] waits for, so one dropped unenqueued leaves that wait on an
-    /// earlier copy's event and returns stale rows.
+    /// earlier copy's event and returns stale rows. Nothing here checks either clause, or that a
+    /// sample was described at all: a step whose sampling never reached the stream brings back
+    /// whatever the row tokens hold.
     ///
     /// # Errors
     ///
@@ -672,12 +679,64 @@ unsafe fn copy_records(sampler: &DeviceSampler, stream: sys::CUstream) -> Result
     Ok(())
 }
 
+/// Borrow marker: a descriptor is minted for the step staged at the time and names its rows, so it
+/// holds the sampler borrowed for as long as it lives. Every `&mut self` method the sampler exposes
+/// is blocked while one is live — [`DeviceSampler::stage`], [`DeviceSampler::stage_eager`],
+/// [`DeviceSampler::read_tokens`], [`DeviceSampler::wait`] and [`DeviceSampler::run_on`] — so
+/// restaging, waiting the staged step out, or describing its readback while a descriptor is still
+/// to be enqueued is a compile error rather than a launch whose row count is the old step's over
+/// the arrays the new one wrote. `read_tokens` among them is what makes the readback's place —
+/// behind the launches, never among them — a type error rather than a convention.
+type WhileStaged<'a> = PhantomData<&'a DeviceSampler>;
+
 /// The gather of the token rows whose token the device sampled last.
-pub struct Gather {
+///
+/// It holds the sampler borrowed while it lives, so staging another step over the arrays it
+/// names, while it is still to be enqueued, does not compile:
+///
+/// ```compile_fail
+/// use atoma_engine::batch::BatchLayout;
+/// use atoma_engine::device::sampler::{DeviceSampler, SamplerError};
+/// use atoma_runtime::tensor::Tensor;
+///
+/// fn stage_behind_the_gather(
+///     sampler: &mut DeviceSampler,
+///     token_ids: &Tensor,
+///     gather_slots: &Tensor,
+///     layout: &BatchLayout,
+/// ) -> Result<(), SamplerError> {
+///     let gather = sampler.gather(token_ids, gather_slots)?;
+///     sampler.stage_eager(layout)?;
+///     drop(gather);
+///     Ok(())
+/// }
+/// ```
+///
+/// Staging once the gather is done with does:
+///
+/// ```
+/// use atoma_engine::batch::BatchLayout;
+/// use atoma_engine::device::sampler::{DeviceSampler, SamplerError};
+/// use atoma_runtime::tensor::Tensor;
+///
+/// fn stage_after_the_gather(
+///     sampler: &mut DeviceSampler,
+///     token_ids: &Tensor,
+///     gather_slots: &Tensor,
+///     layout: &BatchLayout,
+/// ) -> Result<(), SamplerError> {
+///     let gather = sampler.gather(token_ids, gather_slots)?;
+///     drop(gather);
+///     sampler.stage_eager(layout)?;
+///     Ok(())
+/// }
+/// ```
+pub struct Gather<'a> {
     call: GatherCall,
+    _while_staged: WhileStaged<'a>,
 }
 
-impl Descriptor for Gather {
+impl Descriptor for Gather<'_> {
     type Error = SamplerError;
 
     unsafe fn enqueue(&mut self, stream: sys::CUstream) -> Result<(), SamplerError> {
@@ -694,11 +753,51 @@ impl Descriptor for Gather {
 
 /// The sample of the staged step's rows, bounded by the live-row count on the device, which
 /// leaves each live row's token in the row tokens.
-pub struct Sample {
+///
+/// It holds the sampler borrowed while it lives, so waiting the staged step out, while the
+/// sample is still to be enqueued, does not compile:
+///
+/// ```compile_fail
+/// use atoma_engine::device::sampler::{DeviceSampler, SamplerError};
+/// use atoma_runtime::tensor::Tensor;
+///
+/// fn wait_out_the_sample(
+///     sampler: &mut DeviceSampler,
+///     logits: &Tensor,
+///     row_slots: &Tensor,
+///     live_rows: &Tensor,
+/// ) -> Result<(), SamplerError> {
+///     let sample = sampler.sample(logits, row_slots, live_rows)?;
+///     sampler.wait()?;
+///     drop(sample);
+///     Ok(())
+/// }
+/// ```
+///
+/// Waiting once the sample is done with does:
+///
+/// ```
+/// use atoma_engine::device::sampler::{DeviceSampler, SamplerError};
+/// use atoma_runtime::tensor::Tensor;
+///
+/// fn wait_after_the_sample(
+///     sampler: &mut DeviceSampler,
+///     logits: &Tensor,
+///     row_slots: &Tensor,
+///     live_rows: &Tensor,
+/// ) -> Result<(), SamplerError> {
+///     let sample = sampler.sample(logits, row_slots, live_rows)?;
+///     drop(sample);
+///     sampler.wait()?;
+///     Ok(())
+/// }
+/// ```
+pub struct Sample<'a> {
     call: SampleCall,
+    _while_staged: WhileStaged<'a>,
 }
 
-impl Descriptor for Sample {
+impl Descriptor for Sample<'_> {
     type Error = SamplerError;
 
     unsafe fn enqueue(&mut self, stream: sys::CUstream) -> Result<(), SamplerError> {

@@ -3,18 +3,19 @@
 //!
 //! Candle keeps owning the weights and the cache; this module snapshots their device addresses
 //! into tensor views, allocates the arena, the step's fixed buffers and the cuBLAS workspace,
-//! resolves every usable bucket's slot tables, and holds the step descriptor over them. A step is
-//! then seven descriptors on the capture stream: the wait on candle's stream, the sampler's
+//! resolves every usable bucket's slot tables, and holds the step descriptor over them. A step
+//! is then five descriptors on the capture stream: the wait on candle's stream, the sampler's
 //! record upload, the copy-in of the bucket's packed block (the five inputs, the sampler's two
 //! per-step arrays and its live-row count in one copy, with the staging entry's fence signaled
-//! behind it), the gather that takes each decoding row's token from what the device sampled for
-//! its slot, the model step, the sample, which leaves the tokens on the device, and the readback
-//! of the live rows' tokens; then one host wait. Nothing is captured here. Going through the
-//! descriptor seam is what lets a later capture record the gather, the model step and the sample
-//! unchanged; the record upload and the copy-in are the host's copies of what changed and stay in
-//! front of the graph, and the readback stays behind it. A dummy run — a bucket's rows as padding
-//! rows over one block each — is staged and copied in the same way, with no sampler descriptor and
-//! no readback: what a capture check or a warmup runs when there is no live batch.
+//! behind it), the keyed step — the gather that takes each decoding row's token from what the
+//! device sampled for its slot, the model step, and the sample, which leaves the tokens on the
+//! device, in that order and as one descriptor — and the readback of the live rows' tokens; then
+//! one host wait. Nothing is captured here. A recording takes one descriptor, so composing the
+//! three is what lets one graph hold every launch a bucket's step makes; the record upload and
+//! the copy-in are the host's copies of what changed and stay in front of the graph, and the
+//! readback stays behind it. A dummy run — a bucket's rows as padding rows over one block each —
+//! is staged and copied in the same way, with no sampler descriptor and no readback: what a
+//! capture check or a warmup runs when there is no live batch.
 //!
 //! The step's outputs reach the sampler and the readback as tensor views narrowed to the live
 //! rows: the bucket's logits and the sampler's row tokens are viewed once, at Allocation, over
@@ -24,7 +25,7 @@
 //! Every address the step bakes can be read again from the memory that holds it, by name, in one
 //! fixed order ([`DecodeStep::addresses`]): candle's weights and cache without minting a view, the
 //! step's own memory from the allocations it owns. The forward bakes that reading when it is
-//! built and a debug build compares a fresh one against it before each keyed step.
+//! built and a debug build compares a fresh one against it before every step of a keyed batch.
 
 use std::sync::Arc;
 
@@ -43,11 +44,11 @@ use atoma_models::llama::step::{LlamaDecode, LlamaStep, StepError};
 use atoma_models::rope::RotaryTables;
 use atoma_runtime::arena::{ArenaError, ArenaLayout, BucketIdx, CaptureArena};
 use atoma_runtime::error::RuntimeError;
-use atoma_runtime::session::{Allocation, Replay};
+use atoma_runtime::session::{Allocation, Descriptor, Replay};
 use atoma_runtime::tensor::{Dtype, Layout, Tensor, TensorError};
 use candle_core::cuda::CudaStorageSlice;
 use candle_core::{DType, Storage, Tensor as CandleTensor};
-use cudarc::driver::sys::CUdevice_attribute;
+use cudarc::driver::sys::{self, CUdevice_attribute};
 use cudarc::driver::{CudaEvent, CudaSlice, CudaStream, DevicePtr};
 use models::llama::{Config, LayerTensors, Llama, Llama3RopeType};
 use thiserror::Error;
@@ -60,7 +61,7 @@ use crate::decode::batch::{Checked, DecodeBatch, DecodeBatchError, DecodeBuckets
 use crate::decode::inputs::{CopyIn, DecodeInputs, InputsError, WaitEvent};
 use crate::decode::ring::{StagingDepth, StagingEntry};
 use crate::decode::staging::{DummyRun, StagingShape};
-use crate::device::sampler::{DeviceSampler, SamplerError};
+use crate::device::sampler::{DeviceSampler, Gather, Sample, SamplerError};
 use crate::device::{KvCache, RankDevice, Weights};
 use crate::logits::Logits;
 use crate::readback::{Readback, ReadbackError};
@@ -275,9 +276,9 @@ impl DecodeStep {
     /// Every address the step bakes, read from the memory that holds it, in one fixed order:
     /// candle's embedding table, each layer's nine weights, the final norm gain and the head
     /// projection, each layer's cache, then the device block, the arena and the statics. The
-    /// forward bakes this reading when it is built and a debug build reads it again before each
-    /// keyed step; candle's addresses are the ones that can move, and are read without minting
-    /// a view.
+    /// forward bakes this reading when it is built and a debug build reads it again before every
+    /// step of a keyed batch; candle's addresses are the ones that can move, and are read without
+    /// minting a view.
     ///
     /// # Errors
     ///
@@ -317,11 +318,12 @@ impl DecodeStep {
 
     /// Runs `batch`'s step through `session` and samples it: a staging entry acquired and the
     /// inputs and the sampler staged into its block, then the wait on candle's stream, the
-    /// sampler's record upload, the block's copy-in, the gather, the model step, the sample and
-    /// the readback of the live rows' tokens enqueued in that order, then the host wait on those
-    /// tokens. The batch states that every entry computes one token, so its rows are the token
-    /// rows the gather covers. A rank with no sampler runs the same step without the sampler's
-    /// descriptors and waits for it instead, and returns no tokens.
+    /// sampler's record upload, the block's copy-in, the keyed step — the gather, the model step
+    /// and the sample as one descriptor — and the readback of the live rows' tokens enqueued in
+    /// that order, then the host wait on those tokens. The batch states that every entry
+    /// computes one token, so its rows are the token rows the gather covers. A rank with no
+    /// sampler runs the same step without the sampler's descriptors and waits for it instead,
+    /// and returns no tokens.
     ///
     /// # Errors
     ///
@@ -344,17 +346,35 @@ impl DecodeStep {
             return Ok(&[]);
         };
         sampler.stage(layout, batch.tokens, arrays)?;
-        let views = self.inputs.bucket(batch.bucket)?;
         session.run(&mut WaitEvent::new(&self.candle_done))?;
         session.run(&mut sampler.upload_records()?)?;
         session.run(&mut self.copy_in(entry, batch.bucket)?)?;
-        session.run(&mut sampler.gather(&views.inputs.token_ids, &views.gather_slots)?)?;
-        session.run(&mut self.descriptor(batch.bucket)?)?;
-        let logits = self.live_logits(&batch)?;
-        let row_slots = views.row_slots.narrow(0, 0, batch.live)?;
-        session.run(&mut sampler.sample(&logits, &row_slots, &views.live_rows)?)?;
+        session.run(&mut self.keyed_step(sampler, &batch)?)?;
         session.run(&mut sampler.read_tokens()?)?;
         Ok(sampler.wait()?)
+    }
+
+    /// The descriptor that enqueues `batch`'s gather, model step and sample as one: `sampler`'s
+    /// gather over the bucket's copied-in token ids, the bucket's model step, and the sample of
+    /// the live rows' logits under the row slots the same copy-in carried.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DecodeStepError`] when the bucket's inputs or slot tables were not resolved, no
+    /// step is staged on `sampler`, or a view is not the rows the staged step covers.
+    fn keyed_step<'a>(
+        &'a self,
+        sampler: &'a DeviceSampler,
+        batch: &DecodeBatch,
+    ) -> Result<KeyedStep<'a>, DecodeStepError> {
+        let views = self.inputs.bucket(batch.bucket)?;
+        let logits = self.live_logits(batch)?;
+        let row_slots = views.row_slots.narrow(0, 0, batch.live)?;
+        Ok(KeyedStep {
+            gather: sampler.gather(&views.inputs.token_ids, &views.gather_slots)?,
+            model_step: self.descriptor(batch.bucket)?,
+            sample: sampler.sample(&logits, &row_slots, &views.live_rows)?,
+        })
     }
 
     /// Runs `batch`'s step through `session` and reads the logits of its live rows back into
@@ -454,6 +474,31 @@ impl DecodeStep {
         self.candle_done
             .record(stream)
             .map_err(RuntimeError::from)?;
+        Ok(())
+    }
+}
+
+/// One keyed batch's gather, model step and sample as one descriptor, enqueued in that order.
+/// The record upload and the copy-in are enqueued in front of it and the readback behind it, so
+/// a recording of this descriptor alone holds every launch a bucket's step makes and none of
+/// its copies.
+struct KeyedStep<'a> {
+    gather: Gather<'a>,
+    model_step: LlamaStep<'a>,
+    sample: Sample<'a>,
+}
+
+impl Descriptor for KeyedStep<'_> {
+    type Error = DecodeStepError;
+
+    unsafe fn enqueue(&mut self, stream: sys::CUstream) -> Result<(), DecodeStepError> {
+        // SAFETY: the session hands a live stream in the step's context, which is what each of
+        // the three descriptors asks of the stream it is handed.
+        unsafe {
+            self.gather.enqueue(stream)?;
+            self.model_step.enqueue(stream)?;
+            self.sample.enqueue(stream)?;
+        }
         Ok(())
     }
 }
