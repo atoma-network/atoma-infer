@@ -74,12 +74,12 @@ fn config(blocks: u32, token_budget: usize, max_batch: usize) -> SchedulerConfig
 
 #[test]
 fn the_slot_count_covers_every_live_request_and_every_padding_dummy() {
-    // Sixty-four requests, and the three dummies a batch of four pads with.
-    assert_eq!(config(16, 100, 4).slot_count(), 67);
+    // Sixty-four requests, and the four dummies a maximum batch of four reserves.
+    assert_eq!(config(16, 100, 4).slot_count(), 68);
     assert_eq!(
         config(16, 100, 1).slot_count(),
-        64,
-        "a batch of one pads with none"
+        65,
+        "a maximum batch of one still reserves the row a dummy run fills"
     );
 
     // Every slot the scheduler hands out is inside the count: the dummies take theirs at
@@ -89,7 +89,10 @@ fn the_slot_count_covers_every_live_request_and_every_padding_dummy() {
     let reservation = PaddingReservation::reserve(&mut pool, config.max_batch).expect("reserves");
     let dummy_count = reservation.dummy_count();
     reservation.release(&mut pool);
-    assert_eq!(dummy_count, 3, "one dummy per slot a full batch pads");
+    assert_eq!(
+        dummy_count, 4,
+        "one per entry of the maximum batch, so a dummy run fills every row"
+    );
 
     let mut scheduler = scheduler(16, 100, 4);
     let mut clients = Vec::new();

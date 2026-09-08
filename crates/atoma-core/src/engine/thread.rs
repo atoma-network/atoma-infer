@@ -34,16 +34,17 @@ pub enum EngineError {
     Scheduler(#[from] SchedulerError),
     #[error(transparent)]
     Padding(#[from] PaddingError),
-    /// The maximum batch pads to a bucket above itself, which would need more dummies than the
-    /// reservation holds.
+    /// The maximum batch pads to a bucket above itself, whose rows outnumber the one dummy per
+    /// entry the reservation holds.
     #[error(
-        "a maximum batch of {max_batch} pads to the bucket of {bucket}, which needs more dummies \
-         than the {reserved} reserved"
+        "scheduler.max_batch of {max_batch} pads to the bucket of {bucket} in \
+         dispatch.bucket_ladder, whose rows outnumber the one dummy per entry the reservation \
+         holds; add a bucket of {max_batch} to dispatch.bucket_ladder, or set \
+         scheduler.max_batch to a bucket dispatch.bucket_ladder holds"
     )]
     PaddingCannotCoverBucket {
         max_batch: RequestCount,
         bucket: TokenCount,
-        reserved: usize,
     },
     /// The operating system refused the thread.
     #[error("the engine thread could not be spawned: {0:?}")]
@@ -133,17 +134,12 @@ impl Engine {
         contract: &CaptureContract,
     ) -> Result<(Self, EngineHandle, ExecutorRings), EngineError> {
         let max_batch = config.scheduler.max_batch;
-        let reserved = PaddingReservation::dummies_for(max_batch);
         let lookup = PaddingLookup::new(&config.dispatch.bucket_ladder);
         let max_batch_bucket =
             TokenCount::new(max_batch.get()).and_then(|tokens| lookup.bucket_for(tokens));
         if let Some(bucket) = max_batch_bucket {
             if bucket.get() > max_batch.get() {
-                return Err(EngineError::PaddingCannotCoverBucket {
-                    max_batch,
-                    bucket,
-                    reserved,
-                });
+                return Err(EngineError::PaddingCannotCoverBucket { max_batch, bucket });
             }
         }
         let mut pool = BlockPool::new(config.block_count);

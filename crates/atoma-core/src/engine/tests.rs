@@ -279,7 +279,7 @@ fn a_drain_waits_for_a_preempted_request_to_finish() {
     // Two one-block requests and no block to grow either: the second decode preempts.
     let mut config = config(8, 8);
     config.scheduler.max_model_len = tokens(2 * BLOCK_SIZE);
-    config.block_count = u32::try_from(MAX_BATCH - 1 + 2).unwrap();
+    config.block_count = u32::try_from(MAX_BATCH + 2).unwrap();
     let (mut engine, handle, rings) = Engine::new(&config, &contract()).unwrap();
     let mut executor = MockExecutor::constant(rings, 1);
     let first = submit(&handle, BLOCK_SIZE, 16);
@@ -335,7 +335,7 @@ fn shutdown_finishes_every_live_request_and_exits() {
         assert_eq!(finish_reason(client), Some(FinishReason::Shutdown));
     }
     assert_eq!(engine.state().live_requests, 0);
-    assert_eq!(engine.state().available_blocks, BLOCKS - (MAX_BATCH - 1));
+    assert_eq!(engine.state().available_blocks, BLOCKS - MAX_BATCH);
     drop(engine);
     assert!(executor.engine_gone());
 }
@@ -428,7 +428,7 @@ fn the_engine_pads_a_replayed_decode_with_the_dummies_it_reserved() {
     let (mut engine, handle, mut executor) = engine(8, 8);
     assert_eq!(
         engine.state().free_blocks,
-        BLOCKS - (MAX_BATCH - 1),
+        BLOCKS - MAX_BATCH,
         "the dummies' blocks are held from the start"
     );
     let _clients: Vec<_> = (0..3).map(|_| submit(&handle, 2, 16)).collect();
@@ -446,13 +446,21 @@ fn the_engine_pads_a_replayed_decode_with_the_dummies_it_reserved() {
 fn a_bucket_ladder_the_reservation_cannot_pad_to_is_refused() {
     let mut unpaddable = config(8, 8);
     unpaddable.dispatch.bucket_ladder = BucketLadder::new(vec![8]).unwrap();
+    let refused = Engine::new(&unpaddable, &contract()).unwrap_err();
     assert_eq!(
-        Engine::new(&unpaddable, &contract()).unwrap_err(),
+        refused,
         EngineError::PaddingCannotCoverBucket {
             max_batch: requests(MAX_BATCH),
             bucket: tokens(8),
-            reserved: MAX_BATCH - 1,
         }
+    );
+    assert_eq!(
+        refused.to_string(),
+        "scheduler.max_batch of 4 pads to the bucket of 8 in dispatch.bucket_ladder, whose rows \
+         outnumber the one dummy per entry the reservation holds; add a bucket of 4 to \
+         dispatch.bucket_ladder, or set scheduler.max_batch to a bucket dispatch.bucket_ladder \
+         holds",
+        "the refusal names both configuration fields and what to do about it"
     );
 
     let mut too_small = config(8, 8);
@@ -536,7 +544,8 @@ fn a_drain_is_answered_from_the_thread_and_shutdown_returns_it() {
     assert_eq!(
         client.try_iter().last(),
         Some(RequestEvent::Finished {
-            request: RequestId::new(3),
+            // The dummies took the first ids, so the one live request has the next.
+            request: RequestId::new(4),
             reason: FinishReason::MaxNewTokens,
             usage: Usage {
                 prompt_tokens: 3,

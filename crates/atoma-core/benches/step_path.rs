@@ -110,7 +110,7 @@ fn churn_config() -> EngineConfig {
         },
         dispatch: dispatch_config(max_batch),
         block_count: u32::try_from(
-            max_batch - 1 + (CHURN_BATCH + 4) * blocks_for(CHURN_MAX_MODEL_TOKENS),
+            max_batch + (CHURN_BATCH + 4) * blocks_for(CHURN_MAX_MODEL_TOKENS),
         )
         .expect("fits u32"),
         ingress_capacity: requests(live),
