@@ -9,8 +9,9 @@
 //! overwrite a decoding row's token with what its slot sampled, leave a fresh slot's row to the
 //! host, and cover the token rows the caller stated rather than the rows the step samples; a
 //! step staged where the caller says must sample under the row slots uploaded from
-//! there; the eager upload must refuse a step staged where the caller says; and a view of other
-//! rows than the staged step's, or of another dtype, must be refused by name.
+//! there; the eager upload must refuse a step staged where the caller says; a sample with no
+//! copy described behind it must leave nothing to wait on; and a view of other rows than the
+//! staged step's, or of another dtype, must be refused by name.
 //!
 //! Run through `scripts/sampler-parity.sh`.
 
@@ -30,6 +31,7 @@ use atoma_core::types::{
 use atoma_engine::batch::BatchLayout;
 use atoma_engine::decode::staging::SamplerArrays;
 use atoma_engine::device::sampler::{ArraysIn, DeviceSampler, SamplerError};
+use atoma_engine::readback::ReadbackError;
 use atoma_engine::sampling::record::SlotRecord;
 use atoma_engine::sampling::reference;
 use atoma_runtime::context::RuntimeContext;
@@ -232,7 +234,8 @@ impl Rig {
     }
 
     /// Samples `rows` under `layout` as a decode step would, staged where the caller says and
-    /// uploaded from there, and returns the tokens.
+    /// uploaded from there, with the readback enqueued behind the sample as the decode step
+    /// enqueues it, and returns the tokens.
     fn sample_as_decode_step(&mut self, layout: &BatchLayout, rows: &[Vec<f32>]) -> Vec<u32> {
         self.upload_logits(rows);
         self.stage_as_decode_step(layout, rows.len());
@@ -245,6 +248,11 @@ impl Rig {
                 .expect("a step is staged")
                 .enqueue(self.stream.cu_stream())
                 .expect("the sample enqueues");
+            self.sampler
+                .read_tokens()
+                .expect("a step is staged")
+                .enqueue(self.stream.cu_stream())
+                .expect("the readback enqueues");
         }
         self.sampler.wait().expect("the tokens come back").to_vec()
     }
@@ -726,4 +734,35 @@ fn a_view_of_other_rows_than_the_staged_step_or_of_another_dtype_is_refused_by_n
         rig.sampler.gather(&ids, &slots).is_ok(),
         "the right views are taken"
     );
+}
+
+#[test]
+#[ignore = "needs a device and the CUDA toolkit; run scripts/sampler-parity.sh"]
+fn a_sample_with_no_copy_described_behind_it_leaves_nothing_to_wait_on() {
+    let mut rig = Rig::open();
+    let step = layout(vec![entry(1, 0, SamplingParams::default())]);
+    rig.stage_as_decode_step(&step, 1);
+
+    // The rig's zeroed logits: what the row samples does not matter here, only that the sample
+    // describes the launch and nothing else, so the tokens stay on the device until a copy is
+    // described behind it.
+    let (logits, row_slots) = rig.live_views(1);
+    // SAFETY: the stream is the sampler's, and the logits and the row slots are live on its
+    // device.
+    unsafe {
+        rig.sampler
+            .sample(&logits, &row_slots)
+            .expect("a step is staged")
+            .enqueue(rig.stream.cu_stream())
+            .expect("the sample enqueues");
+    }
+    let refused = rig.sampler.wait().expect_err("no copy was described");
+    assert!(
+        matches!(
+            refused,
+            SamplerError::Readback(ReadbackError::NoCopyPending)
+        ),
+        "a sample with no copy described behind it leaves nothing to wait on: {refused}"
+    );
+    rig.stream.synchronize().expect("the stream drains");
 }

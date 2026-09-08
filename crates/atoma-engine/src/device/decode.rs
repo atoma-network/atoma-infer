@@ -4,17 +4,17 @@
 //! Candle keeps owning the weights and the cache; this module snapshots their device addresses
 //! into tensor views, allocates the arena, the step's fixed buffers and the cuBLAS workspace,
 //! resolves every usable bucket's slot tables, and holds the step descriptor over them. A step is
-//! then six descriptors on the capture stream: the wait on candle's stream, the sampler's record
-//! upload, the copy-in of the bucket's packed block (the five inputs and the sampler's two
+//! then seven descriptors on the capture stream: the wait on candle's stream, the sampler's
+//! record upload, the copy-in of the bucket's packed block (the five inputs and the sampler's two
 //! per-step arrays in one copy, with the staging entry's fence signaled behind it), the gather
 //! that takes each decoding row's token from what the device sampled for its slot, the model
-//! step, and the sample, which leaves the tokens on the device and reads them back; then one host
-//! wait. Nothing is captured here. Going through the descriptor seam is what lets a later capture
-//! record the gather, the model step and the sample unchanged; the record upload and the copy-in
-//! are the host's copies of what changed and stay in front of the graph. A dummy run — a bucket's
-//! rows as padding rows over one block each — is staged and copied in the same way, with no
-//! sampler descriptor and no readback: what a capture check or a warmup runs when there is no
-//! live batch.
+//! step, the sample, which leaves the tokens on the device, and the readback of the live rows'
+//! tokens; then one host wait. Nothing is captured here. Going through the descriptor seam is
+//! what lets a later capture record the gather, the model step and the sample unchanged; the
+//! record upload and the copy-in are the host's copies of what changed and stay in front of the
+//! graph, and the readback stays behind it. A dummy run — a bucket's rows as padding rows
+//! over one block each — is staged and copied in the same way, with no sampler descriptor and no
+//! readback: what a capture check or a warmup runs when there is no live batch.
 //!
 //! The step's outputs reach the sampler and the readback as tensor views narrowed to the live
 //! rows: the bucket's logits and the sampler's row tokens are viewed once, at Allocation, over
@@ -317,11 +317,11 @@ impl DecodeStep {
 
     /// Runs `batch`'s step through `session` and samples it: a staging entry acquired and the
     /// inputs and the sampler staged into its block, then the wait on candle's stream, the
-    /// sampler's record upload, the block's copy-in, the gather, the model step and the sample
-    /// enqueued in that order, then the host wait on the sampled tokens. The batch states that
-    /// every entry computes one token, so its rows are the token rows the gather covers. A rank
-    /// with no sampler runs the same step without the sampler's descriptors and waits for it
-    /// instead, and returns no tokens.
+    /// sampler's record upload, the block's copy-in, the gather, the model step, the sample and
+    /// the readback of the live rows' tokens enqueued in that order, then the host wait on those
+    /// tokens. The batch states that every entry computes one token, so its rows are the token
+    /// rows the gather covers. A rank with no sampler runs the same step without the sampler's
+    /// descriptors and waits for it instead, and returns no tokens.
     ///
     /// # Errors
     ///
@@ -353,6 +353,7 @@ impl DecodeStep {
         let logits = self.live_logits(&batch)?;
         let row_slots = views.row_slots.narrow(0, 0, batch.live)?;
         session.run(&mut sampler.sample(&logits, &row_slots)?)?;
+        session.run(&mut sampler.read_tokens()?)?;
         Ok(sampler.wait()?)
     }
 

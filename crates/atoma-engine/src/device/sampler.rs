@@ -11,17 +11,19 @@
 //! carries, and hands [`DeviceSampler::gather`] and [`DeviceSampler::sample`] tensor views over
 //! where the two arrays landed and over the logits. Each view is held to the staged step's
 //! rows and the dtype the kernel reads, so a view handed to the wrong argument is refused by
-//! name. What comes back is one asynchronous copy of the rows' tokens, through the leading rows
-//! of the row tokens view, waited on once the step is enqueued through the readback's own event
-//! and nothing else: the host learns what was sampled for detokenisation and finish detection,
-//! and the device never waits for it. The sampled tokens stay in the per-slot array the next
-//! step's gather reads.
+//! name. The sample describes the launch alone and leaves each row's token on the device;
+//! [`DeviceSampler::read_tokens`] describes the one asynchronous copy that brings them back,
+//! through the leading rows of the row tokens view — the staged step's rows and no others —
+//! enqueued behind the sample and waited on once the step is enqueued through the readback's own
+//! event and nothing else: the host learns what was sampled for detokenisation and finish
+//! detection, and the device never waits for it. The sampled tokens stay in the per-slot array
+//! the next step's gather reads.
 //!
 //! The candle forward samples through the same state on candle's stream. An eager step gathers
 //! nothing, so [`DeviceSampler::stage_eager`] writes its row slots into the sampler's own pinned
-//! pair and [`DeviceSampler::run_on`] uploads them there with the records; the host wait that
-//! ends every step, on either stream, is what orders the two streams' use of the sampler's
-//! device state.
+//! pair and [`DeviceSampler::run_on`] uploads them there with the records and enqueues the sample
+//! and the readback in turn; the host wait that ends every step, on either stream, is what orders
+//! the two streams' use of the sampler's device state.
 //!
 //! Every descriptor names the sampler's four device arrays by the addresses read once at
 //! Allocation. [`DeviceSampler::addresses`] reads them again from the arrays themselves, by name
@@ -432,19 +434,15 @@ impl DeviceSampler {
 
     /// The descriptor that samples every selected row from the f32 `logits`, one row per
     /// selected row a vocabulary wide, under the i32 `row_slots`, one per selected row viewed
-    /// where the staged step's copy-in put them, and copies the tokens back for
-    /// [`DeviceSampler::wait`]. Both views are the selected rows exactly: the caller narrows
-    /// them to the live rows.
+    /// where the staged step's copy-in put them, and leaves each row's token in the row tokens.
+    /// Both views are the selected rows exactly: the caller narrows them to the live rows.
+    /// Nothing is read back here; [`DeviceSampler::read_tokens`] describes the readback.
     ///
     /// # Errors
     ///
     /// Returns [`SamplerError::NoStepStaged`] when no step is staged, or a `View` variant when
     /// a view is not the selected rows of the dtype the kernel reads.
-    pub fn sample(
-        &mut self,
-        logits: &Tensor,
-        row_slots: &Tensor,
-    ) -> Result<Sample<'_>, SamplerError> {
+    pub fn sample(&self, logits: &Tensor, row_slots: &Tensor) -> Result<Sample, SamplerError> {
         let staged = self.staged.ok_or(SamplerError::NoStepStaged)?;
         check_view("logits", logits, Dtype::F32, &[staged.rows, self.vocab])?;
         check_view("row slots", row_slots, Dtype::I32, &[staged.rows])?;
@@ -452,12 +450,11 @@ impl DeviceSampler {
     }
 
     /// The sample of the staged step's rows from the f32 logits at `logits` under the i32 row
-    /// slots at `row_slots`, and the readback of its tokens through the leading rows of the row
-    /// tokens view. The addresses are the caller's to have checked: a view for a decode step,
-    /// candle's logits and the sampler's own row slots for an eager one.
-    fn sample_at(&mut self, logits: u64, row_slots: u64) -> Result<Sample<'_>, SamplerError> {
+    /// slots at `row_slots`. The addresses are the caller's to have checked: a view for a decode
+    /// step, candle's logits and the sampler's own row slots for an eager one.
+    fn sample_at(&self, logits: u64, row_slots: u64) -> Result<Sample, SamplerError> {
         let staged = self.staged.ok_or(SamplerError::NoStepStaged)?;
-        let tokens = self.row_tokens.view.narrow(0, 0, staged.rows)?;
+        let tokens = self.staged_tokens(staged.rows)?;
         let call = SampleCall {
             logits,
             row_slots,
@@ -468,8 +465,29 @@ impl DeviceSampler {
             n_rows: staged.rows,
             stream: ptr::null_mut(),
         };
-        let copy = self.readback.copy(&tokens)?;
-        Ok(Sample { call, copy })
+        Ok(Sample { call })
+    }
+
+    /// The descriptor that copies the staged step's tokens to the host, through the leading rows
+    /// of the row tokens view: the rows the sample writes and no others, brought back in one
+    /// asynchronous copy for [`DeviceSampler::wait`]. It is the caller's to enqueue behind the
+    /// sample, on the stream the sample is enqueued on; describing it is already what
+    /// [`DeviceSampler::wait`] waits for, so one dropped unenqueued leaves that wait on an
+    /// earlier copy's event and returns stale rows.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SamplerError::NoStepStaged`] when no step is staged.
+    pub fn read_tokens(&mut self) -> Result<ReadbackCopy<'_, u32>, SamplerError> {
+        let staged = self.staged.ok_or(SamplerError::NoStepStaged)?;
+        let tokens = self.staged_tokens(staged.rows)?;
+        Ok(self.readback.copy(&tokens)?)
+    }
+
+    /// The u32 view of the row tokens `rows` rows are sampled into: the leading rows of the row
+    /// tokens view.
+    fn staged_tokens(&self, rows: usize) -> Result<Tensor, SamplerError> {
+        Ok(self.row_tokens.view.narrow(0, 0, rows)?)
     }
 
     /// Waits for the staged step's tokens, and that copy alone, and returns them: one per
@@ -477,8 +495,8 @@ impl DeviceSampler {
     ///
     /// # Errors
     ///
-    /// Returns [`SamplerError`] when no step is staged, no copy was enqueued, or the wait
-    /// fails.
+    /// Returns [`SamplerError`] when no step is staged, [`DeviceSampler::read_tokens`] described
+    /// no copy, or the wait fails.
     pub fn wait(&mut self) -> Result<&[u32], SamplerError> {
         if self.staged.take().is_none() {
             return Err(SamplerError::NoStepStaged);
@@ -487,8 +505,9 @@ impl DeviceSampler {
     }
 
     /// Runs the eager step staged by [`DeviceSampler::stage_eager`] on `stream` — the upload
-    /// from the sampler's own staging, the sample and the readback — over the f32 logits `logits`
-    /// holds, and waits for its tokens: the candle path, which has no descriptor seam.
+    /// from the sampler's own staging, the sample and the readback of its tokens — over the f32
+    /// logits `logits` holds, and waits for those tokens: the candle path, which has no
+    /// descriptor seam.
     ///
     /// # Errors
     ///
@@ -511,6 +530,7 @@ impl DeviceSampler {
             self.upload_eager()?.enqueue(stream.cu_stream())?;
             self.sample_at(address, row_slots)?
                 .enqueue(stream.cu_stream())?;
+            self.read_tokens()?.enqueue(stream.cu_stream())?;
         }
         self.wait()
     }
@@ -613,13 +633,12 @@ impl Descriptor for Gather {
     }
 }
 
-/// The sample of every selected row and the readback of its tokens.
-pub struct Sample<'a> {
+/// The sample of every selected row, which leaves that row's token in the row tokens.
+pub struct Sample {
     call: SampleCall,
-    copy: ReadbackCopy<'a, u32>,
 }
 
-impl Descriptor for Sample<'_> {
+impl Descriptor for Sample {
     type Error = SamplerError;
 
     unsafe fn enqueue(&mut self, stream: sys::CUstream) -> Result<(), SamplerError> {
@@ -629,10 +648,7 @@ impl Descriptor for Sample<'_> {
         };
         // SAFETY: the session hands a live stream; the logits are what the stream's earlier
         // work wrote, and every other address is this sampler's, staged for these rows.
-        unsafe {
-            sample(&call)?;
-            self.copy.enqueue(stream)?;
-        }
+        unsafe { sample(&call) }?;
         Ok(())
     }
 }
