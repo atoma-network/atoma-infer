@@ -15,8 +15,8 @@ use crate::types::{RequestCount, TokenCount};
 pub struct SchedulerConfig {
     /// Query tokens one step may compute, summed over entries.
     pub token_budget: TokenCount,
-    /// Entries one step may hold: the largest bucket graphs were captured for, which the
-    /// dispatch config knows as `captured_max_requests`. It bounds one step.
+    /// Entries one step may hold. It bounds one step, and with it the buckets a step can fill:
+    /// a uniform decode gives every entry one token, so a bucket above it never fills.
     pub max_batch: RequestCount,
     /// The longest sequence the model serves.
     pub max_model_len: TokenCount,

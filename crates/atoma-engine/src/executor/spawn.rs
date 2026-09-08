@@ -105,6 +105,7 @@ pub fn spawn_ranks(
         #[cfg(not(feature = "nccl"))]
         decode_step: DecodeStepPlan {
             dispatch: engine.dispatch.clone(),
+            max_batch: engine.scheduler.max_batch,
             max_model_len: engine.scheduler.max_model_len,
             block_size: engine.scheduler.block_size,
             dtype: model.dtype,

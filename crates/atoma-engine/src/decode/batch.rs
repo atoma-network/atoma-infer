@@ -10,6 +10,7 @@
 //! protocol, and is refused.
 
 use atoma_core::dispatch::{DispatchConfig, GraphKey};
+use atoma_core::types::RequestCount;
 use atoma_runtime::arena::BucketIdx;
 use thiserror::Error;
 
@@ -61,24 +62,23 @@ pub enum Checked {
 }
 
 /// The buckets the decode step serves: the configured bucket ladder's distinct entries at or
-/// below the captured maximum, in configured order. The arena and every slot table are built
-/// over exactly these, so an entry's position here is its bucket index everywhere.
+/// below the maximum batch, in configured order. The arena and every slot table are built over
+/// exactly these, so an entry's position here is its bucket index everywhere.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DecodeBuckets {
     tokens: Vec<usize>,
 }
 
 impl DecodeBuckets {
-    /// The entries of `config`'s bucket ladder a captured decode graph can serve: a uniform-decode
-    /// batch has as many tokens as entries, so a bucket above the captured request maximum never
+    /// The entries of `config`'s bucket ladder a step of at most `max_batch` entries can fill: a
+    /// uniform decode gives every entry one token, so a bucket above the maximum batch never
     /// fills. A size the ladder repeats is served by its first entry, so the repeats are dropped
     /// rather than given tables and a graph nothing routes to.
     #[must_use]
-    pub fn usable(config: &DispatchConfig) -> Self {
-        let captured_max = config.captured_max_requests.get();
+    pub fn usable(config: &DispatchConfig, max_batch: RequestCount) -> Self {
         let mut tokens: Vec<usize> = Vec::new();
         for &bucket in config.bucket_ladder.buckets() {
-            if bucket <= captured_max && !tokens.contains(&bucket) {
+            if bucket <= max_batch.get() && !tokens.contains(&bucket) {
                 tokens.push(bucket);
             }
         }
@@ -190,7 +190,8 @@ mod tests {
     const MAX_WIDTH: usize = 8;
 
     fn buckets() -> DecodeBuckets {
-        DecodeBuckets::usable(&engine_config().dispatch)
+        let config = engine_config();
+        DecodeBuckets::usable(&config.dispatch, config.scheduler.max_batch)
     }
 
     /// Lays a keyed command out and takes its key.
@@ -204,12 +205,11 @@ mod tests {
     }
 
     #[test]
-    fn the_usable_buckets_are_the_ladders_distinct_entries_up_to_the_captured_maximum_in_order() {
+    fn the_usable_buckets_are_the_ladders_distinct_entries_up_to_the_maximum_batch_in_order() {
         let mut config = engine_config().dispatch;
         config.bucket_ladder = BucketLadder::new(vec![8, 1, 4, 2, 16, 4]).unwrap();
-        config.captured_max_requests = RequestCount::new(4).unwrap();
 
-        let buckets = DecodeBuckets::usable(&config);
+        let buckets = DecodeBuckets::usable(&config, RequestCount::new(4).unwrap());
 
         assert_eq!(
             buckets.tokens(),
@@ -221,6 +221,24 @@ mod tests {
         assert_eq!(buckets.index_of(2), Some(BucketIdx(2)));
         assert_eq!(buckets.index_of(8), None);
         assert_eq!(buckets.index_of(3), None);
+    }
+
+    #[test]
+    fn a_bucket_a_uniform_decode_could_never_fill_is_not_usable() {
+        let mut config = engine_config().dispatch;
+        config.bucket_ladder = BucketLadder::new(vec![1, 2, 4, 8]).unwrap();
+        config.captured_max_requests = RequestCount::new(8).unwrap();
+
+        let buckets = DecodeBuckets::usable(&config, RequestCount::new(4).unwrap());
+
+        assert_eq!(
+            buckets.tokens(),
+            [1, 2, 4],
+            "a batch of at most four entries decodes at most four tokens, whatever the captured \
+             maximum"
+        );
+        assert_eq!(buckets.largest(), 4);
+        assert_eq!(buckets.index_of(8), None);
     }
 
     #[test]
@@ -277,9 +295,8 @@ mod tests {
             entry(2, 3, vec![9], &[20], true),
             entry(3, 3, vec![9], &[30], true),
         ]);
-        let mut config = engine_config().dispatch;
-        config.captured_max_requests = RequestCount::new(2).unwrap();
-        let buckets = DecodeBuckets::usable(&config);
+        let buckets =
+            DecodeBuckets::usable(&engine_config().dispatch, RequestCount::new(2).unwrap());
 
         let checked = DecodeBatch::check(&layout, key, &buckets, MAX_WIDTH).unwrap();
 

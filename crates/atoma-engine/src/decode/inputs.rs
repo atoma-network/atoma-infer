@@ -467,7 +467,8 @@ mod tests {
 
     /// The buckets [`engine_config`] serves: one, two and four rows.
     fn buckets() -> DecodeBuckets {
-        DecodeBuckets::usable(&engine_config().dispatch)
+        let config = engine_config();
+        DecodeBuckets::usable(&config.dispatch, config.scheduler.max_batch)
     }
 
     fn packed() -> PackedBuckets {
@@ -730,13 +731,16 @@ mod tests {
 
     #[test]
     fn inputs_for_no_bucket_are_refused() {
-        let none = DecodeBuckets::usable(&DispatchConfig {
-            bucket_ladder: BucketLadder::new(vec![2, 4]).unwrap(),
-            captured_max_requests: RequestCount::new(1).unwrap(),
-        });
+        let none = DecodeBuckets::usable(
+            &DispatchConfig {
+                bucket_ladder: BucketLadder::new(vec![2, 4]).unwrap(),
+                captured_max_requests: RequestCount::new(1).unwrap(),
+            },
+            RequestCount::new(1).unwrap(),
+        );
         assert!(
             none.tokens().is_empty(),
-            "no bucket is at or below one request"
+            "no bucket is at or below one entry"
         );
 
         assert!(matches!(

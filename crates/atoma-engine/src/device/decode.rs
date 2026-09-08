@@ -29,7 +29,7 @@
 use std::sync::Arc;
 
 use atoma_core::dispatch::{DispatchConfig, GraphKey};
-use atoma_core::types::TokenCount;
+use atoma_core::types::{RequestCount, TokenCount};
 use atoma_models::attention::{block_table_columns, AttentionError, AttentionPlan};
 use atoma_models::dims::{DimsError, Llama3RopeScaling, LlamaDims, RopeParams};
 use atoma_models::gemm::{GemmError, StepBlas, WORKSPACE_BYTES};
@@ -86,10 +86,10 @@ pub enum DecodeStepError {
         expected: usize,
     },
     #[error(
-        "no entry of engine.dispatch.bucket_ladder is at or below captured_max_requests of \
-         {captured_max}; the decode step needs one bucket to serve"
+        "no entry of engine.dispatch.bucket_ladder is at or below engine.scheduler.max_batch of \
+         {max_batch}; the decode step needs one bucket to serve, so add a bucket at or below it"
     )]
-    NoUsableBucket { captured_max: usize },
+    NoUsableBucket { max_batch: RequestCount },
     #[error("the device reports {count} multiprocessors, which is not a count")]
     MultiprocessorCount { count: i32 },
     #[error(
@@ -127,6 +127,9 @@ pub enum DecodeStepError {
 #[derive(Debug, Clone)]
 pub struct DecodeStepPlan {
     pub dispatch: DispatchConfig,
+    /// Entries one step may hold, as `SchedulerConfig::max_batch`: a uniform decode gives every
+    /// entry one token, so a bucket above it is never filled.
+    pub max_batch: RequestCount,
     pub max_model_len: TokenCount,
     pub block_size: TokenCount,
     pub dtype: ConfiguredDtype,
@@ -192,10 +195,10 @@ impl DecodeStep {
         if plan.dtype != ConfiguredDtype::Bf16 {
             return Err(DecodeStepError::NotBf16 { dtype: plan.dtype });
         }
-        let buckets = DecodeBuckets::usable(&plan.dispatch);
+        let buckets = DecodeBuckets::usable(&plan.dispatch, plan.max_batch);
         if buckets.tokens().is_empty() {
             return Err(DecodeStepError::NoUsableBucket {
-                captured_max: plan.dispatch.captured_max_requests.get(),
+                max_batch: plan.max_batch,
             });
         }
         let llama = weights.llama();

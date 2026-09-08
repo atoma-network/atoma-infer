@@ -64,7 +64,7 @@ use cudarc::driver::CudaStream;
 
 /// The bucket ladder under test.
 const LADDER: [usize; 3] = [1, 2, 4];
-/// The largest bucket of the ladder, and the request count that keeps every bucket usable.
+/// The largest bucket of the ladder, and the maximum batch that keeps every bucket usable.
 const LARGEST_BUCKET: usize = 4;
 /// Rows of the bucket both steps and the dummy run fill.
 const ROWS: usize = 2;
@@ -283,7 +283,10 @@ fn dispatch_config() -> DispatchConfig {
 }
 
 fn buckets() -> DecodeBuckets {
-    DecodeBuckets::usable(&dispatch_config())
+    DecodeBuckets::usable(
+        &dispatch_config(),
+        RequestCount::new(LARGEST_BUCKET).expect("nonzero"),
+    )
 }
 
 /// The staging shape of [`LADDER`]'s largest bucket at `width` columns.

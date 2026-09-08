@@ -234,6 +234,7 @@ fn open(model: &ModelConfig) -> Rig {
     .expect("the readback pins");
     let plan = DecodeStepPlan {
         dispatch: dispatch_config(),
+        max_batch: requests(MAX_BATCH),
         max_model_len: tokens(MAX_MODEL_LEN),
         block_size: tokens(BLOCK_SIZE),
         dtype: model.dtype,

@@ -633,7 +633,8 @@ mod tests {
         let DispatchDecision::FullReplay(key) = layout.dispatch else {
             panic!("keyed: {:?}", layout.dispatch);
         };
-        let buckets = DecodeBuckets::usable(&engine_config().dispatch);
+        let config = engine_config();
+        let buckets = DecodeBuckets::usable(&config.dispatch, config.scheduler.max_batch);
         let Checked::Step(batch) = DecodeBatch::check(&layout, key, &buckets, WIDTH).unwrap()
         else {
             panic!("served by the decode step");
