@@ -180,7 +180,9 @@ mod tests {
     use std::time::Duration;
 
     use atoma_core::dispatch::{DispatchDecision, EagerReason};
-    use atoma_core::engine::{Control, Engine, EngineHandle, EngineThread, ExecutorRings};
+    use atoma_core::engine::{
+        Control, Engine, EngineHandle, EngineThread, ExecutorHandoff, ExecutorRings,
+    };
     use atoma_core::request::{FinishReason, RequestEvent};
 
     use super::{feed, Executor, ExecutorError, ExecutorLoop, Follower};
@@ -189,7 +191,7 @@ mod tests {
         contract, engine_config, submit, FakeForward, FakeForwardError, BLOCK_SIZE, WAIT,
     };
 
-    fn engine() -> (EngineHandle, ExecutorRings, EngineThread) {
+    fn engine() -> (EngineHandle, ExecutorHandoff, EngineThread) {
         Engine::spawn(&engine_config(), &contract()).unwrap()
     }
 
@@ -199,7 +201,8 @@ mod tests {
 
     #[test]
     fn a_request_flows_through_the_executor_to_its_finish() {
-        let (handle, rings, engine) = engine();
+        let (handle, handoff, engine) = engine();
+        let rings = handoff.rings;
         let forward = FakeForward::constant(5);
         let served = forward.served();
         let executor = thread::spawn(move || executor(rings, forward).run());
@@ -253,7 +256,8 @@ mod tests {
 
     #[test]
     fn a_failing_forward_ends_the_executor_with_the_cause_and_the_engine_fails_the_request() {
-        let (handle, rings, engine) = engine();
+        let (handle, handoff, engine) = engine();
+        let rings = handoff.rings;
         let forward = FakeForward::constant(5).failing_on_command(2);
         let executor = thread::spawn(move || executor(rings, forward).run());
         let client = submit(&handle, 3, 16);
@@ -286,7 +290,8 @@ mod tests {
         leader_forward: FakeForward,
         follower_forward: FakeForward,
     ) -> (EngineHandle, EngineThread, RankThread, RankThread) {
-        let (handle, rings, engine) = engine();
+        let (handle, handoff, engine) = engine();
+        let rings = handoff.rings;
         let (leader_end, follower_rings) = feed(Rank::new(1), rings.unparker());
         let mut leader = executor(rings, leader_forward);
         leader.follow(leader_end);
@@ -396,7 +401,8 @@ mod tests {
 
     #[test]
     fn the_executor_returns_once_the_engine_is_gone_with_nothing_to_serve() {
-        let (handle, rings, engine) = engine();
+        let (handle, handoff, engine) = engine();
+        let rings = handoff.rings;
         let executor = thread::spawn(move || executor(rings, FakeForward::constant(1)).run());
         thread::sleep(Duration::from_millis(10));
         assert!(!executor.is_finished(), "parked, waiting for a command");

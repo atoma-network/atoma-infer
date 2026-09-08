@@ -308,7 +308,7 @@ mod tests {
     use std::sync::mpsc;
     use std::thread;
 
-    use atoma_core::engine::{Control, Engine, EngineHandle, EngineThread, ExecutorRings};
+    use atoma_core::engine::{Control, Engine, EngineHandle, EngineThread, ExecutorHandoff};
     use atoma_core::request::RequestEvent;
     use core_affinity::{get_core_ids, CoreId as AffinityCoreId};
 
@@ -317,7 +317,7 @@ mod tests {
     use crate::executor::{Executor, ExecutorError, ExecutorLoop};
     use crate::test_support::{contract, engine_config, submit, FakeForward, BLOCK_SIZE, WAIT};
 
-    fn engine() -> (EngineHandle, ExecutorRings, EngineThread) {
+    fn engine() -> (EngineHandle, ExecutorHandoff, EngineThread) {
         Engine::spawn(&engine_config(), &contract()).unwrap()
     }
 
@@ -331,7 +331,8 @@ mod tests {
     #[test]
     fn spawn_pins_the_thread_names_it_and_runs_the_executor_on_it() {
         let core = a_core();
-        let (handle, rings, engine) = engine();
+        let (handle, handoff, engine) = engine();
+        let rings = handoff.rings;
         let (observed, observations) = mpsc::channel();
         let thread = spawn(Rank::new(3), CoreId::new(core.id), move || {
             let name = thread::current().name().map(str::to_owned);
@@ -371,7 +372,8 @@ mod tests {
             .map(|id| id.id)
             .max()
             .map_or(0, |max| max + 1);
-        let (_handle, rings, _engine) = engine();
+        let (_handle, handoff, _engine) = engine();
+        let rings = handoff.rings;
         let error = spawn(Rank::ZERO, CoreId::new(beyond), move || {
             Ok(Executor::new(rings, FakeForward::constant(7), BLOCK_SIZE))
         })
@@ -435,7 +437,8 @@ mod tests {
     fn wait_all_reports_the_first_failure_while_others_are_still_starting() {
         let core = a_core();
         let (release, held) = mpsc::channel::<()>();
-        let (_handle, rings, _engine) = engine();
+        let (_handle, handoff, _engine) = engine();
+        let rings = handoff.rings;
         let slow = launch(Rank::ZERO, CoreId::new(core.id), move || {
             held.recv().expect("released once the wait has returned");
             Ok(Executor::new(rings, FakeForward::constant(1), BLOCK_SIZE))

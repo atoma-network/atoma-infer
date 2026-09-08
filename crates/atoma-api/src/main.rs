@@ -62,14 +62,14 @@ mod startup {
             )
         })?;
 
-        let (handle, rings, engine) =
+        let (handle, handoff, engine) =
             Engine::spawn(&config.engine, &contract(config.model.id.as_str()))?;
         let executors = match spawn_ranks(
             &config.engine,
             &config.executor,
             &config.model,
             &files,
-            rings,
+            handoff,
         ) {
             Ok(executors) => executors,
             Err(error) => {

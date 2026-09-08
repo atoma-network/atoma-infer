@@ -6,8 +6,8 @@
 //! joined, so waiting for rank zero alone would never return when a follower fails before it
 //! joins.
 
-use atoma_core::engine::{EngineConfig, ExecutorRings};
-use atoma_core::types::{RequestCount, TokenCount};
+use atoma_core::engine::{EngineConfig, ExecutorHandoff};
+use atoma_core::types::{BlockId, RequestCount, TokenCount};
 use atoma_runtime::context::RuntimeContext;
 use atoma_runtime::session::Allocation;
 use candle_core::DType;
@@ -60,6 +60,10 @@ struct RankPlan {
     max_batch: RequestCount,
     /// The request slots whatever is indexed by slot is sized for.
     slot_count: usize,
+    /// The block each padding dummy owns, in reservation order: what a dummy run fills a
+    /// bucket's rows over.
+    #[expect(dead_code, reason = "no bucket is captured over them yet")]
+    dummy_blocks: Vec<BlockId>,
     dtype: DType,
     files: ModelFiles,
     #[cfg(not(feature = "nccl"))]
@@ -68,8 +72,9 @@ struct RankPlan {
     collective: Id,
 }
 
-/// Spawns rank zero's executor thread over `rings` and one follower thread per further rank,
-/// each pinned to its core and holding its device, and returns once every rank is serving.
+/// Spawns rank zero's executor thread over `handoff`'s rings and one follower thread per further
+/// rank, each pinned to its core and holding its device, and returns once every rank is serving.
+/// Each rank carries the dummies' blocks `handoff` hands over.
 ///
 /// # Errors
 ///
@@ -84,8 +89,12 @@ pub fn spawn_ranks(
     executor: &ExecutorConfig,
     model: &ModelConfig,
     files: &ModelFiles,
-    rings: ExecutorRings,
+    handoff: ExecutorHandoff,
 ) -> Result<Vec<ExecutorThread>, StartupError> {
+    let ExecutorHandoff {
+        rings,
+        dummy_blocks,
+    } = handoff;
     let Some(leader) = executor.ranks.first().copied() else {
         return Err(StartupError::NoRanks);
     };
@@ -100,6 +109,7 @@ pub fn spawn_ranks(
         block_size: engine.scheduler.block_size,
         max_batch: engine.scheduler.max_batch,
         slot_count: engine.scheduler.slot_count(),
+        dummy_blocks,
         dtype: model.dtype.into(),
         files: files.clone(),
         #[cfg(not(feature = "nccl"))]

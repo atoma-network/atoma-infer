@@ -21,7 +21,7 @@ use crate::request::{
 use crate::scheduler::{AdmissionPolicy, SchedulerConfig, SchedulerError};
 use crate::step::StepResult;
 use crate::test_support::{contract as capture_contract, requests, tokens};
-use crate::types::RequestId;
+use crate::types::{BlockId, RequestId};
 
 const BLOCK_SIZE: usize = 4;
 const MAX_BATCH: usize = 4;
@@ -73,9 +73,9 @@ fn contract() -> CaptureContract {
 }
 
 fn engine(max_requests: usize, ingress_capacity: usize) -> (Engine, EngineHandle, MockExecutor) {
-    let (engine, handle, rings) =
+    let (engine, handle, handoff) =
         Engine::new(&config(max_requests, ingress_capacity), &contract()).unwrap();
-    (engine, handle, MockExecutor::constant(rings, 1))
+    (engine, handle, MockExecutor::constant(handoff.rings, 1))
 }
 
 fn new_request(prompt_len: usize, max_new_tokens: usize) -> (NewRequest, EgressReceiver) {
@@ -280,8 +280,8 @@ fn a_drain_waits_for_a_preempted_request_to_finish() {
     let mut config = config(8, 8);
     config.scheduler.max_model_len = tokens(2 * BLOCK_SIZE);
     config.block_count = u32::try_from(MAX_BATCH + 2).unwrap();
-    let (mut engine, handle, rings) = Engine::new(&config, &contract()).unwrap();
-    let mut executor = MockExecutor::constant(rings, 1);
+    let (mut engine, handle, handoff) = Engine::new(&config, &contract()).unwrap();
+    let mut executor = MockExecutor::constant(handoff.rings, 1);
     let first = submit(&handle, BLOCK_SIZE, 16);
     let second = submit(&handle, BLOCK_SIZE, 16);
 
@@ -395,7 +395,7 @@ fn a_step_out_past_the_step_deadline_fails_every_live_request_and_exits() {
     let mut config = config(8, 8);
     config.step_deadline = Duration::from_millis(20);
     // The executor's ends are held, unanswered, for the whole test: the exit is the deadline's.
-    let (mut engine, handle, rings) = Engine::new(&config, &contract()).unwrap();
+    let (mut engine, handle, handoff) = Engine::new(&config, &contract()).unwrap();
     let running = submit(&handle, 2, 16);
     engine.pass();
     let waiting = submit(&handle, 2, 16);
@@ -411,7 +411,7 @@ fn a_step_out_past_the_step_deadline_fails_every_live_request_and_exits() {
     assert_eq!(finish_reason(&running), Some(FinishReason::ExecutorLost));
     assert_eq!(finish_reason(&waiting), Some(FinishReason::ExecutorLost));
     assert_eq!(engine.state().live_requests, 0);
-    drop(rings);
+    drop(handoff);
 }
 
 #[test]
@@ -440,6 +440,48 @@ fn the_engine_pads_a_replayed_decode_with_the_dummies_it_reserved() {
         "three decodes pad to the bucket of four"
     );
     assert_eq!(decode.entries.len(), 4);
+}
+
+/// The executor is handed the block each dummy owns, so a dummy run can fill a bucket's rows
+/// over real KV: the same blocks the padding requests hold in the slab, in reservation order.
+#[test]
+fn the_engine_hands_the_executor_the_block_every_dummy_owns() {
+    let (engine, _handle, handoff) = Engine::new(&config(8, 8), &contract()).unwrap();
+
+    let scheduler = engine.scheduler();
+    let dummies: Vec<BlockId> = scheduler
+        .padding()
+        .iter()
+        .map(|&slot| {
+            let dummy = scheduler.request(slot).expect("a dummy holds its slot");
+            dummy.sequences()[0].block_table()[0]
+        })
+        .collect();
+    assert!(
+        !dummies.is_empty(),
+        "the reservation put dummies in the slab to hand blocks over for"
+    );
+    assert_eq!(
+        handoff.dummy_blocks, dummies,
+        "each dummy's own block, in reservation order"
+    );
+}
+
+/// Spawning hands the executor what building does: the thread takes the engine, not the blocks.
+#[test]
+fn a_spawned_engine_hands_the_executor_the_dummies_blocks_too() {
+    let (_handle, handoff, engine) = Engine::spawn(&config(8, 8), &contract()).unwrap();
+    assert_eq!(
+        handoff.dummy_blocks.len(),
+        MAX_BATCH,
+        "one block per dummy the reservation holds"
+    );
+
+    drop(handoff);
+    wait_until("the thread to notice its executor is gone", || {
+        engine.is_finished()
+    });
+    engine.join();
 }
 
 #[test]
@@ -503,8 +545,8 @@ fn a_pool_the_reservation_leaves_too_small_is_refused() {
 fn spawn_with_executor(idle_deadline: Duration) -> (EngineHandle, EngineThread) {
     let mut config = config(8, 8);
     config.idle_deadline = idle_deadline;
-    let (handle, rings, engine) = Engine::spawn(&config, &contract()).unwrap();
-    let executor = MockExecutor::constant(rings, 1);
+    let (handle, handoff, engine) = Engine::spawn(&config, &contract()).unwrap();
+    let executor = MockExecutor::constant(handoff.rings, 1);
     thread::spawn(move || executor.run_until_engine_gone());
     (handle, engine)
 }
@@ -599,22 +641,22 @@ fn a_wedged_executor_fails_every_live_request_and_returns_the_thread_at_the_step
     let mut config = config(8, 8);
     config.idle_deadline = LONG_DEADLINE;
     config.step_deadline = Duration::from_millis(50);
-    let (handle, rings, engine) = Engine::spawn(&config, &contract()).unwrap();
+    let (handle, handoff, engine) = Engine::spawn(&config, &contract()).unwrap();
     let client = submit(&handle, 3, 16);
     wait_until("the thread to give the step up", || engine.is_finished());
     engine.join();
     assert_eq!(finish_reason(&client), Some(FinishReason::ExecutorLost));
     assert_engine_gone(&handle);
-    drop(rings);
+    drop(handoff);
 }
 
 #[test]
 fn a_dead_executor_fails_every_pending_request_and_returns_the_thread() {
     let mut config = config(8, 8);
     config.idle_deadline = LONG_DEADLINE;
-    let (handle, rings, engine) = Engine::spawn(&config, &contract()).unwrap();
+    let (handle, handoff, engine) = Engine::spawn(&config, &contract()).unwrap();
     let client = submit(&handle, 3, 16);
-    let mut executor = MockExecutor::constant(rings, 1);
+    let mut executor = MockExecutor::constant(handoff.rings, 1);
     wait_until("the first step to be issued", || executor.serve_one());
     assert!(matches!(
         client.recv_timeout(WAIT).unwrap(),

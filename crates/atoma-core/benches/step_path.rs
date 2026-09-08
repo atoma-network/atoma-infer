@@ -216,8 +216,9 @@ fn submit(handle: &EngineHandle, request: NewRequest) {
 
 /// Sixty-four requests decoding at a long context, with a full admission window behind them.
 fn measure_decode() -> Histogram<u64> {
-    let (mut engine, handle, mut rings) =
+    let (mut engine, handle, handoff) =
         Engine::new(&decode_config(), &contract()).expect("the bench configuration is valid");
+    let mut rings = handoff.rings;
     let mut clients = Vec::with_capacity(DECODE_BATCH + DECODE_WAITING);
     for index in 0..DECODE_BATCH {
         let index = u32::try_from(index).expect("fits u32");
@@ -263,8 +264,9 @@ fn measure_decode() -> Histogram<u64> {
 /// Prompts that share a family prefix, run a handful of decodes and finish, replaced as they go:
 /// every pass admits over prefix hits, evicts to lease, and retires what finished.
 fn measure_churn() -> Histogram<u64> {
-    let (mut engine, handle, mut rings) =
+    let (mut engine, handle, handoff) =
         Engine::new(&churn_config(), &contract()).expect("the bench configuration is valid");
+    let mut rings = handoff.rings;
     let mut clients = Vec::with_capacity(CHURN_BATCH + CHURN_WAITING);
     let mut next: u32 = 0;
     let mut finished = 0;
