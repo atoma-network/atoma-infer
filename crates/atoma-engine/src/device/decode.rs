@@ -352,7 +352,7 @@ impl DecodeStep {
         session.run(&mut self.descriptor(batch.bucket)?)?;
         let logits = self.live_logits(&batch)?;
         let row_slots = views.row_slots.narrow(0, 0, batch.live)?;
-        session.run(&mut sampler.sample(&logits, &row_slots)?)?;
+        session.run(&mut sampler.sample(&logits, &row_slots, &views.live_rows)?)?;
         session.run(&mut sampler.read_tokens()?)?;
         Ok(sampler.wait()?)
     }

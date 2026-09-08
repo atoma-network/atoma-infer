@@ -51,6 +51,10 @@ pub enum BakedName {
     /// The sampler's own row slots, which an eager step samples under. The per-step row slots a
     /// keyed step samples under are staged into the packed block and are not baked.
     SamplerRowSlots,
+    /// The sampler's own live-row count, which an eager step's sample is bounded by. The
+    /// per-step count a keyed step is bounded by is staged into the packed block and is not
+    /// baked.
+    SamplerLiveRows,
     /// The sampler's row tokens, which the readback copies through.
     RowTokens,
 }
@@ -76,6 +80,7 @@ impl fmt::Display for BakedName {
             BakedName::SamplingRecords => "the sampling records",
             BakedName::SampledTokens => "the sampled tokens",
             BakedName::SamplerRowSlots => "the sampler's row slots",
+            BakedName::SamplerLiveRows => "the sampler's live-row count",
             BakedName::RowTokens => "the row tokens",
         })
     }
@@ -474,6 +479,7 @@ mod tests {
             (BakedName::SamplingRecords, "the sampling records"),
             (BakedName::SampledTokens, "the sampled tokens"),
             (BakedName::SamplerRowSlots, "the sampler's row slots"),
+            (BakedName::SamplerLiveRows, "the sampler's live-row count"),
             (BakedName::RowTokens, "the row tokens"),
         ]
     }

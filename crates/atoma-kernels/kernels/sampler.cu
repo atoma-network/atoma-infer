@@ -5,6 +5,12 @@
 // fixed order, so a row's token depends on its logits, its record and nothing else: not on the
 // batch it sits in, not on the slot it occupies, and not on which launch computed it.
 //
+// The sample is bounded by a device-resident count of the batch's live rows rather than by its
+// launch: a row at or past that count returns before it reads anything of its own, leaving that
+// row's token, its slot's last sampled token and its slot's draw counter as they are. A launch
+// over more rows than the batch has live therefore samples the live rows and no others, and one
+// over a count of zero samples nothing at all.
+//
 // The sample kernel is the host reference (atoma-engine's sampling::reference) step for step:
 // logits are ordered by a key monotone in their value with a not-a-number last; a greedy record
 // takes the largest and draws nothing; a drawn record admits the top_k largest with every tie of
@@ -16,6 +22,7 @@
 #include <cuda_runtime.h>
 #include <math.h>
 
+#include <cstddef>
 #include <cstdint>
 
 // One request slot's record, as atoma-engine's sampling::record lays it out.
@@ -35,10 +42,21 @@ struct SampleArgs {
     SlotRecord* records;
     uint32_t* sampled;
     uint32_t* out;
+    const uint32_t* live_rows;
     int64_t vocab;
     int64_t n_rows;
 };
-static_assert(sizeof(SampleArgs) == 56, "the arguments are 56 bytes, as the host declares them");
+static_assert(sizeof(SampleArgs) == 64, "the arguments are 64 bytes, as the host declares them");
+// Every field at the byte the host holds it to, so a reordering on this side stops the build
+// rather than reading one argument as another.
+static_assert(offsetof(SampleArgs, logits) == 0, "logits is the host's first argument");
+static_assert(offsetof(SampleArgs, row_slots) == 8, "row_slots is the host's second argument");
+static_assert(offsetof(SampleArgs, records) == 16, "records is the host's third argument");
+static_assert(offsetof(SampleArgs, sampled) == 24, "sampled is the host's fourth argument");
+static_assert(offsetof(SampleArgs, out) == 32, "out is the host's fifth argument");
+static_assert(offsetof(SampleArgs, live_rows) == 40, "live_rows is the host's sixth argument");
+static_assert(offsetof(SampleArgs, vocab) == 48, "vocab is the host's seventh argument");
+static_assert(offsetof(SampleArgs, n_rows) == 56, "n_rows is the host's eighth argument");
 
 namespace {
 
@@ -372,6 +390,11 @@ __device__ long long picked(const Row& row, const Kept& kept, uint64_t uniform, 
 __global__ void __launch_bounds__(kThreads) sample_kernel(SampleArgs args) {
     __shared__ Scratch scratch;
     const int64_t row_index = blockIdx.x;
+    // The whole block shares the row, so it returns whole, before the first reduction and
+    // before the row's slot is read: only a live row's slot is the caller's to have made valid.
+    if (row_index >= static_cast<int64_t>(*args.live_rows)) {
+        return;
+    }
     const Row row = {args.logits + row_index * args.vocab, args.vocab};
     const int32_t slot = args.row_slots[row_index];
     const SlotRecord record = args.records[slot];

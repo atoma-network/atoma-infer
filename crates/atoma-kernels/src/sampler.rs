@@ -1,5 +1,6 @@
 //! The sampler's kernels: the gather that takes a row's token from what the device last sampled
-//! for its request slot, and the sample that draws each row's next token and leaves it there.
+//! for its request slot, and the sample that draws each live row's next token and leaves it
+//! there.
 //!
 //! The sources are in-house (`kernels/sampler.cu`), compiled by nvcc under the `cuda` feature into
 //! the in-house kernel library, apart from the vendored flash-attention build and its fast-math
@@ -28,20 +29,25 @@ pub struct GatherCall {
     pub stream: *mut c_void,
 }
 
-/// Samples one token per row from its logits under its slot's record, writes it to the slot's
-/// `sampled` entry and the row's `out` entry, and advances the slot's draw counter.
+/// Samples one token per live row from its logits under its slot's record, writes it to the
+/// slot's `sampled` entry and the row's `out` entry, and advances the slot's draw counter. The
+/// live rows are the leading rows the device-resident `live_rows` counts: a row at or past that
+/// count is left as it is, so a launch over more rows than the batch has live samples the live
+/// rows and no others.
 #[derive(Debug, Clone, Copy)]
 pub struct SampleCall {
     /// f32 `[n_rows, vocab]`, row-major.
     pub logits: u64,
-    /// i32 `[n_rows]`: the slot each row samples under.
+    /// i32 `[n_rows]`: the slot each live row samples under.
     pub row_slots: u64,
     /// The slot records, 24 bytes each, `[slots]`; each sampling row's is advanced.
     pub records: u64,
     /// u32 `[slots]`: written for each sampling row's slot.
     pub sampled: u64,
-    /// u32 `[n_rows]`: the token sampled for each row.
+    /// u32 `[n_rows]`: written with the token sampled for each live row.
     pub out: u64,
+    /// One u32 on the device: how many of the launch's leading rows are live and sample.
+    pub live_rows: u64,
     pub vocab: usize,
     pub n_rows: usize,
     pub stream: *mut c_void,
@@ -88,7 +94,8 @@ mod compiled {
     ///
     /// # Safety
     /// Every address in `call` must be live on the stream's device and match its documented
-    /// shape; every row slot must index `records` and `sampled`, and no two rows may share one.
+    /// shape; every live row's slot must index `records` and `sampled`, and no two live rows may
+    /// share one.
     pub unsafe fn sample(call: &SampleCall) -> Result<(), KernelError> {
         let args = ffi::SampleArgs {
             logits: call.logits as *const c_void,
@@ -96,6 +103,7 @@ mod compiled {
             records: call.records as *mut c_void,
             sampled: call.sampled as *mut c_void,
             out: call.out as *mut c_void,
+            live_rows: call.live_rows as *const c_void,
             vocab: arg_i64("vocab", call.vocab)?,
             n_rows: arg_i64("n_rows", call.n_rows)?,
         };
@@ -162,15 +170,17 @@ mod tests {
         "uint64_t seed;",
     ];
 
-    /// The sample launch's arguments as the host lays them out, field for field.
-    const SAMPLE_ARGS_FIELDS: [&str; 7] = [
-        "const float* logits;",
-        "const int32_t* row_slots;",
-        "SlotRecord* records;",
-        "uint32_t* sampled;",
-        "uint32_t* out;",
-        "int64_t vocab;",
-        "int64_t n_rows;",
+    /// The sample launch's arguments as the host lays them out: each field as the sources
+    /// declare it, its name, and the byte offset `ffi::SampleArgs` holds it to.
+    const SAMPLE_ARGS_FIELDS: [(&str, &str, usize); 8] = [
+        ("const float* logits;", "logits", 0),
+        ("const int32_t* row_slots;", "row_slots", 8),
+        ("SlotRecord* records;", "records", 16),
+        ("uint32_t* sampled;", "sampled", 24),
+        ("uint32_t* out;", "out", 32),
+        ("const uint32_t* live_rows;", "live_rows", 40),
+        ("int64_t vocab;", "vocab", 48),
+        ("int64_t n_rows;", "n_rows", 56),
     ];
 
     /// The fields of the struct the sources declare as `name`, in order.
@@ -209,17 +219,29 @@ mod tests {
     }
 
     #[test]
-    fn the_record_and_the_arguments_are_declared_field_for_field_as_the_host_lays_them_out() {
+    fn the_record_and_the_arguments_are_declared_field_for_field_at_the_hosts_offsets() {
         assert_eq!(declared_fields("SlotRecord"), RECORD_FIELDS);
         assert!(
             KERNEL_SOURCE.contains("static_assert(sizeof(SlotRecord) == 24"),
             "the sources hold the record to its size"
         );
-        assert_eq!(declared_fields("SampleArgs"), SAMPLE_ARGS_FIELDS);
+        assert_eq!(
+            declared_fields("SampleArgs"),
+            SAMPLE_ARGS_FIELDS.map(|(declaration, _, _)| declaration)
+        );
         assert!(
-            KERNEL_SOURCE.contains("static_assert(sizeof(SampleArgs) == 56"),
+            KERNEL_SOURCE.contains("static_assert(sizeof(SampleArgs) == 64"),
             "the sources hold the arguments to their size"
         );
+        // Each side is held to the same absolute offsets, so a reordering of either alone stops
+        // that side's build; the names and the order alone would not catch one.
+        for (_, field, offset) in SAMPLE_ARGS_FIELDS {
+            let held = format!("static_assert(offsetof(SampleArgs, {field}) == {offset}");
+            assert!(
+                KERNEL_SOURCE.contains(&held),
+                "the sources hold {field} to offset {offset}"
+            );
+        }
     }
 
     #[test]
@@ -242,6 +264,7 @@ mod tests {
                     records: 0,
                     sampled: 0,
                     out: 0,
+                    live_rows: 0,
                     vocab: 8,
                     n_rows: 1,
                     stream,
