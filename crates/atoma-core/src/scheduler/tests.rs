@@ -112,6 +112,42 @@ fn the_slot_count_covers_every_live_request_and_every_padding_dummy() {
     );
 }
 
+#[test]
+fn the_configured_population_is_admitted_beside_the_dummies_without_the_slab_growing() {
+    // A pool far larger than one maximum-length request, so the blocks the dummies reserve still
+    // leave room for one.
+    let config = config(16, 100, 4);
+    let mut pool = BlockPool::new(64);
+    let reservation = PaddingReservation::reserve(&mut pool, config.max_batch).expect("reserves");
+    let dummy_count = reservation.dummy_count();
+    let mut scheduler = Scheduler::with_padding(config, pool, reservation)
+        .expect("the pool holds one maximum-length request");
+    let capacity = scheduler.requests.capacity();
+
+    let mut clients = Vec::new();
+    for _ in 0..MAX_REQUESTS {
+        let (egress, client) = egress();
+        clients.push(client);
+        assert!(
+            scheduler.has_room(),
+            "the population cap is not reached yet"
+        );
+        scheduler
+            .intake(new_request(3, 4, egress))
+            .expect("the prompt fits the model");
+    }
+
+    assert_eq!(scheduler.live_request_count(), MAX_REQUESTS);
+    assert_eq!(scheduler.requests.len(), MAX_REQUESTS + dummy_count);
+    assert!(!scheduler.has_room(), "the population cap is reached");
+    assert_eq!(
+        scheduler.requests.capacity(),
+        capacity,
+        "the whole configured population fits the slab it was built with, so no admission moves \
+         the requests already in it"
+    );
+}
+
 /// A scheduler that retires a client leaving more than `max_backlog` events unread.
 fn backlog_scheduler(blocks: u32, max_backlog: usize) -> Scheduler {
     Scheduler::new(
