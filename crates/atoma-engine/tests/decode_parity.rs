@@ -12,6 +12,12 @@
 //! batch it is computed in; that spread is the floor the step is read against, and it is printed
 //! beside the step's.
 //!
+//! The replay runs first at every step, over a snapshot of the cache, and must write each live
+//! row's slot and nothing else in the blocks it may touch; the eager step then runs the same
+//! command and its writes must be the replay's bit for bit. Run the other way round, a replay
+//! that skipped its copy-in or its model step would read the eager step's inputs and outputs as
+//! its own and pass.
+//!
 //! A replay reads the token of a row the device has sampled for before from the device, through
 //! the graph's gather, so the keyed command a replay runs carries a decoy token in the host's
 //! copy for every such row: a graph whose model step ran ahead of its gather would decode the
@@ -50,6 +56,7 @@ use atoma_core::types::{
 use atoma_engine::batch::BatchLayout;
 use atoma_engine::config::{DeviceOrdinal, Dtype, ModelConfig, ModelId, PromptTemplate};
 use atoma_engine::decode::declaration;
+use atoma_engine::decode::graphs::CaptureReport;
 use atoma_engine::decode::ring::StagingDepth;
 use atoma_engine::device::capture::{capture_bucket_ladder, Captured};
 use atoma_engine::device::decode::{DecodeStep, DecodeStepPlan};
@@ -70,8 +77,9 @@ const DEFAULT_MODEL: &str = "NousResearch/Meta-Llama-3.1-8B-Instruct";
 const BLOCK_SIZE: usize = 16;
 const BLOCK_COUNT: usize = 512;
 const MAX_MODEL_LEN: usize = 512;
-/// As many sequences as the largest bucket holds, so every bucket is reached.
-const SEQUENCES: usize = 8;
+/// As many sequences as the maximum batch, which is what the largest bucket the step serves
+/// holds, so every bucket is reached.
+const SEQUENCES: usize = MAX_BATCH;
 const STEPS: usize = 32;
 const LADDER: [usize; 4] = [1, 2, 4, 8];
 const MAX_BATCH: usize = 8;
@@ -124,14 +132,20 @@ impl Lcg {
 }
 
 /// One sequence under test: its tokens so far, the blocks it owns, how many tokens the cache
-/// holds, and whether the device holds its last token.
+/// holds, and where its last token is.
 struct Sequence {
     tokens: Vec<u32>,
     blocks: Vec<u32>,
     context_len: usize,
-    /// Whether a replay has sampled for this sequence, so the next replay gathers its token from
-    /// the device and the host's copy of it is not read.
-    gathers: bool,
+    last_token: LastToken,
+}
+
+/// Where a sequence's last token is: on the host alone until a replay samples for the sequence,
+/// then on the device too, where the next replay's gather reads it and the host's copy is not.
+#[derive(Clone, Copy)]
+enum LastToken {
+    OnHost,
+    OnDevice,
 }
 
 impl Sequence {
@@ -161,9 +175,9 @@ impl Sequence {
     /// token before.
     fn replay_input(&self, vocab: usize) -> u32 {
         let token = self.next_token();
-        if !self.gathers {
+        let LastToken::OnDevice = self.last_token else {
             return token;
-        }
+        };
         if usize::try_from(token).expect("fits") + 1 < vocab {
             token + 1
         } else {
@@ -344,15 +358,21 @@ fn open(model: &ModelConfig) -> Rig {
     }
 }
 
+/// What one bucket's graph holds: its nodes, and how many of them allocate or free memory.
+struct GraphNodes {
+    nodes: usize,
+    memory_nodes: usize,
+}
+
 /// Prints what capturing the bucket ladder cost and what each graph holds, and holds every
 /// graph to allocating or freeing nothing.
-fn report_capture(captured: &Captured) -> Vec<(usize, usize)> {
+fn report_capture(captured: &Captured) -> Vec<GraphNodes> {
     let Captured {
         session,
         graphs,
         report,
     } = captured;
-    let counts: Vec<(usize, usize)> = LADDER
+    let nodes: Vec<GraphNodes> = LADDER
         .iter()
         .enumerate()
         .map(|(index, &rows)| {
@@ -372,7 +392,10 @@ fn report_capture(captured: &Captured) -> Vec<(usize, usize)> {
                 memory_nodes, 0,
                 "the bucket of {rows}'s graph allocates or frees memory"
             );
-            (nodes, memory_nodes)
+            GraphNodes {
+                nodes,
+                memory_nodes,
+            }
         })
         .collect();
     for cost in report.graphs() {
@@ -396,7 +419,7 @@ fn report_capture(captured: &Captured) -> Vec<(usize, usize)> {
         ),
         Err(error) => println!("capture: {error}"),
     }
-    counts
+    nodes
 }
 
 /// Shows the free-memory reading responds: a scratch allocation of `SCRATCH_BYTES` straight
@@ -501,13 +524,14 @@ struct Harness {
     vocab: usize,
 }
 
-/// Runs one decode step over `chosen` three ways and compares them: the eager decode step
-/// against candle row by row on their logits, and the replay of the bucket's graph against the
-/// eager step on the token it samples and the cache it writes. Then advances each chosen
-/// sequence by the token the replay sampled. Every chosen sequence also decodes alone on candle,
-/// which measures candle against itself over the same row; the live batch runs on candle last,
-/// so what the cache holds at the end of the step is what it held before this measurement was
-/// taken.
+/// Runs one decode step over `chosen` three ways and compares them: the replay of the bucket's
+/// graph first, which must write each live row's slot and nothing else, then the eager decode
+/// step, whose cache writes must be the replay's bit for bit and whose logits are compared
+/// against candle row by row, with the token the replay sampled held to the eager step's argmax.
+/// Then advances each chosen sequence by that token. Every chosen sequence also decodes alone
+/// on candle, which measures candle against itself over the same row; the live batch runs on
+/// candle last, so what the cache holds at the end of the step is what it held before this
+/// measurement was taken.
 fn compare_step(harness: &mut Harness, chosen: &[usize], step: usize) {
     let Harness {
         context,
@@ -533,6 +557,22 @@ fn compare_step(harness: &mut Harness, chosen: &[usize], step: usize) {
         .collect();
     let kv_width = kv_width(cache);
     let before = snapshot(cache, &written);
+    let replayed = lay_out(&commands.replayed);
+    let sampled: Vec<u32> = holding_free_memory(context, *pool, step, "the replay", || {
+        forward
+            .forward(&replayed)
+            .expect("the keyed batch replays its bucket's graph")
+            .to_vec()
+    });
+    let after_replay = snapshot(cache, &written);
+    check_step_writes(
+        &before,
+        &after_replay,
+        &written,
+        kv_width,
+        &format!("step {step}, the replay"),
+    );
+
     let tensor_logits: Vec<Vec<f32>> =
         holding_free_memory(context, *pool, step, "the eager decode step", || {
             let logits = forward
@@ -543,19 +583,9 @@ fn compare_step(harness: &mut Harness, chosen: &[usize], step: usize) {
                 .collect()
         });
     let after_step = snapshot(cache, &written);
-    check_step_writes(&before, &after_step, &written, kv_width, step);
-
-    let replayed = lay_out(&commands.replayed);
-    let sampled: Vec<u32> = holding_free_memory(context, *pool, step, "the replay", || {
-        forward
-            .forward(&replayed)
-            .expect("the keyed batch replays its bucket's graph")
-            .to_vec()
-    });
-    let after_replay = snapshot(cache, &written);
     assert!(
-        identical(&after_step, &after_replay),
-        "step {step}: the replay's cache writes are not the eager step's, bit for bit"
+        identical(&after_replay, &after_step),
+        "step {step}: the eager step's cache writes are not the replay's, bit for bit"
     );
     let bucket = LADDER
         .iter()
@@ -603,7 +633,7 @@ fn compare_step(harness: &mut Harness, chosen: &[usize], step: usize) {
         let sequence = &mut sequences[index];
         sequence.context_len += 1;
         sequence.tokens.push(next);
-        sequence.gathers = true;
+        sequence.last_token = LastToken::OnDevice;
     }
 }
 
@@ -720,7 +750,7 @@ fn seed_sequences(random: &mut Lcg, vocab: usize) -> Vec<Sequence> {
                 .map(|block| u32::try_from(index * blocks_each + block).expect("fits"))
                 .collect(),
             context_len: 0,
-            gathers: false,
+            last_token: LastToken::OnHost,
         })
         .collect()
 }
@@ -739,7 +769,7 @@ fn batch_size(step: usize, random: &mut Lcg) -> usize {
 /// memory read through the runtime context before and after: a replay that allocates anything
 /// that stays would show as a drop across the soak. The sequences are not advanced, so every
 /// replay decodes the same position and writes the same slots.
-fn soak(harness: &mut Harness) -> (DeviceBytes, DeviceBytes) {
+fn soak(harness: &mut Harness) -> SoakReadings {
     let Harness {
         context,
         forward,
@@ -759,21 +789,56 @@ fn soak(harness: &mut Harness) -> (DeviceBytes, DeviceBytes) {
             .expect("the keyed batch replays its bucket's graph");
     }
     let after = free_memory(context);
-    (before, after)
+    SoakReadings { before, after }
 }
 
-#[test]
-#[ignore = "needs a device, the CUDA toolkit and a Llama checkpoint; run scripts/decode-parity.sh"]
-fn the_two_forwards_agree_on_every_decode_and_every_bucket_captures_and_replays() {
-    let model = ModelConfig {
+/// Free device memory read before and after the soak.
+#[derive(Clone, Copy)]
+struct SoakReadings {
+    before: DeviceBytes,
+    after: DeviceBytes,
+}
+
+/// The bounds the run is held to: `PARITY_MAX_ABS_DIFF` on the f32 logits, the eager step
+/// against candle, and `PARITY_KV_MAX_ABS_DIFF` on the key and value rows the step writes
+/// against candle's writes of the same slots, each the default where the variable is unset.
+struct Bounds {
+    logits: f32,
+    kv: f32,
+}
+
+impl Bounds {
+    fn from_env() -> Self {
+        Self {
+            logits: bound_from_env("PARITY_MAX_ABS_DIFF", DEFAULT_MAX_ABS_DIFF),
+            kv: bound_from_env("PARITY_KV_MAX_ABS_DIFF", DEFAULT_KV_MAX_ABS_DIFF),
+        }
+    }
+}
+
+/// What capturing the bucket ladder left to report: what each graph holds, what the capture
+/// cost, and the free memory read once the reading was shown to respond.
+struct CaptureEvidence {
+    graphs: Vec<GraphNodes>,
+    report: CaptureReport,
+    free_after: DeviceBytes,
+}
+
+/// The checkpoint under test: `PARITY_MODEL`, or Llama 3.1 8B Instruct, in bf16.
+fn model_under_test() -> ModelConfig {
+    ModelConfig {
         id: env::var("PARITY_MODEL").map_or_else(|_| ModelId::new(DEFAULT_MODEL), ModelId::new),
         revision: "main".to_owned(),
         cache_dir: None,
         dtype: Dtype::Bf16,
         prompt_template: PromptTemplate::Llama3,
-    };
-    let bound = bound_from_env("PARITY_MAX_ABS_DIFF", DEFAULT_MAX_ABS_DIFF);
-    let kv_bound = bound_from_env("PARITY_KV_MAX_ABS_DIFF", DEFAULT_KV_MAX_ABS_DIFF);
+    }
+}
+
+/// Opens the device, captures the bucket ladder over the rig's dummies' blocks, and builds the
+/// forward that serves from it beside the sequences under test, prefilled through candle: the
+/// harness, and what the capture left to report.
+fn build_harness(model: &ModelConfig, random: &mut Lcg) -> (Harness, CaptureEvidence) {
     let Rig {
         context,
         allocation,
@@ -782,7 +847,7 @@ fn the_two_forwards_agree_on_every_decode_and_every_bucket_captures_and_replays(
         mut sampler,
         readback,
         vocab,
-    } = open(&model);
+    } = open(model);
     let contract = CaptureContract::resolve(&[declaration()], &ModelDeclaration::new("llama"));
     let dispatcher = Dispatcher::new(&dispatch_config(), &contract);
 
@@ -794,13 +859,13 @@ fn the_two_forwards_agree_on_every_decode_and_every_bucket_captures_and_replays(
         &dummy_blocks(),
     )
     .expect("every bucket of the bucket ladder captures");
-    let counts = report_capture(&captured);
+    let graphs = report_capture(&captured);
     let Captured {
         session,
-        graphs,
+        graphs: graph_set,
         report,
     } = captured;
-    let free_after_capture = free_memory_responds(&context);
+    let free_after = free_memory_responds(&context);
     let cache: Vec<Tensor> = allocated.kv_cache.layers().to_vec();
     let pool = default_pool(allocated.device.stream().context());
     if pool.is_none() {
@@ -808,10 +873,9 @@ fn the_two_forwards_agree_on_every_decode_and_every_bucket_captures_and_replays(
     }
     allocated.sampler = Some(sampler);
     let forward =
-        CudaForward::new(allocated, decode_step, graphs, session).expect("the forward builds");
+        CudaForward::new(allocated, decode_step, graph_set, session).expect("the forward builds");
 
-    let mut random = Lcg(0x5EED_2026_0903);
-    let sequences = seed_sequences(&mut random, vocab);
+    let sequences = seed_sequences(random, vocab);
     let mut harness = Harness {
         context,
         forward,
@@ -828,19 +892,25 @@ fn the_two_forwards_agree_on_every_decode_and_every_bucket_captures_and_replays(
         &mut harness.readback,
         &mut harness.sequences,
     );
+    (
+        harness,
+        CaptureEvidence {
+            graphs,
+            report,
+            free_after,
+        },
+    )
+}
 
-    for step in 0..STEPS {
-        let mut chosen: Vec<usize> = (0..SEQUENCES).collect();
-        for index in (1..SEQUENCES).rev() {
-            chosen.swap(index, random.below(index + 1));
-        }
-        chosen.truncate(batch_size(step, &mut random));
-        chosen.sort_unstable();
-        compare_step(&mut harness, &chosen, step);
-    }
-    let (soak_before, soak_after) = soak(&mut harness);
-    let parity = harness.parity;
-
+/// Prints the evidence block: what every comparison found, what the capture cost, and what the
+/// soak read.
+fn print_evidence(
+    model: &ModelConfig,
+    parity: &Parity,
+    capture: &CaptureEvidence,
+    bounds: &Bounds,
+    soak: SoakReadings,
+) {
     println!("=============== decode parity evidence ===============");
     println!("model:                {}", model.id);
     println!("decode steps:         {STEPS}");
@@ -849,18 +919,19 @@ fn the_two_forwards_agree_on_every_decode_and_every_bucket_captures_and_replays(
     println!("argmax ties:          {}", parity.ties);
     println!("max |logit diff|:     {:.6}", parity.max_abs_diff);
     println!("mean |logit diff|:    {:.6}", parity.mean_abs_diff());
-    println!("bound:                {bound}");
+    println!("bound:                {}", bounds.logits);
     println!("candle alone against candle in the live batch:");
     println!("  max |logit diff|:   {:.6}", parity.candle_max_abs_diff);
     println!("  mean |logit diff|:  {:.6}", parity.candle_mean_abs_diff());
     println!("cache writes, the step against candle over the same slots:");
     println!("  max |k/v diff|:     {:.6}", parity.kv_max_abs_diff);
-    println!("  bound:              {kv_bound}");
-    println!("bucket ladder capture, {} graphs:", counts.len());
-    for ((rows, (nodes, memory_nodes)), cost) in LADDER.iter().zip(&counts).zip(report.graphs()) {
+    println!("  bound:              {}", bounds.kv);
+    let report = &capture.report;
+    println!("bucket ladder capture, {} graphs:", capture.graphs.len());
+    for ((rows, graph), cost) in LADDER.iter().zip(&capture.graphs).zip(report.graphs()) {
         println!(
-            "  bucket {rows:>2}: {nodes} nodes, {memory_nodes} memory nodes, {:?}, {} bytes",
-            cost.elapsed, cost.used
+            "  bucket {rows:>2}: {} nodes, {} memory nodes, {:?}, {} bytes",
+            graph.nodes, graph.memory_nodes, cost.elapsed, cost.used
         );
     }
     println!(
@@ -884,22 +955,31 @@ fn the_two_forwards_agree_on_every_decode_and_every_bucket_captures_and_replays(
         println!("  bucket {rows:>2} replayed: {replays} steps");
     }
     println!(
-        "free memory: {free_after_capture} bytes after the capture; {SOAK_REPLAYS} replays: \
-         {soak_before} bytes before, {soak_after} after"
+        "free memory: {} bytes after the capture; {SOAK_REPLAYS} replays: {} bytes before, {} \
+         after",
+        capture.free_after, soak.before, soak.after
     );
+}
+
+/// Holds the run to its bounds: every argmax and every replayed token agrees where the
+/// reference separates the ids, every bucket was replayed, and the soak allocated nothing that
+/// stayed.
+fn assert_evidence(parity: &Parity, bounds: &Bounds, soak: SoakReadings) {
     assert_eq!(
         parity.argmax_disagreements, 0,
         "every live row's argmax agrees on ids candle's logits separate"
     );
     assert!(
-        parity.max_abs_diff <= bound,
-        "the largest logit difference {} is above the bound {bound}",
-        parity.max_abs_diff
+        parity.max_abs_diff <= bounds.logits,
+        "the largest logit difference {} is above the bound {}",
+        parity.max_abs_diff,
+        bounds.logits
     );
     assert!(
-        parity.kv_max_abs_diff <= kv_bound,
-        "the largest cache-write difference {} is above the bound {kv_bound}",
-        parity.kv_max_abs_diff
+        parity.kv_max_abs_diff <= bounds.kv,
+        "the largest cache-write difference {} is above the bound {}",
+        parity.kv_max_abs_diff,
+        bounds.kv
     );
     assert_eq!(
         parity.replay_disagreements, 0,
@@ -911,11 +991,34 @@ fn the_two_forwards_agree_on_every_decode_and_every_bucket_captures_and_replays(
         parity.replays_per_bucket
     );
     assert_eq!(
-        soak_before,
-        soak_after,
+        soak.before,
+        soak.after,
         "{SOAK_REPLAYS} replays left {} bytes allocated",
-        soak_before.get().abs_diff(soak_after.get())
+        soak.before.get().abs_diff(soak.after.get())
     );
+}
+
+#[test]
+#[ignore = "needs a device, the CUDA toolkit and a Llama checkpoint; run scripts/decode-parity.sh"]
+fn the_two_forwards_agree_on_every_decode_and_every_bucket_captures_and_replays() {
+    let model = model_under_test();
+    let bounds = Bounds::from_env();
+    let mut random = Lcg(0x5EED_2026_0903);
+    let (mut harness, capture) = build_harness(&model, &mut random);
+
+    for step in 0..STEPS {
+        let mut chosen: Vec<usize> = (0..SEQUENCES).collect();
+        for index in (1..SEQUENCES).rev() {
+            chosen.swap(index, random.below(index + 1));
+        }
+        chosen.truncate(batch_size(step, &mut random));
+        chosen.sort_unstable();
+        compare_step(&mut harness, &chosen, step);
+    }
+    let soak = soak(&mut harness);
+
+    print_evidence(&model, &harness.parity, &capture, &bounds, soak);
+    assert_evidence(&harness.parity, &bounds, soak);
 }
 
 /// Whether two snapshots hold the same values bit for bit, `-0.0` and `NaN` included.
@@ -980,16 +1083,16 @@ fn slot_ranges(offset: usize, kv_width: usize) -> [Range<usize>; 2] {
     [k.clone(), v_base + k.start..v_base + k.end]
 }
 
-/// Holds the decode step to writing each live row's own slot, and the dummies' slot of the dummy
-/// block, and nothing else in those blocks. Candle's run of the same batch overwrites the rows'
-/// slots afterwards, so a write that landed anywhere else would otherwise go unseen: later steps
-/// would read the same wrong cache through both forwards.
+/// Holds `what`, one step over the cache, to writing each live row's own slot, and the dummies'
+/// slot of the dummy block, and nothing else in those blocks. The eager step and candle's run of
+/// the same batch overwrite the rows' slots afterwards, so a write that landed anywhere else
+/// would otherwise go unseen: later steps would read the same wrong cache through every path.
 fn check_step_writes(
     before: &Snapshot,
     after: &Snapshot,
     written: &[usize],
     kv_width: usize,
-    step: usize,
+    what: &str,
 ) {
     for (row, (before, after)) in before.rows.iter().zip(&after.rows).enumerate() {
         let ranges = slot_ranges(written[row] % BLOCK_SIZE, kv_width);
@@ -998,13 +1101,13 @@ fn check_step_writes(
                 ranges
                     .iter()
                     .any(|range| before[range.clone()] != after[range.clone()]),
-                "step {step} row {row} layer {layer}: the decode step did not write its slot"
+                "{what}, row {row} layer {layer}: no write to the row's slot"
             );
             untouched_outside(
                 before,
                 after,
                 &ranges,
-                &format!("step {step} row {row} layer {layer}"),
+                &format!("{what}, row {row} layer {layer}"),
             );
         }
     }
@@ -1014,7 +1117,7 @@ fn check_step_writes(
             before,
             after,
             &ranges,
-            &format!("step {step} dummy block layer {layer}"),
+            &format!("{what}, dummy block layer {layer}"),
         );
     }
 }
@@ -1027,7 +1130,7 @@ fn untouched_outside(before: &[f32], after: &[f32], ranges: &[Range<usize>], at:
         }
         assert!(
             before.to_bits() == after.to_bits(),
-            "{at}: the decode step wrote outside its slot, at value {index}"
+            "{at}: a write outside the slot, at value {index}"
         );
     }
 }
