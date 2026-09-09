@@ -13,6 +13,9 @@
 //! moved, before the step's own work is enqueued. Each address is re-read through its owner, and
 //! candle's tensors carry cudarc's event guard, so the reading enqueues a wait and a record for
 //! each weight and cache first. A release build carries no such list and reads nothing.
+//!
+//! The forward drops its session before the memory a recording bakes addresses in;
+//! [`CudaForward`]'s field order is what does it.
 
 use std::sync::Arc;
 
@@ -83,18 +86,36 @@ pub struct Allocated {
 /// Holds the session's Replay phase for the process lifetime: nothing is captured in this crate,
 /// and holding the phase is what keeps the allocation from being reopened. The step over runtime
 /// tensors is enqueued through it; under NCCL the decode step stays on candle and there is none.
+///
+/// Field order is load-bearing. Rust drops fields in declaration order, so this declaration is
+/// the teardown order, and there is no hand-written cleanup to get wrong: the Replay phase goes
+/// first, taking the graph set with it, and every address a recording bakes is in memory declared
+/// after it. A [`GraphEntry`](atoma_runtime::graph_entry::GraphEntry) cannot hold this memory for
+/// itself — one arena, one device block and one set of statics serve every bucket, so no single
+/// entry can own them, and [`BakedBuffers`](atoma_runtime::session::BakedBuffers) moves what it
+/// is handed into one entry — so the declaration is the whole of the guarantee. A `Drop` impl
+/// could not put it back: `drop` runs before any field drops, so it cannot reorder them at all
+/// short of `Option` or `ManuallyDrop`. [`crate::forward`] holds this file's declaration to the
+/// order instead.
 pub struct CudaForward {
-    allocated: Allocated,
+    /// Held for the process lifetime, which is what keeps the allocation from being reopened;
+    /// under NCCL nothing is enqueued through it. Declared first, and so dropped first: the graph
+    /// set goes before the memory it bakes addresses in.
+    #[cfg_attr(feature = "nccl", allow(dead_code))]
+    session: Replay,
+    /// Dropped after the session: the arena, the device block and the statics every bucket's
+    /// step reads are owned here.
     #[cfg(not(feature = "nccl"))]
     decode_step: DecodeStep,
     /// Every address the decode step and the sampler bake, read when the forward was built; a
     /// debug build reads them again before each keyed step, and a release build carries no list.
+    /// Names and `u64` addresses only: it owns none of the memory a recording bakes, so where it
+    /// sits in the order is free.
     #[cfg(all(not(feature = "nccl"), debug_assertions))]
     baked: BakedAddresses,
-    /// Held for the process lifetime, which is what keeps the allocation from being reopened;
-    /// under NCCL nothing is enqueued through it.
-    #[cfg_attr(feature = "nccl", allow(dead_code))]
-    session: Replay,
+    /// Dropped last: candle's weights and cache and the sampler's arrays are most of what a
+    /// recording bakes, and the device itself is here.
+    allocated: Allocated,
 }
 
 impl CudaForward {
@@ -114,12 +135,12 @@ impl CudaForward {
         #[cfg(all(not(feature = "nccl"), debug_assertions))]
         let baked = BakedAddresses::bake(addresses(&allocated, &decode_step)?);
         Ok(Self {
-            allocated,
+            session,
             #[cfg(not(feature = "nccl"))]
             decode_step,
             #[cfg(all(not(feature = "nccl"), debug_assertions))]
             baked,
-            session,
+            allocated,
         })
     }
 
@@ -152,11 +173,11 @@ impl CudaForward {
             #[cfg(debug_assertions)]
             self.assert_unmoved();
             let Self {
-                allocated: _,
+                session,
                 decode_step,
                 #[cfg(debug_assertions)]
                     baked: _,
-                session,
+                allocated: _,
             } = self;
             return Ok(decode_step.run_for_logits(session, layout, batch, readback)?);
         }
@@ -203,11 +224,11 @@ impl CudaForward {
         #[cfg(debug_assertions)]
         self.assert_unmoved();
         let Self {
-            allocated,
+            session,
             decode_step,
             #[cfg(debug_assertions)]
                 baked: _,
-            session,
+            allocated,
         } = self;
         Ok(decode_step.run(session, layout, batch, allocated.sampler.as_mut())?)
     }
