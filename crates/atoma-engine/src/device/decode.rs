@@ -39,8 +39,7 @@ use atoma_models::gemm::{GemmError, StepBlas, WORKSPACE_BYTES};
 use atoma_models::kernels::RotaryTensors;
 use atoma_models::layer::{LayerWeight, LLAMA_LAYER};
 use atoma_models::llama::slots::{
-    Bucket, BucketSlots, LayerWeights, LlamaCache, LlamaWeights, SlotError, SlotSources,
-    StepStatics,
+    BucketSlots, LayerWeights, LlamaCache, LlamaWeights, SlotError, SlotSources, StepStatics,
 };
 use atoma_models::llama::step::{LlamaDecode, LlamaStep, StepError};
 use atoma_models::rope::RotaryTables;
@@ -562,8 +561,7 @@ fn resolve_slots(
         .buckets
         .iter()
         .zip(sizing.plans)
-        .map(|((index, tokens), attention)| {
-            let bucket = Bucket { index, tokens };
+        .map(|(bucket, attention)| {
             let views = inputs.bucket(bucket.index)?;
             Ok(BucketSlots::resolve(
                 &sources,

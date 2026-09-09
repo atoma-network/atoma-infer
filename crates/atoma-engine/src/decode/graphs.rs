@@ -9,6 +9,7 @@
 use std::time::Duration;
 
 use atoma_core::types::BlockId;
+use atoma_models::llama::slots::Bucket;
 use atoma_runtime::arena::BucketIdx;
 use atoma_runtime::context::DeviceBytes;
 use atoma_runtime::graph_memory::{GraphMemory, GraphMemoryError};
@@ -53,15 +54,20 @@ pub fn dummy_runs(
 ) -> Result<Vec<DummyRun>, GraphSetError> {
     buckets
         .iter()
-        .map(|(bucket, rows)| {
-            let Some(taken) = blocks.get(..rows) else {
-                return Err(GraphSetError::NotEnoughDummyBlocks {
-                    rows,
-                    blocks: blocks.len(),
-                });
-            };
-            Ok(DummyRun::new(bucket, taken.to_vec()))
-        })
+        .map(
+            |Bucket {
+                 index,
+                 tokens: rows,
+             }| {
+                let Some(taken) = blocks.get(..rows) else {
+                    return Err(GraphSetError::NotEnoughDummyBlocks {
+                        rows,
+                        blocks: blocks.len(),
+                    });
+                };
+                Ok(DummyRun::new(index, taken.to_vec()))
+            },
+        )
         .collect()
 }
 

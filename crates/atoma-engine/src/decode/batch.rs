@@ -11,6 +11,7 @@
 
 use atoma_core::dispatch::{DispatchConfig, GraphKey};
 use atoma_core::types::RequestCount;
+use atoma_models::llama::slots::Bucket;
 use atoma_runtime::arena::BucketIdx;
 use thiserror::Error;
 
@@ -92,11 +93,14 @@ impl DecodeBuckets {
     }
 
     /// Each bucket with its index, in index order.
-    pub fn iter(&self) -> impl Iterator<Item = (BucketIdx, usize)> + '_ {
+    pub fn iter(&self) -> impl Iterator<Item = Bucket> + '_ {
         self.tokens
             .iter()
             .enumerate()
-            .map(|(index, &tokens)| (BucketIdx(index), tokens))
+            .map(|(index, &tokens)| Bucket {
+                index: BucketIdx(index),
+                tokens,
+            })
     }
 
     /// The largest bucket, or zero when nothing is usable.
@@ -226,9 +230,13 @@ mod tests {
             "the repeated four is served by its first entry and gets no second table"
         );
         assert_eq!(buckets.largest(), 4);
+        let bucket = |index: usize, tokens: usize| Bucket {
+            index: BucketIdx(index),
+            tokens,
+        };
         assert_eq!(
             buckets.iter().collect::<Vec<_>>(),
-            [(BucketIdx(0), 1), (BucketIdx(1), 4), (BucketIdx(2), 2)]
+            [bucket(0, 1), bucket(1, 4), bucket(2, 2)]
         );
         assert_eq!(buckets.index_of(4), Some(BucketIdx(1)));
         assert_eq!(buckets.index_of(2), Some(BucketIdx(2)));
