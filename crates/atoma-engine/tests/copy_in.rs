@@ -64,11 +64,12 @@ use cudarc::driver::CudaStream;
 
 /// The bucket ladder under test.
 const LADDER: [usize; 3] = [1, 2, 4];
-/// The largest bucket of the ladder, and the maximum batch that keeps every bucket usable.
+/// The largest bucket of the bucket ladder, and the maximum batch that keeps every bucket
+/// usable.
 const LARGEST_BUCKET: usize = 4;
 /// Rows of the bucket both steps and the dummy run fill.
 const ROWS: usize = 2;
-/// That bucket: the ladder's second.
+/// That bucket: the bucket ladder's second.
 const BUCKET: BucketIdx = BucketIdx(1);
 /// Columns of the block table, wide enough that the largest bucket's table is longer than the
 /// alignment, so the buckets pack to different lengths.
