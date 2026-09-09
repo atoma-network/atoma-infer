@@ -3,6 +3,7 @@
 
 use std::collections::HashSet;
 use std::fmt;
+use std::num::NonZeroUsize;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
@@ -94,6 +95,21 @@ pub enum Dtype {
     F16,
     Bf16,
     F32,
+}
+
+impl Dtype {
+    /// Bytes one element takes on the device.
+    ///
+    /// # Panics
+    ///
+    /// Never: two and four are not zero.
+    #[must_use]
+    pub const fn element_bytes(self) -> NonZeroUsize {
+        match self {
+            Dtype::F16 | Dtype::Bf16 => NonZeroUsize::new(2).expect("two is not zero"),
+            Dtype::F32 => NonZeroUsize::new(4).expect("four is not zero"),
+        }
+    }
 }
 
 /// The executor: one thread per rank, each owning a device and pinned to a core.
