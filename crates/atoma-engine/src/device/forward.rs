@@ -63,6 +63,11 @@ pub enum CudaForwardError {
     #[cfg(not(feature = "nccl"))]
     #[error(transparent)]
     GraphSet(#[from] GraphSetError),
+    /// A keyed batch on a rank that holds no sampler, so nothing a graph's sample reads is
+    /// staged: every rank built without NCCL holds one, so this names a forward built wrongly.
+    #[cfg(not(feature = "nccl"))]
+    #[error("a keyed batch reached the decode step on a rank that holds no sampler")]
+    NoSampler,
     /// The forward's logits came back on the host, which no device forward should produce.
     #[error("the logits are not on the device")]
     LogitsNotOnDevice,
@@ -232,7 +237,7 @@ impl CudaForward {
     }
 
     /// Runs `batch` on the decode step by replaying the graph its bucket was captured into,
-    /// which stages the sampler for it and samples its live rows, when this rank samples.
+    /// which stages the sampler for it and samples its live rows.
     #[cfg(not(feature = "nccl"))]
     fn run_decode_step(
         &mut self,
@@ -249,8 +254,11 @@ impl CudaForward {
                 baked: _,
             allocated,
         } = self;
+        let Some(sampler) = allocated.sampler.as_mut() else {
+            return Err(CudaForwardError::NoSampler);
+        };
         let graph = graphs.graph(batch.bucket)?;
-        Ok(decode_step.run(session, graph, layout, batch, allocated.sampler.as_mut())?)
+        Ok(decode_step.run(session, graph, layout, batch, sampler)?)
     }
 
     /// Runs `layout` through the Llama forward on candle's stream and samples the selected rows

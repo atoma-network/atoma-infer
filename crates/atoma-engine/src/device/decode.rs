@@ -16,8 +16,8 @@
 //! behind it. Nothing is captured here; a recording is made over a dummy run — a bucket's rows
 //! as padding rows over one block each — staged and copied in the same way and with no readback,
 //! under the keyed step over every row of the bucket, [`DecodeStep::bucket_step`], whose sample
-//! returns for every row since the run's live-row count is zero. A dummy run under the model
-//! step alone is what a capture check or a warmup runs when there is no live batch.
+//! returns for every row since the run's live-row count is zero. The warmup a recording consumes
+//! runs that same step over that same run, eagerly, immediately before it.
 //!
 //! The step's outputs reach the sampler and the readback as tensor views narrowed to the live
 //! rows: the bucket's logits and the sampler's row tokens are viewed once, at Allocation, over
@@ -332,8 +332,6 @@ impl DecodeStep {
     /// readback of the live rows' tokens enqueued in that order, then the host wait on those
     /// tokens. The batch states that every entry computes one token, so its rows are the token
     /// rows the gather covers, and the live-row count the copy-in carried bounds the sample.
-    /// A rank with no sampler has no sampler arrays staged for a graph's sample to read, so it
-    /// runs the bucket's model step eagerly instead, waits for it, and returns no tokens.
     ///
     /// # Errors
     ///
@@ -345,17 +343,10 @@ impl DecodeStep {
         graph: GraphIdx,
         layout: &BatchLayout,
         batch: DecodeBatch,
-        sampler: Option<&'a mut DeviceSampler>,
+        sampler: &'a mut DeviceSampler,
     ) -> Result<&'a [u32], DecodeStepError> {
         let entry = self.inputs.acquire()?;
         let arrays = self.inputs.stage(&entry, layout, &batch)?;
-        let Some(sampler) = sampler else {
-            session.run(&mut WaitEvent::new(&self.candle_done))?;
-            session.run(&mut self.copy_in(entry, batch.bucket)?)?;
-            session.run(&mut self.descriptor(batch.bucket)?)?;
-            session.synchronize()?;
-            return Ok(&[]);
-        };
         sampler.stage(layout, batch.tokens, arrays)?;
         session.run(&mut WaitEvent::new(&self.candle_done))?;
         session.run(&mut sampler.upload_records()?)?;
