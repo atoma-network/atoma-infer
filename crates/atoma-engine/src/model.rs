@@ -225,11 +225,14 @@ struct KvGeometryDeclaration {
     num_hidden_layers: usize,
     hidden_size: usize,
     num_attention_heads: usize,
-    num_key_value_heads: usize,
+    /// Absent from a checkpoint written before grouped-query attention, where every attention
+    /// head has a key-value head of its own; the model loader reads it the same way.
+    num_key_value_heads: Option<usize>,
 }
 
 /// The model's cache as one layer group of full attention, read from its `config.json`: every
-/// layer caches keys and values for `num_key_value_heads` heads of `hidden_size /
+/// layer caches keys and values for `num_key_value_heads` heads — `num_attention_heads` where
+/// the checkpoint declares none, as the model loader reads it — of `hidden_size /
 /// num_attention_heads` elements each, in `dtype`, over blocks of `block_size` tokens. What a
 /// configuration's padding costs is answerable from this before anything is allocated. The
 /// bytes are the whole cache's; under tensor parallelism each rank holds its share of the heads.
@@ -263,7 +266,12 @@ pub fn kv_cache_spec(
         kind: CacheKind::Full,
         layout: BlockLayout {
             block_size,
-            kv_head_count: count("num_key_value_heads", declared.num_key_value_heads)?,
+            kv_head_count: count(
+                "num_key_value_heads",
+                declared
+                    .num_key_value_heads
+                    .unwrap_or(declared.num_attention_heads),
+            )?,
             head_width: count(
                 "hidden_size / num_attention_heads",
                 declared.hidden_size / attention_heads.get(),
@@ -373,6 +381,24 @@ mod tests {
             32 * 16 * 2 * 8 * 128 * 4,
             "f32 elements are four bytes"
         );
+    }
+
+    #[test]
+    fn a_checkpoint_declaring_no_kv_heads_caches_one_per_attention_head() {
+        // Written before grouped-query attention: no `num_key_value_heads`, which the model
+        // loader reads as one key-value head per attention head.
+        let dir = TempDir::new().unwrap();
+        let config = file(
+            &dir,
+            "config.json",
+            r#"{"num_hidden_layers": 2, "hidden_size": 64, "num_attention_heads": 4}"#,
+        );
+        let block_size = TokenCount::new(16).unwrap();
+
+        let spec = kv_cache_spec(&config, block_size, Dtype::Bf16).unwrap();
+
+        // One block: 2 layers of 16 tokens, each token K and V over 4 heads of 16 bf16.
+        assert_eq!(spec.bytes_per_block(), 2 * 16 * 2 * 4 * 16 * 2);
     }
 
     #[test]
