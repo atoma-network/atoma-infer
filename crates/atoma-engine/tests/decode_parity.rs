@@ -39,6 +39,7 @@
 // The evidence block is this test's product; it goes to stdout on purpose.
 #![allow(clippy::print_stdout, clippy::print_stderr)]
 
+use std::cmp::Ordering;
 use std::env;
 use std::ops::Range;
 use std::ptr;
@@ -525,10 +526,11 @@ struct Harness {
 }
 
 /// Runs each live entry through candle on its own, one row to a step, so every row has the
-/// reference computed in a second shape beside the one the live batch gives it.
+/// reference computed in a second shape. Candle's logits move with the live batch, so a pair of
+/// ids it orders one way batched and the other way alone is a pair it cannot order at all.
 fn candle_alone(
     forward: &mut CudaForward,
-    readback: &mut Readback,
+    readback: &mut Readback<f32>,
     live: &[(usize, &Sequence)],
     step: usize,
 ) -> Vec<Vec<f32>> {
@@ -629,7 +631,7 @@ fn compare_step(harness: &mut Harness, chosen: &[usize], step: usize) {
     assert_eq!(sampled.len(), chosen.len(), "one token per live entry");
     for (row, tensor_row) in tensor_logits.iter().enumerate() {
         let candle_row = candle_logits.row(row).expect("row");
-        record_argmax(parity, step, row, tensor_row, candle_row);
+        record_argmax(parity, step, row, tensor_row, (candle_row, &alone[row]));
         record_replay(parity, step, row, tensor_row, sampled[row]);
         let diff = widest(tensor_row, candle_row);
         parity.max_abs_diff = parity.max_abs_diff.max(diff);
@@ -679,36 +681,43 @@ fn holding_free_memory<T>(
     result
 }
 
-/// Compares the two forwards' argmax on one row, counting a disagreement or a tie.
+/// Compares the two forwards' argmax on one row, counting a disagreement or a tie. `reference`
+/// is candle's row twice: computed in the live batch, and computed alone.
 fn record_argmax(
     parity: &mut Parity,
     step: usize,
     row: usize,
     tensor_row: &[f32],
-    candle_row: &[f32],
+    reference: (&[f32], &[f32]),
 ) {
+    let (candle_row, alone_row) = reference;
     let (ours, theirs) = (argmax(tensor_row), argmax(candle_row));
     if ours == theirs {
         return;
     }
-    // Both forwards' logits for both ids. Candle reads its logits back in bf16: when it holds
-    // the two ids at one value it cannot order them, and its argmax takes the lower id, so the
-    // row is a tie rather than a disagreement. The tie is exact equality of what candle holds.
+    // The reference orders the two ids only when it holds the same order in both shapes it was
+    // computed in. Candle reads its logits back in bf16 and its logits move with the live batch
+    // by far more than one bf16 step, so a pair it holds at one value, or ranks one way batched
+    // and the other way alone, is a pair it cannot order: the row is a tie, not a disagreement.
     let (ours_at, theirs_at) = (at(ours), at(theirs));
-    let tied = candle_row[ours_at].to_bits() == candle_row[theirs_at].to_bits();
+    let batched = candle_row[ours_at].total_cmp(&candle_row[theirs_at]);
+    let alone = alone_row[ours_at].total_cmp(&alone_row[theirs_at]);
+    let tied = batched != alone || batched == Ordering::Equal;
     if tied {
         parity.ties += 1;
     } else {
         parity.argmax_disagreements += 1;
     }
     eprintln!(
-        "step {step} row {row}: {} — decode step argmax {ours} (step {:.4}, candle {:.4}), \
-         candle argmax {theirs} (step {:.4}, candle {:.4})",
+        "step {step} row {row}: {} — ids {ours}/{theirs}; step {:.6}/{:.6}, candle batched \
+         {:.6}/{:.6}, candle alone {:.6}/{:.6}",
         if tied { "tie" } else { "disagreement" },
         tensor_row[ours_at],
-        candle_row[ours_at],
         tensor_row[theirs_at],
-        candle_row[theirs_at]
+        candle_row[ours_at],
+        candle_row[theirs_at],
+        alone_row[ours_at],
+        alone_row[theirs_at]
     );
 }
 
@@ -970,12 +979,12 @@ fn print_evidence(
 }
 
 /// Holds the run to its bounds: every argmax and every replayed token agrees where the
-/// reference separates the ids, every bucket was replayed, and the soak allocated nothing that
+/// reference orders the ids, every bucket was replayed, and the soak allocated nothing that
 /// stayed.
 fn assert_evidence(parity: &Parity, bounds: &Bounds, soak: SoakReadings) {
     assert_eq!(
         parity.argmax_disagreements, 0,
-        "every live row's argmax agrees on ids candle's logits separate"
+        "every live row's argmax agrees on ids candle orders the same way batched and alone"
     );
     assert!(
         parity.max_abs_diff <= bounds.logits,
