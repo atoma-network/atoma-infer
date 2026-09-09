@@ -396,7 +396,7 @@ impl DeviceSampler {
     /// caller's to stage, as [`stage_dummy`](crate::decode::staging::stage_dummy) does, naming no
     /// request slot and a count of zero — so what this settles is the rows the run's descriptors
     /// cover: every row of the bucket, for the gather and the sample alike, since a graph bakes
-    /// the bucket's rows and the sample takes its live count from the device. No row samples
+    /// the bucket's rows and the sample takes its live-row count from the device. No row samples
     /// under the step it leaves — the sample launched over it returns for every row — and no
     /// readback follows it, so there is nothing to wait for; the next [`DeviceSampler::stage`]
     /// or [`DeviceSampler::stage_eager`] replaces it.

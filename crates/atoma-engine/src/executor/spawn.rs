@@ -185,7 +185,7 @@ fn open_forward(rank: Rank, ordinal: DeviceOrdinal, plan: &RankPlan) -> Result<C
     // Rank zero alone samples: a follower runs the forward for its share of the model and
     // produces nothing, so it holds no sampler. Without NCCL there is one rank, and its
     // sampler is what every recording of the bucket ladder holds the sample of.
-    let sampler = |allocation: &Allocation| {
+    let new_sampler = |allocation: &Allocation| {
         DeviceSampler::new(
             allocation,
             device.stream(),
@@ -196,7 +196,7 @@ fn open_forward(rank: Rank, ordinal: DeviceOrdinal, plan: &RankPlan) -> Result<C
     };
     #[cfg(not(feature = "nccl"))]
     let (sampler, decode_step, graphs, session) = {
-        let mut sampler = sampler(&allocation)?;
+        let mut sampler = new_sampler(&allocation)?;
         let mut decode_step =
             DecodeStep::build(&allocation, &device, &weights, &kv_cache, &plan.decode_step)?;
         let Captured {
@@ -215,7 +215,7 @@ fn open_forward(rank: Rank, ordinal: DeviceOrdinal, plan: &RankPlan) -> Result<C
     #[cfg(feature = "nccl")]
     let (sampler, session) = {
         let sampler = if rank == Rank::ZERO {
-            Some(sampler(&allocation)?)
+            Some(new_sampler(&allocation)?)
         } else {
             None
         };

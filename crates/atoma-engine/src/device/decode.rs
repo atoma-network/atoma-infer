@@ -361,7 +361,7 @@ impl DecodeStep {
     /// copied-in token ids, the bucket's model step, and the sample of the run's rows' logits
     /// under the row slots the same copy-in carried. The run's rows are every row of the bucket,
     /// which [`DecodeStep::stage_dummy`] holds a run to, so the sample is recorded over the whole
-    /// bucket and takes its live count from the device at each replay; over the dummy run's
+    /// bucket and takes its live-row count from the device at each replay; over the dummy run's
     /// staging that count is zero, so the sample described returns for every row.
     ///
     /// # Errors

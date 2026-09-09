@@ -72,8 +72,8 @@ pub struct DecodeBuckets {
 impl DecodeBuckets {
     /// The entries of `config`'s bucket ladder a step of at most `max_batch` entries can fill: a
     /// uniform decode gives every entry one token, so a bucket above the maximum batch never
-    /// fills. A size the ladder repeats is served by its first entry, so the repeats are dropped
-    /// rather than given tables and a graph nothing routes to.
+    /// fills. A size the bucket ladder repeats is served by its first entry, so the repeats are
+    /// dropped rather than given tables and a graph nothing routes to.
     #[must_use]
     pub fn usable(config: &DispatchConfig, max_batch: RequestCount) -> Self {
         let mut tokens: Vec<usize> = Vec::new();
@@ -213,7 +213,8 @@ mod tests {
     }
 
     #[test]
-    fn the_usable_buckets_are_the_ladders_distinct_entries_up_to_the_maximum_batch_in_order() {
+    fn the_usable_buckets_are_the_bucket_ladders_distinct_entries_up_to_the_maximum_batch_in_order()
+    {
         let mut config = engine_config().dispatch;
         config.bucket_ladder = BucketLadder::new(vec![8, 1, 4, 2, 16, 4]).unwrap();
 

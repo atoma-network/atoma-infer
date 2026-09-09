@@ -29,10 +29,11 @@ session's own list of graph entries, which the engine's indexes into.
 _Avoid_: graph cache, graph table, graph map
 
 **Capture report**:
-What capturing the bucket ladder cost at startup: each graph's cost — its bucket, the time its
-warmup and recording took, the drop in free memory across them and the free memory after — and
-the whole capture's time and drop, the one warmup ahead of every recording included. Logged on
-the executor thread as it is measured; `CaptureReport`.
+What capturing the bucket ladder cost at startup: each graph's cost, `GraphCost` — its bucket,
+the time its warmup and recording took, the drop in free memory across them and the free memory
+after, which the next bucket's drop is read from — and the whole capture's time and drop, the
+one warmup ahead of every recording included. Logged on the executor thread as it is measured;
+`CaptureReport`.
 _Avoid_: capture stats, capture metrics, startup profile
 
 **Graph memory**:
@@ -511,6 +512,13 @@ buffer sized for the largest batch, enqueued on the forward's stream, and waited
 buffer's own event and nothing else. Logits never cross it in serving; a harness that compares
 them reads them through a readback of its own.
 _Avoid_: download, sync (for this copy), logits fetch
+
+**Sampled witness**:
+That a sample of the staged step reached the stream, so the readback of its tokens can be
+described behind it: minted by a `Sample` once it has been enqueued and by the decode step once
+it has replayed a graph that holds one, and nowhere else, so a readback cannot be asked for
+tokens no sample wrote; `Sampled`.
+_Avoid_: receipt, sample proof, sampled flag
 
 **Sampling record**:
 What one request slot holds on the device for the request in it: its temperature, top-k, top-p,
