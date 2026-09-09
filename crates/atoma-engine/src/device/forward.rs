@@ -83,9 +83,9 @@ pub struct Allocated {
 
 /// The model forward on one rank's device.
 ///
-/// Holds the session's Replay phase for the process lifetime: nothing is captured in this crate,
-/// and holding the phase is what keeps the allocation from being reopened. The step over runtime
-/// tensors is enqueued through it; under NCCL the decode step stays on candle and there is none.
+/// Holds the session's Replay phase for the process lifetime; holding the phase is what keeps the
+/// allocation from being reopened. The step over runtime tensors is enqueued through it; under
+/// NCCL the decode step stays on candle and there is none.
 ///
 /// Field order is load-bearing. Rust drops fields in declaration order, so this declaration is
 /// the teardown order, and there is no hand-written cleanup to get wrong: the Replay phase goes

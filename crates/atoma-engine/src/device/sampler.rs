@@ -13,9 +13,11 @@
 //! and over the logits. Each view is held to the staged step's rows and the dtype the kernel
 //! reads, so a view handed to the wrong argument is refused by name, and each descriptor holds
 //! the sampler borrowed for its life, so it cannot outlive the staged step whose rows it names.
-//! The sample describes the launch alone, bounded by the count that came up with the arrays —
-//! the kernel returns for a row at or past it, reading neither its logits nor its slot — and
-//! leaves each live row's token on the device; [`DeviceSampler::read_tokens`] describes the one
+//! A dummy run is staged by [`DeviceSampler::stage_dummy_run`] over the caller's staging of it,
+//! with every row of its bucket covered and none live, which is what a recording of the bucket
+//! is made over. The sample describes the launch alone, bounded by the count that came up with the
+//! arrays — the kernel returns for a row at or past it, reading neither its logits nor its slot —
+//! and leaves each live row's token on the device; [`DeviceSampler::read_tokens`] describes the one
 //! asynchronous copy that brings them back, through the leading rows of the row tokens view —
 //! the staged step's rows and no others — enqueued behind the sample and waited on once the
 //! step is enqueued through the readback's own event and nothing else: the host learns what was
@@ -54,7 +56,7 @@ use tracing::{info, warn};
 
 use crate::batch::BatchLayout;
 use crate::decode::baked::{BakedAddress, BakedName};
-use crate::decode::staging::{stage_sampler, SamplerArrays, StagingError};
+use crate::decode::staging::{stage_sampler, DummyRun, SamplerArrays, StagingError};
 use crate::pinned::Pinned;
 use crate::readback::{Readback, ReadbackCopy, ReadbackError};
 use crate::sampling::inputs::{SamplerInputs, SamplerInputsError};
@@ -64,8 +66,8 @@ use crate::sampling::record::{SlotRecord, RECORD_BYTES};
 /// Why the sampler could not be built or run.
 #[derive(Debug, Error)]
 pub enum SamplerError {
-    /// More selected rows than the sampler was sized for.
-    #[error("{rows} rows sample this step but the sampler holds {max_rows} at most")]
+    /// More rows staged than the sampler was sized for.
+    #[error("{rows} rows are staged this step but the sampler holds {max_rows} at most")]
     TooManyRows { rows: usize, max_rows: usize },
     /// More token rows to gather for than the sampler was sized for.
     #[error("{rows} token rows this step but the sampler gathers for {max_rows} at most")]
@@ -379,6 +381,36 @@ impl DeviceSampler {
             },
         )?;
         self.staged = Some(StagedStep::of(&inputs, ArraysIn::Sampler));
+        Ok(())
+    }
+
+    /// Stages `run`: what a recording of its bucket is made over. No record changes hands and
+    /// nothing is written here — a dummy run's row slots, gather slots and live-row count are the
+    /// caller's to stage, as [`stage_dummy`](crate::decode::staging::stage_dummy) does, naming no
+    /// request slot and a count of zero — so what this settles is the rows the run's descriptors
+    /// cover: every row of the bucket, for the gather and the sample alike, since a graph bakes
+    /// the bucket's rows and the sample takes its live count from the device. No row samples
+    /// under the step it leaves — the sample launched over it returns for every row — and no
+    /// readback follows it, so there is nothing to wait for; the next [`DeviceSampler::stage`]
+    /// or [`DeviceSampler::stage_eager`] replaces it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SamplerError::TooManyRows`] when the run has more rows than the sampler holds.
+    pub fn stage_dummy_run(&mut self, run: &DummyRun) -> Result<(), SamplerError> {
+        self.staged = None;
+        let rows = run.rows();
+        if rows > self.max_rows {
+            return Err(SamplerError::TooManyRows {
+                rows,
+                max_rows: self.max_rows,
+            });
+        }
+        self.staged = Some(StagedStep {
+            rows,
+            gather_rows: rows,
+            arrays: ArraysIn::Caller,
+        });
         Ok(())
     }
 

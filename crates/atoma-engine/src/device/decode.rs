@@ -14,8 +14,10 @@
 //! three is what lets one graph hold every launch a bucket's step makes; the record upload and
 //! the copy-in are the host's copies of what changed and stay in front of the graph, and the
 //! readback stays behind it. A dummy run — a bucket's rows as padding rows over one block each —
-//! is staged and copied in the same way, with no sampler descriptor and no readback: what a
-//! capture check or a warmup runs when there is no live batch.
+//! is staged and copied in the same way and has no readback: what a capture check, a warmup or a
+//! recording runs when there is no live batch, under the model step alone or under the keyed step
+//! over every row of the bucket, `DecodeStep::bucket_step`, whose sample returns for every row
+//! since the run's live-row count is zero.
 //!
 //! The step's outputs reach the sampler and the readback as tensor views narrowed to the live
 //! rows: the bucket's logits and the sampler's row tokens are viewed once, at Allocation, over
@@ -302,6 +304,13 @@ impl DecodeStep {
         Ok(addresses)
     }
 
+    /// The buckets the step serves, in bucket order: what its tables were resolved over, and
+    /// what a capture of the bucket ladder records one graph for each of.
+    #[must_use]
+    pub fn buckets(&self) -> &DecodeBuckets {
+        &self.buckets
+    }
+
     /// Checks a batch keyed by `key` against the shape the step bakes.
     ///
     /// # Errors
@@ -367,12 +376,49 @@ impl DecodeStep {
         sampler: &'a DeviceSampler,
         batch: &DecodeBatch,
     ) -> Result<KeyedStep<'a>, DecodeStepError> {
-        let views = self.inputs.bucket(batch.bucket)?;
-        let logits = self.live_logits(batch)?;
-        let row_slots = views.row_slots.narrow(0, 0, batch.live)?;
+        self.step_over(sampler, batch.bucket, batch.live)
+    }
+
+    /// The descriptor a recording of `run`'s bucket holds: the same three as a keyed batch's,
+    /// with the sample over the run's rows — every row of the bucket, which
+    /// [`DecodeStep::stage_dummy`] holds a run to — rather than a batch's live rows, since a
+    /// graph bakes the bucket's rows and the sample takes its live count from the device. Over
+    /// the dummy run's staging that count is zero, so the sample described returns for every
+    /// row.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DecodeStepError`] when the bucket's inputs or slot tables were not resolved, the
+    /// run has more rows than the bucket, no step is staged on `sampler`, or the staged step's
+    /// rows are not the run's.
+    pub(crate) fn bucket_step<'a>(
+        &'a self,
+        sampler: &'a DeviceSampler,
+        run: &DummyRun,
+    ) -> Result<KeyedStep<'a>, DecodeStepError> {
+        self.step_over(sampler, run.bucket(), run.rows())
+    }
+
+    /// `bucket`'s gather, model step and sample as one descriptor: the gather over the bucket's
+    /// copied-in token ids and the model step over every row of the bucket, and the sample over
+    /// its leading `rows` rows' logits under the row slots the same copy-in carried.
+    fn step_over<'a>(
+        &'a self,
+        sampler: &'a DeviceSampler,
+        bucket: BucketIdx,
+        rows: usize,
+    ) -> Result<KeyedStep<'a>, DecodeStepError> {
+        let views = self.inputs.bucket(bucket)?;
+        let logits = self
+            .decode
+            .bucket(bucket)?
+            .statics
+            .logits
+            .narrow(0, 0, rows)?;
+        let row_slots = views.row_slots.narrow(0, 0, rows)?;
         Ok(KeyedStep {
             gather: sampler.gather(&views.inputs.token_ids, &views.gather_slots)?,
-            model_step: self.descriptor(batch.bucket)?,
+            model_step: self.descriptor(bucket)?,
             sample: sampler.sample(&logits, &row_slots, &views.live_rows)?,
         })
     }
@@ -478,11 +524,13 @@ impl DecodeStep {
     }
 }
 
-/// One keyed batch's gather, model step and sample as one descriptor, enqueued in that order.
-/// The record upload and the copy-in are enqueued in front of it and the readback behind it, so
-/// a recording of this descriptor alone holds every launch a bucket's step makes and none of
-/// its copies.
-struct KeyedStep<'a> {
+/// One bucket's gather, model step and sample as one descriptor, enqueued in that order. The
+/// gather and the model step run over every row of the bucket either way; the sample is over a
+/// keyed batch's live rows, or over every row for the dummy run a recording of the bucket is
+/// made over. The record upload and the copy-in are enqueued in front of it and the readback
+/// behind it, so a recording of this descriptor alone holds every launch a bucket's step makes
+/// and none of its copies.
+pub(crate) struct KeyedStep<'a> {
     gather: Gather<'a>,
     model_step: LlamaStep<'a>,
     sample: Sample<'a>,
@@ -546,15 +594,10 @@ fn resolve_slots(
     };
     let slots = sizing
         .buckets
-        .tokens()
         .iter()
         .zip(sizing.plans)
-        .enumerate()
-        .map(|(index, (&tokens, attention))| {
-            let bucket = Bucket {
-                index: BucketIdx(index),
-                tokens,
-            };
+        .map(|((index, tokens), attention)| {
+            let bucket = Bucket { index, tokens };
             let views = inputs.bucket(bucket.index)?;
             Ok(BucketSlots::resolve(
                 &sources,

@@ -164,6 +164,18 @@ pub struct BakedBuffers {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GraphIdx(usize);
 
+impl GraphIdx {
+    /// An index no session minted, for tests of what maps a bucket to its graph.
+    ///
+    /// Behind the `test-support` feature, which nothing in a serving build enables: a real index
+    /// is meaningful only to the session that minted it, and this one to nothing.
+    #[cfg(any(test, feature = "test-support"))]
+    #[must_use]
+    pub fn for_test(index: usize) -> Self {
+        Self(index)
+    }
+}
+
 /// The first session phase: fixes every device address and binds every stream, BLAS handle and
 /// communicator. Nothing is captured in it, and nothing may be allocated after it.
 pub struct Allocation {

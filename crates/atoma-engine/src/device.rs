@@ -5,9 +5,13 @@
 //! addresses before anything is captured, and taking the phase by reference is what makes an
 //! allocation after that point unwritable. A keyed decode batch runs through the session's
 //! descriptor seam on the step over runtime-owned tensors, built here from the addresses candle
-//! loaded the weights and cache at; every other batch runs eagerly on candle's own stream. Under
-//! NCCL the decode step stays on candle and no such step is built.
+//! loaded the weights and cache at, which [`capture`] records into a graph set, one recording per
+//! bucket of the bucket ladder that step serves over the padding dummies' blocks; every other
+//! batch runs eagerly on candle's own stream. Under NCCL the decode step stays on candle, no such
+//! step is built and nothing is captured.
 
+#[cfg(not(feature = "nccl"))]
+pub mod capture;
 #[cfg(not(feature = "nccl"))]
 pub mod decode;
 pub mod forward;

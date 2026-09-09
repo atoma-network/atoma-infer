@@ -91,6 +91,14 @@ impl DecodeBuckets {
         &self.tokens
     }
 
+    /// Each bucket with its index, in index order.
+    pub fn iter(&self) -> impl Iterator<Item = (BucketIdx, usize)> + '_ {
+        self.tokens
+            .iter()
+            .enumerate()
+            .map(|(index, &tokens)| (BucketIdx(index), tokens))
+    }
+
     /// The largest bucket, or zero when nothing is usable.
     #[must_use]
     pub fn largest(&self) -> usize {
@@ -217,6 +225,10 @@ mod tests {
             "the repeated four is served by its first entry and gets no second table"
         );
         assert_eq!(buckets.largest(), 4);
+        assert_eq!(
+            buckets.iter().collect::<Vec<_>>(),
+            [(BucketIdx(0), 1), (BucketIdx(1), 4), (BucketIdx(2), 2)]
+        );
         assert_eq!(buckets.index_of(4), Some(BucketIdx(1)));
         assert_eq!(buckets.index_of(2), Some(BucketIdx(2)));
         assert_eq!(buckets.index_of(8), None);

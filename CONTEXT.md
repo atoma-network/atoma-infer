@@ -445,11 +445,12 @@ _Avoid_: ring size, queue depth, staging count
 
 **Dummy run**:
 A bucket's rows filled as padding rows over one KV block each, staged and copied in through the
-same acquire and fence as a live step and then run with no sampler descriptor and nothing read
-back: what a capture check or a warmup runs when there is no live batch. Every row is what a
-dummy's row is in a live step, so the only cache it writes is each block's first KV slot. Its
-sampler arrays are written too — the two naming no request slot and the live-row count zero — so
-its copy-in carries nothing stale.
+same acquire and fence as a live step and then run with nothing read back: what a capture check,
+a warmup or a recording runs when there is no live batch. Every row is what a dummy's row is in a
+live step, so the only cache it writes is each block's first KV slot. Its sampler arrays are
+written too — the two naming no request slot and the live-row count zero — so its copy-in carries
+nothing stale, and a sample launched over its rows returns for every one of them: no slot's
+sampling record or draw counter moves.
 _Avoid_: padding batch, fake batch, dummy step
 
 **Readback**:

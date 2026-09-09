@@ -13,9 +13,11 @@
 //! | [`staging`] | A bucket's eight arrays packed into one block, and what a step or a dummy run writes into them |
 //! | [`inputs`] | The staging ring's blocks, the device block, each bucket's views; the copy-in and wait descriptors |
 //! | [`ring`] | The staging ring: a fence per staging entry and a cursor; `acquire` waits, `try_acquire` asks |
+//! | [`graphs`] | The graph serving each bucket, and the dummy run each bucket is captured over |
 
 pub mod baked;
 pub mod batch;
+pub mod graphs;
 pub mod inputs;
 pub mod ring;
 pub mod staging;

@@ -11,8 +11,8 @@
 //! model's five from the batch layout, and [`stage_sampler`] the sampler's two and the count from
 //! what the sampler decided for the step. [`stage_dummy`] writes all eight for a [`DummyRun`]:
 //! every row a padding row over one block, the sampler's two naming no request slot and a
-//! live-row count of zero, which is what a capture check or a warmup runs when there is no live
-//! batch.
+//! live-row count of zero, which is what a capture check, a warmup or a recording runs when there
+//! is no live batch.
 //!
 //! The block table is staged at the full width a sequence can reach, never at the layout's
 //! batch-local width: the width is baked into the attention launch, so it cannot follow the
@@ -126,17 +126,18 @@ pub struct StagingShape {
     pub block_size: TokenCount,
 }
 
-/// A bucket's rows filled as padding rows, over one KV block each: what a capture check or a
-/// warmup runs when there is no live batch.
+/// A bucket's rows filled as padding rows, over one KV block each: what a capture check, a
+/// warmup or a recording runs when there is no live batch.
 ///
 /// Each row holds what a dummy's row holds in a live step: the padding token at position 0, a
 /// key length of one, the block's first KV slot, and a block table of that one block. The step
 /// therefore does the same work for these rows as it does for a dummy's row in a live step. It
 /// writes one KV slot per block, the first, and no other cache.
 ///
-/// A dummy run samples no rows. No sampler descriptor runs over it, and it reads nothing back.
-/// It stages its sampler arrays, but the two name no request slot and the live-row count is
-/// zero, so its copy-in carries nothing stale.
+/// A dummy run samples no rows and reads nothing back. Its sampler arrays are staged, the two
+/// naming no request slot and the live-row count zero, so its copy-in carries nothing stale and
+/// a sample launched over its rows — which a recording of its bucket holds — returns for every
+/// one of them.
 #[derive(Debug)]
 pub struct DummyRun {
     bucket: BucketIdx,
@@ -162,6 +163,12 @@ impl DummyRun {
     #[must_use]
     pub fn rows(&self) -> usize {
         self.blocks.len()
+    }
+
+    /// The block each row is filled over, in row order.
+    #[cfg(test)]
+    pub(crate) fn blocks(&self) -> &[BlockId] {
+        &self.blocks
     }
 }
 
