@@ -21,6 +21,34 @@ batch, since the dummy run fills the bucket's rows. The warmup pass every record
 inside it and is not another name for it.
 _Avoid_: capture cleanliness, capture smoke test
 
+**Graph set**:
+Which graph serves each bucket: the recordings one capture of the bucket ladder made, one per
+bucket at the bucket's index, held by the forward beside the session that indexes them and looked
+up by the bucket the key names. `GraphSet` in the engine; the runtime's graph set is the
+session's own list of graph entries, which the engine's indexes into.
+_Avoid_: graph cache, graph table, graph map
+
+**Capture report**:
+What capturing the bucket ladder cost at startup: each graph's cost — its bucket, the time its
+warmup and recording took, the drop in free memory across them and the free memory after — and
+the whole capture's time and drop, the one warmup ahead of every recording included. Logged on
+the executor thread as it is measured; `CaptureReport`.
+_Avoid_: capture stats, capture metrics, startup profile
+
+**Graph memory**:
+A graph set's device memory as a fixed term plus a marginal term per graph, fitted by least
+squares over what each capture used: a report of what a capture that has run cost, and never a
+ceiling for one that has not, since the fit bounds no single point. `GraphMemory`.
+_Avoid_: graph overhead, memory budget (for the fit), per-graph cost (for the marginal term)
+
+**Free-memory reading**:
+One query of the device's free memory through the runtime context, as `DeviceBytes`: what the
+device has free, not what this process holds, so anything else on the device moves it, and the
+drop between two readings is a cost and never below zero. A reading can be the first call to
+check the context after a driver status was deferred onto it, and then fails under that status's
+own classification, so a reading is propagated and never read as a number in its place.
+_Avoid_: memory probe, mem info, usage sample
+
 **Capture session**:
 The value that carries one graph set through the three session phases, with consuming
 transitions between them. It lives and dies on the executor thread that runs it; the executor
@@ -341,6 +369,13 @@ The pinned per-rank thread that owns the device and runs the session. It acts on
 and re-derives nothing in it.
 _Avoid_: worker, model thread, runner
 
+**Executor handoff**:
+What the engine hands the executor's ranks at startup, and nothing else: their ends of the rings,
+and the padding dummies' blocks as block ids in reservation order, for the capture of the bucket
+ladder to fill every dummy run from. Minted by the engine when it is built, consumed when the
+ranks are spawned; `ExecutorHandoff`.
+_Avoid_: executor config, startup bundle, rings (for the whole)
+
 **Follower**:
 An executor rank other than zero. Rank zero, the leader, owns the engine's rings and feeds each
 step command to every follower over a ring of its own; a follower runs the forward for it and
@@ -442,6 +477,23 @@ eight, since each staging entry pins host memory sized for the largest bucket. W
 many copy-ins can be in flight at once, and so how far a host could run ahead of the device
 before an acquire has to wait.
 _Avoid_: ring size, queue depth, staging count
+
+**Keyed step**:
+The device work of a keyed batch: the gather that takes each decoding row's token from what the
+device sampled for its slot, the model step over the bucket's rows, and the sample of the rows'
+logits, in that order and composed into one descriptor, `KeyedStep`, since a recording takes
+one. It is what a bucket's graph holds and what a replay launches. The wait on candle's stream,
+the sampler's record upload and the copy-in are enqueued ahead of it and the readback behind it,
+and none of them is in the graph; "before each keyed step" is before any of that is enqueued.
+_Avoid_: graph step, kernel sequence, decode kernels (for the whole)
+
+**Live-row count**:
+How many leading rows of a keyed step are live: one `u32`, the eighth array of the packed block,
+carried by the copy-in beside the sampler's two and read on the device by the sample, which
+returns for a row at or past it. One graph captured at a bucket samples exactly the live rows of
+any batch it serves; a dummy run's count is zero, so a recording samples nothing. The candle path
+passes a word of the sampler's own, written with the records.
+_Avoid_: valid count, non-padded count, active rows, live tokens
 
 **Dummy run**:
 A bucket's rows filled as padding rows over one KV block each, staged and copied in through the
