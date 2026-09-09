@@ -1,7 +1,7 @@
 use crate::error::KernelError;
 use core::ffi::{c_char, c_int, c_void};
 use std::ffi::CStr;
-use std::mem::size_of;
+use std::mem::{offset_of, size_of};
 
 /// The sample launch's arguments, as `kernels/sampler.cu` lays them out.
 #[repr(C)]
@@ -16,13 +16,29 @@ pub(crate) struct SampleArgs {
     pub(crate) sampled: *mut c_void,
     /// u32 `[n_rows]`: the token sampled for each row.
     pub(crate) out: *mut c_void,
+    /// One u32: how many of the launch's leading rows are live and sample.
+    pub(crate) live_rows: *const c_void,
     pub(crate) vocab: i64,
     pub(crate) n_rows: i64,
 }
 
 /// The size the sources assert for the arguments.
-const SAMPLE_ARGS_BYTES: usize = 56;
-const _: () = assert!(size_of::<SampleArgs>() == SAMPLE_ARGS_BYTES);
+const SAMPLE_ARGS_BYTES: usize = 64;
+
+/// The layout the sources declare, checked at compile time: the size the launch reads, and every
+/// field at the byte the sources hold it to, so a reordering on this side stops the build rather
+/// than handing the kernel one argument as another.
+const _: () = {
+    assert!(size_of::<SampleArgs>() == SAMPLE_ARGS_BYTES);
+    assert!(offset_of!(SampleArgs, logits) == 0);
+    assert!(offset_of!(SampleArgs, row_slots) == 8);
+    assert!(offset_of!(SampleArgs, records) == 16);
+    assert!(offset_of!(SampleArgs, sampled) == 24);
+    assert!(offset_of!(SampleArgs, out) == 32);
+    assert!(offset_of!(SampleArgs, live_rows) == 40);
+    assert!(offset_of!(SampleArgs, vocab) == 48);
+    assert!(offset_of!(SampleArgs, n_rows) == 56);
+};
 
 extern "C" {
     /// Records any failure for [`flash_last_error`] rather than returning it: the vendored dispatch

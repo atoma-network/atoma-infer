@@ -25,7 +25,7 @@ use crate::kv::{BlockPool, PaddingError, PaddingReservation};
 use crate::request::FinishReason;
 use crate::scheduler::{Scheduled, Scheduler, SchedulerError};
 use crate::step::StepResult;
-use crate::types::{RequestCount, StepId, TokenCount};
+use crate::types::{BlockId, RequestCount, StepId, TokenCount};
 
 /// A configuration the engine refuses to start under.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
@@ -34,16 +34,17 @@ pub enum EngineError {
     Scheduler(#[from] SchedulerError),
     #[error(transparent)]
     Padding(#[from] PaddingError),
-    /// The maximum batch pads to a bucket above itself, which would need more dummies than the
-    /// reservation holds.
+    /// The maximum batch pads to a bucket above itself, whose rows outnumber the one dummy per
+    /// entry the reservation holds.
     #[error(
-        "a maximum batch of {max_batch} pads to the bucket of {bucket}, which needs more dummies \
-         than the {reserved} reserved"
+        "scheduler.max_batch of {max_batch} pads to the bucket of {bucket} in \
+         dispatch.bucket_ladder, whose rows outnumber the one dummy per entry the reservation \
+         holds; add a bucket of {max_batch} to dispatch.bucket_ladder, or set \
+         scheduler.max_batch to a bucket dispatch.bucket_ladder holds"
     )]
     PaddingCannotCoverBucket {
         max_batch: RequestCount,
         bucket: TokenCount,
-        reserved: usize,
     },
     /// The operating system refused the thread.
     #[error("the engine thread could not be spawned: {0:?}")]
@@ -56,6 +57,18 @@ pub struct EngineHandle {
     pub ingress: IngressSender,
     pub control: ControlSender,
     pub heartbeat: HeartbeatReader,
+}
+
+/// What the executor's ranks are handed: their ends of the rings, and the block each padding
+/// dummy owns.
+#[derive(Debug)]
+pub struct ExecutorHandoff {
+    /// The executor's ends of the rings the engine thread drives its steps over.
+    pub rings: ExecutorRings,
+    /// Each dummy's block, in reservation order. A dummy run fills a bucket's rows over them,
+    /// so the executor's ranks are handed them as block ids and the blocks stay leased for the
+    /// process lifetime.
+    pub dummy_blocks: Vec<BlockId>,
 }
 
 /// The running engine thread. It returns on shutdown or when the executor is gone, after every
@@ -117,7 +130,7 @@ pub struct Engine {
 }
 
 impl Engine {
-    /// Builds the engine, its clients' handle and the executor's ends of the rings.
+    /// Builds the engine, its clients' handle and what the executor's ranks are handed.
     ///
     /// `contract` is what the active backends and the model settled before anything was
     /// captured: the level every captured routine is valid at, and the sites the pass leaves the
@@ -131,23 +144,21 @@ impl Engine {
     pub fn new(
         config: &EngineConfig,
         contract: &CaptureContract,
-    ) -> Result<(Self, EngineHandle, ExecutorRings), EngineError> {
+    ) -> Result<(Self, EngineHandle, ExecutorHandoff), EngineError> {
         let max_batch = config.scheduler.max_batch;
-        let reserved = PaddingReservation::dummies_for(max_batch);
         let lookup = PaddingLookup::new(&config.dispatch.bucket_ladder);
         let max_batch_bucket =
             TokenCount::new(max_batch.get()).and_then(|tokens| lookup.bucket_for(tokens));
         if let Some(bucket) = max_batch_bucket {
             if bucket.get() > max_batch.get() {
-                return Err(EngineError::PaddingCannotCoverBucket {
-                    max_batch,
-                    bucket,
-                    reserved,
-                });
+                return Err(EngineError::PaddingCannotCoverBucket { max_batch, bucket });
             }
         }
         let mut pool = BlockPool::new(config.block_count);
         let reservation = PaddingReservation::reserve(&mut pool, max_batch)?;
+        // Ids, not leases: the reservation itself goes on to the scheduler, which holds every
+        // lease for the process lifetime and is the one place that surrenders them.
+        let dummy_blocks = reservation.block_ids();
         let scheduler = Scheduler::with_padding(config.scheduler.clone(), pool, reservation)?;
 
         let parker = Parker::new();
@@ -175,7 +186,11 @@ impl Engine {
             control: control_sender,
             heartbeat: heartbeat_reader,
         };
-        Ok((engine, handle, executor_rings))
+        let handoff = ExecutorHandoff {
+            rings: executor_rings,
+            dummy_blocks,
+        };
+        Ok((engine, handle, handoff))
     }
 
     /// Builds the engine and runs it on its own thread, named `atoma-engine`.
@@ -187,13 +202,13 @@ impl Engine {
     pub fn spawn(
         config: &EngineConfig,
         contract: &CaptureContract,
-    ) -> Result<(EngineHandle, ExecutorRings, EngineThread), EngineError> {
-        let (engine, handle, executor_rings) = Self::new(config, contract)?;
+    ) -> Result<(EngineHandle, ExecutorHandoff, EngineThread), EngineError> {
+        let (engine, handle, handoff) = Self::new(config, contract)?;
         let join = thread::Builder::new()
             .name("atoma-engine".to_owned())
             .spawn(move || engine.run())
             .map_err(|error| EngineError::ThreadSpawn(error.kind()))?;
-        Ok((handle, executor_rings, EngineThread { join }))
+        Ok((handle, handoff, EngineThread { join }))
     }
 
     /// Passes until shutdown, the executor gone or a step out past its deadline, parking between

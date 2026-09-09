@@ -325,7 +325,7 @@ mod tests {
     #[test]
     fn dummies_occupy_slots_for_the_process_lifetime_and_never_enter_admission() {
         let (mut scheduler, _) = scheduler(100);
-        assert_eq!(scheduler.padding().len(), MAX_BATCH - 1);
+        assert_eq!(scheduler.padding().len(), MAX_BATCH);
         assert_eq!(
             scheduler.live_request_count(),
             0,

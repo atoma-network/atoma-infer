@@ -5,15 +5,18 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use std::env;
 use std::fs::File;
 use std::io::{self, BufReader};
+use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 
+use atoma_core::kv::{BlockLayout, CacheKind, KvCacheSpec, KvSource, LayerGroup};
+use atoma_core::types::{LayerGroupId, TokenCount};
 use hf_hub::api::sync::{ApiBuilder, ApiError, ApiRepo};
 use hf_hub::{Repo, RepoType};
 use serde::Deserialize;
 use thiserror::Error;
 use tracing::info;
 
-use crate::config::{ModelConfig, ModelId};
+use crate::config::{Dtype, ModelConfig, ModelId};
 
 #[cfg(feature = "cuda")]
 use models::llama::{Config, LlamaConfig};
@@ -70,6 +73,13 @@ pub enum ModelError {
     EosMismatch {
         configured: Vec<u32>,
         model: Vec<u32>,
+    },
+    /// The model's config declares a cache geometry of zero somewhere a count is needed.
+    #[error("{} declares {what} as {value}, which is not a count", path.display())]
+    NotACount {
+        path: PathBuf,
+        what: &'static str,
+        value: usize,
     },
 }
 
@@ -208,6 +218,70 @@ pub fn check_eos_token_ids(configured: &[u32], model: &[u32]) -> Result<(), Mode
     })
 }
 
+/// What a checkpoint's `config.json` declares of its cache's geometry.
+#[derive(Debug, Deserialize)]
+struct KvGeometryDeclaration {
+    num_hidden_layers: usize,
+    hidden_size: usize,
+    num_attention_heads: usize,
+    /// Absent from a checkpoint written before grouped-query attention, where every attention
+    /// head has a key-value head of its own; the model loader reads it the same way.
+    num_key_value_heads: Option<usize>,
+}
+
+/// The model's cache as one layer group of full attention, read from its `config.json`: every
+/// layer caches keys and values for `num_key_value_heads` heads — `num_attention_heads` where
+/// the checkpoint declares none, as the model loader reads it — of `hidden_size /
+/// num_attention_heads` elements each, in `dtype`, over blocks of `block_size` tokens. What a
+/// configuration's padding costs is answerable from this before anything is allocated. The
+/// bytes are the whole cache's; under tensor parallelism each rank holds its share of the heads.
+///
+/// # Errors
+///
+/// Returns [`ModelError`] when the file cannot be read or is not a model configuration, and
+/// [`ModelError::NotACount`] when it declares a layer count, a head count or a head width of
+/// zero.
+///
+/// # Panics
+///
+/// Never: one layer group writing its own cache passes every rule [`KvCacheSpec::new`] checks.
+pub fn kv_cache_spec(
+    config: &Path,
+    block_size: TokenCount,
+    dtype: Dtype,
+) -> Result<KvCacheSpec, ModelError> {
+    let declared: KvGeometryDeclaration = read_json(config)?;
+    let count = |what: &'static str, value: usize| {
+        NonZeroUsize::new(value).ok_or_else(|| ModelError::NotACount {
+            path: config.to_path_buf(),
+            what,
+            value,
+        })
+    };
+    let attention_heads = count("num_attention_heads", declared.num_attention_heads)?;
+    let group = LayerGroup {
+        id: LayerGroupId::new(0),
+        layer_count: count("num_hidden_layers", declared.num_hidden_layers)?,
+        kind: CacheKind::Full,
+        layout: BlockLayout {
+            block_size,
+            kv_head_count: count(
+                "num_key_value_heads",
+                declared
+                    .num_key_value_heads
+                    .unwrap_or(declared.num_attention_heads),
+            )?,
+            head_width: count(
+                "hidden_size / num_attention_heads",
+                declared.hidden_size / attention_heads.get(),
+            )?,
+            element_bytes: dtype.element_bytes(),
+        },
+        kv_source: KvSource::Own,
+    };
+    Ok(KvCacheSpec::new(vec![group]).expect("one layer group writing its own cache is a spec"))
+}
+
 /// The model's Llama configuration as its `config.json` declares it.
 ///
 /// # Errors
@@ -240,9 +314,14 @@ mod tests {
     use std::fs;
     use std::path::PathBuf;
 
+    use atoma_core::kv::PaddingReservation;
+    use atoma_core::types::{RequestCount, TokenCount};
     use tempfile::TempDir;
 
-    use super::{check_eos_token_ids, eos_token_ids, weight_files_in_index, ModelError};
+    use super::{
+        check_eos_token_ids, eos_token_ids, kv_cache_spec, weight_files_in_index, ModelError,
+    };
+    use crate::config::Dtype;
 
     fn file(dir: &TempDir, name: &str, contents: &str) -> PathBuf {
         let path = dir.path().join(name);
@@ -270,6 +349,123 @@ mod tests {
         );
         let none = file(&dir, "none.json", r#"{"vocab_size": 8}"#);
         assert!(eos_token_ids(&none).unwrap().is_empty());
+    }
+
+    #[test]
+    fn the_cache_spec_is_one_full_attention_group_of_the_configs_geometry() {
+        // Llama 3.1 8B: 32 layers, 8 KV heads of 4096 / 32 = 128 elements, bf16.
+        let dir = TempDir::new().unwrap();
+        let config = file(
+            &dir,
+            "config.json",
+            r#"{"num_hidden_layers": 32, "hidden_size": 4096, "num_attention_heads": 32,
+                "num_key_value_heads": 8, "vocab_size": 128256}"#,
+        );
+        let block_size = TokenCount::new(16).unwrap();
+
+        let spec = kv_cache_spec(&config, block_size, Dtype::Bf16).unwrap();
+
+        // One block: 32 layers of 16 tokens, each token K and V over 8 heads of 128 bf16.
+        assert_eq!(spec.groups().len(), 1);
+        assert_eq!(spec.bytes_per_block(), 32 * 16 * 2 * 8 * 128 * 2);
+        // What the padding dummies of a maximum batch of 64 cost: one block each.
+        assert_eq!(
+            PaddingReservation::cost_bytes(&spec, RequestCount::new(64).unwrap()),
+            64 * 32 * 16 * 2 * 8 * 128 * 2
+        );
+        assert_eq!(
+            kv_cache_spec(&config, block_size, Dtype::F32)
+                .unwrap()
+                .bytes_per_block(),
+            32 * 16 * 2 * 8 * 128 * 4,
+            "f32 elements are four bytes"
+        );
+    }
+
+    #[test]
+    fn a_checkpoint_declaring_no_kv_heads_caches_one_per_attention_head() {
+        // Written before grouped-query attention: no `num_key_value_heads`, which the model
+        // loader reads as one key-value head per attention head.
+        let dir = TempDir::new().unwrap();
+        let config = file(
+            &dir,
+            "config.json",
+            r#"{"num_hidden_layers": 2, "hidden_size": 64, "num_attention_heads": 4}"#,
+        );
+        let block_size = TokenCount::new(16).unwrap();
+
+        let spec = kv_cache_spec(&config, block_size, Dtype::Bf16).unwrap();
+
+        // One block: 2 layers of 16 tokens, each token K and V over 4 heads of 16 bf16.
+        assert_eq!(spec.bytes_per_block(), 2 * 16 * 2 * 4 * 16 * 2);
+    }
+
+    #[test]
+    fn a_geometry_of_zero_is_refused_naming_the_field() {
+        let dir = TempDir::new().unwrap();
+        let block_size = TokenCount::new(16).unwrap();
+        let no_heads = file(
+            &dir,
+            "no_heads.json",
+            r#"{"num_hidden_layers": 2, "hidden_size": 64, "num_attention_heads": 0,
+                "num_key_value_heads": 0}"#,
+        );
+        let error = kv_cache_spec(&no_heads, block_size, Dtype::Bf16).unwrap_err();
+        assert!(
+            matches!(
+                &error,
+                ModelError::NotACount {
+                    what: "num_attention_heads",
+                    value: 0,
+                    ..
+                }
+            ),
+            "{error}"
+        );
+        assert!(error.to_string().contains("no_heads.json"), "{error}");
+
+        // More attention heads than the hidden size has elements leaves a head no width.
+        let thin = file(
+            &dir,
+            "thin.json",
+            r#"{"num_hidden_layers": 2, "hidden_size": 16, "num_attention_heads": 32,
+                "num_key_value_heads": 8}"#,
+        );
+        let error = kv_cache_spec(&thin, block_size, Dtype::Bf16).unwrap_err();
+        assert!(
+            matches!(
+                &error,
+                ModelError::NotACount {
+                    what: "hidden_size / num_attention_heads",
+                    value: 0,
+                    ..
+                }
+            ),
+            "{error}"
+        );
+
+        let no_layers = file(
+            &dir,
+            "no_layers.json",
+            r#"{"num_hidden_layers": 0, "hidden_size": 64, "num_attention_heads": 4,
+                "num_key_value_heads": 4}"#,
+        );
+        let error = kv_cache_spec(&no_layers, block_size, Dtype::Bf16).unwrap_err();
+        assert!(
+            matches!(
+                &error,
+                ModelError::NotACount {
+                    what: "num_hidden_layers",
+                    value: 0,
+                    ..
+                }
+            ),
+            "{error}"
+        );
+
+        let missing = file(&dir, "missing.json", r#"{"num_hidden_layers": 2}"#);
+        let error = kv_cache_spec(&missing, block_size, Dtype::Bf16).unwrap_err();
+        assert!(matches!(error, ModelError::Malformed { .. }), "{error}");
     }
 
     #[test]

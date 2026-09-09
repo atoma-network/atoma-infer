@@ -681,12 +681,12 @@ mod tests {
             &[BackendDeclaration::new("test", SupportLevel::Never)],
             &ModelDeclaration::new("test"),
         );
-        let (handle, rings, engine) = Engine::spawn(&engine_config(), &contract).unwrap();
+        let (handle, handoff, engine) = Engine::spawn(&engine_config(), &contract).unwrap();
         let forward = ConstantForward {
             token: token_id,
             sampled: Vec::new(),
         };
-        let executor = Executor::new(rings, forward, TokenCount::new(BLOCK_SIZE).unwrap());
+        let executor = Executor::new(handoff.rings, forward, TokenCount::new(BLOCK_SIZE).unwrap());
         let executor = thread::spawn(move || executor.run());
         // Health reads the heartbeat, which the thread publishes after its first pass.
         let started = Instant::now();

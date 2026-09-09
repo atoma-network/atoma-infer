@@ -1,7 +1,7 @@
-//! The forward on the device: a keyed decode batch on the step over runtime-owned tensors, every
-//! other batch through the Llama forward on candle's stream, and the selected rows sampled on the
-//! device either way, so what comes back to the host is one copy of the sampled tokens and never
-//! the logits.
+//! The forward on the device: a keyed decode batch replayed from the graph its bucket was
+//! captured into, on the step over runtime-owned tensors, every other batch through the Llama
+//! forward on candle's stream, and the selected rows sampled on the device either way, so what
+//! comes back to the host is one copy of the sampled tokens and never the logits.
 //!
 //! The logits path stays reachable as [`CudaForward::forward_logits`], which reads them back into
 //! a readback the caller owns: what the decode parity harness compares the two forwards through,
@@ -13,6 +13,9 @@
 //! moved, before the step's own work is enqueued. Each address is re-read through its owner, and
 //! candle's tensors carry cudarc's event guard, so the reading enqueues a wait and a record for
 //! each weight and cache first. A release build carries no such list and reads nothing.
+//!
+//! The forward drops its session before the memory a recording bakes addresses in;
+//! [`CudaForward`]'s field order is what does it.
 
 use std::sync::Arc;
 
@@ -39,6 +42,8 @@ use crate::decode::baked::{BakedAddress, BakedAddresses};
 #[cfg(not(feature = "nccl"))]
 use crate::decode::batch::{Checked, DecodeBatch};
 #[cfg(not(feature = "nccl"))]
+use crate::decode::graphs::{GraphSet, GraphSetError};
+#[cfg(not(feature = "nccl"))]
 use crate::device::decode::{DecodeStep, DecodeStepError};
 
 /// Why a step could not be run on the device.
@@ -53,6 +58,16 @@ pub enum CudaForwardError {
     #[cfg(not(feature = "nccl"))]
     #[error(transparent)]
     DecodeStep(Box<DecodeStepError>),
+    /// A keyed batch of a bucket the graph set holds no graph for: the batch's bucket and the
+    /// captured bucket ladder disagree.
+    #[cfg(not(feature = "nccl"))]
+    #[error(transparent)]
+    GraphSet(#[from] GraphSetError),
+    /// A keyed batch on a rank that holds no sampler, so nothing a graph's sample reads is
+    /// staged: every rank built without NCCL holds one, so this names a forward built wrongly.
+    #[cfg(not(feature = "nccl"))]
+    #[error("a keyed batch reached the decode step on a rank that holds no sampler")]
+    NoSampler,
     /// The forward's logits came back on the host, which no device forward should produce.
     #[error("the logits are not on the device")]
     LogitsNotOnDevice,
@@ -80,27 +95,52 @@ pub struct Allocated {
 
 /// The model forward on one rank's device.
 ///
-/// Holds the session's Replay phase for the process lifetime: nothing is captured in this crate,
-/// and holding the phase is what keeps the allocation from being reopened. The step over runtime
-/// tensors is enqueued through it; under NCCL the decode step stays on candle and there is none.
+/// Holds the session's Replay phase for the process lifetime, and the graph set its capture of
+/// the bucket ladder made; holding the phase is what keeps the allocation from being reopened.
+/// A keyed batch replays its bucket's graph through it, selected by the bucket the key names and
+/// never re-derived from the batch; under NCCL the decode step stays on candle, there is none,
+/// and nothing is captured.
+///
+/// Field order is load-bearing. Rust drops fields in declaration order, so this declaration is
+/// the teardown order, and there is no hand-written cleanup to get wrong: the Replay phase goes
+/// first, taking the graph set with it, and every address a recording bakes is in memory declared
+/// after it. A [`GraphEntry`](atoma_runtime::graph_entry::GraphEntry) cannot hold this memory for
+/// itself — one arena, one device block and one set of statics serve every bucket, so no single
+/// entry can own them, and [`BakedBuffers`](atoma_runtime::session::BakedBuffers) moves what it
+/// is handed into one entry — so the declaration is the whole of the guarantee. A `Drop` impl
+/// could not put it back: `drop` runs before any field drops, so it cannot reorder them at all
+/// short of `Option` or `ManuallyDrop`. [`crate::forward`] holds this file's declaration to the
+/// order instead.
 pub struct CudaForward {
-    allocated: Allocated,
+    /// Held for the process lifetime, which is what keeps the allocation from being reopened;
+    /// under NCCL nothing is enqueued through it. Declared first, and so dropped first: the graph
+    /// set goes before the memory it bakes addresses in.
+    #[cfg_attr(feature = "nccl", allow(dead_code))]
+    session: Replay,
+    /// The graph serving each bucket, by its index in the session. Names only: it owns nothing
+    /// a recording bakes, so its place in the order is free, and it sits with the session it
+    /// indexes.
+    #[cfg(not(feature = "nccl"))]
+    graphs: GraphSet,
+    /// Dropped after the session: the arena, the device block and the statics every bucket's
+    /// step reads are owned here.
     #[cfg(not(feature = "nccl"))]
     decode_step: DecodeStep,
     /// Every address the decode step and the sampler bake, read when the forward was built; a
     /// debug build reads them again before each keyed step, and a release build carries no list.
+    /// Names and `u64` addresses only: it owns none of the memory a recording bakes, so where it
+    /// sits in the order is free.
     #[cfg(all(not(feature = "nccl"), debug_assertions))]
     baked: BakedAddresses,
-    /// Held for the process lifetime, which is what keeps the allocation from being reopened;
-    /// under NCCL nothing is enqueued through it.
-    #[cfg_attr(feature = "nccl", allow(dead_code))]
-    session: Replay,
+    /// Dropped last: candle's weights and cache and the sampler's arrays are most of what a
+    /// recording bakes, and the device itself is here.
+    allocated: Allocated,
 }
 
 impl CudaForward {
-    /// Holds what the rank allocated and the step over runtime tensors for the Replay phase
-    /// `session`, and, in a debug build, bakes every address the step and the sampler read, by
-    /// name, to check before each keyed step.
+    /// Holds what the rank allocated, the step over runtime tensors and the graph set `graphs`
+    /// its capture made for the Replay phase `session`, and, in a debug build, bakes every
+    /// address the step and the sampler read, by name, to check before each keyed step.
     ///
     /// # Errors
     ///
@@ -109,17 +149,20 @@ impl CudaForward {
     pub fn new(
         allocated: Allocated,
         #[cfg(not(feature = "nccl"))] decode_step: DecodeStep,
+        #[cfg(not(feature = "nccl"))] graphs: GraphSet,
         session: Replay,
     ) -> Result<Self, CudaForwardError> {
         #[cfg(all(not(feature = "nccl"), debug_assertions))]
         let baked = BakedAddresses::bake(addresses(&allocated, &decode_step)?);
         Ok(Self {
-            allocated,
+            session,
+            #[cfg(not(feature = "nccl"))]
+            graphs,
             #[cfg(not(feature = "nccl"))]
             decode_step,
             #[cfg(all(not(feature = "nccl"), debug_assertions))]
             baked,
-            session,
+            allocated,
         })
     }
 
@@ -152,11 +195,12 @@ impl CudaForward {
             #[cfg(debug_assertions)]
             self.assert_unmoved();
             let Self {
-                allocated: _,
+                session,
+                graphs: _,
                 decode_step,
                 #[cfg(debug_assertions)]
                     baked: _,
-                session,
+                allocated: _,
             } = self;
             return Ok(decode_step.run_for_logits(session, layout, batch, readback)?);
         }
@@ -192,8 +236,8 @@ impl CudaForward {
         }
     }
 
-    /// Runs `batch` on the decode step, which stages the sampler for it and samples its live
-    /// rows, when this rank samples.
+    /// Runs `batch` on the decode step by replaying the graph its bucket was captured into,
+    /// which stages the sampler for it and samples its live rows.
     #[cfg(not(feature = "nccl"))]
     fn run_decode_step(
         &mut self,
@@ -203,13 +247,18 @@ impl CudaForward {
         #[cfg(debug_assertions)]
         self.assert_unmoved();
         let Self {
-            allocated,
+            session,
+            graphs,
             decode_step,
             #[cfg(debug_assertions)]
                 baked: _,
-            session,
+            allocated,
         } = self;
-        Ok(decode_step.run(session, layout, batch, allocated.sampler.as_mut())?)
+        let Some(sampler) = allocated.sampler.as_mut() else {
+            return Err(CudaForwardError::NoSampler);
+        };
+        let graph = graphs.graph(batch.bucket)?;
+        Ok(decode_step.run(session, graph, layout, batch, sampler)?)
     }
 
     /// Runs `layout` through the Llama forward on candle's stream and samples the selected rows

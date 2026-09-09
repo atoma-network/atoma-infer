@@ -2,21 +2,21 @@
 //! holds, when a staging entry's fence is passed, and what an acquire costs when the host runs
 //! ahead.
 //!
-//! No checkpoint and no model: the inputs are built over a context, a stream and a session of
-//! their own, so what is measured is the staging and the copy and nothing else. A step's seven
-//! arrays — the five the model step reads and the two the sampler reads — are staged into one
-//! staging entry's pinned block and copied in through it; the device block is read back and every
-//! array compared at the bucket's packed offsets, and past the bucket's packed length the block
-//! is still as its allocation zeroed it. A second step, differing in all seven, is staged into
-//! the other staging entry before either copy-in runs, so each staging entry holds a step of its
-//! own when the first copy reads: each readback shows what its own staging entry was staged
-//! with, and it is the pair of them that says a copy-in does not reach one fixed pinned block —
-//! a `stage` naming block zero instead of the staging entry's leaves the second step in front of
-//! the first readback, and a `copy_in` naming it leaves the first step in front of the second.
-//! A dummy run then goes through the first staging entry again, taken back through the
-//! non-blocking half of the staging ring's protocol. Both copies have been waited on by then, so
-//! what that shows is a real fence answering a query and reading passed — which the staging
-//! ring's own tests cannot show over their fake fence — and not the order of the signal.
+//! No checkpoint and no model: the inputs are built over a context, a stream and a session of their
+//! own, so what is measured is the staging and the copy and nothing else. A step's eight arrays —
+//! the five the model step reads, the two the sampler reads and its live-row count — are staged
+//! into one staging entry's pinned block and copied in through it; the device block is read back
+//! and every array compared at the bucket's packed offsets, and past the bucket's packed length the
+//! block is still as its allocation zeroed it. A second step, differing in all eight, is staged
+//! into the other staging entry before either copy-in runs, so each staging entry holds a step of
+//! its own when the first copy reads: each readback shows what its own staging entry was staged
+//! with, and it is the pair of them that says a copy-in does not reach one fixed pinned block — a
+//! `stage` naming block zero instead of the staging entry's leaves the second step in front of the
+//! first readback, and a `copy_in` naming it leaves the first step in front of the second. A dummy
+//! run then goes through the first staging entry again, taken back through the non-blocking half of
+//! the staging ring's protocol. Both copies have been waited on by then, so what that shows is a
+//! real fence answering a query and reading passed — which the staging ring's own tests cannot show
+//! over their fake fence — and not the order of the signal.
 //!
 //! What none of the three copies pins is which of the two pinned blocks a staging entry names:
 //! swap the blocks wherever a staging entry indexes one and every comparison still passes. The
@@ -64,11 +64,12 @@ use cudarc::driver::CudaStream;
 
 /// The bucket ladder under test.
 const LADDER: [usize; 3] = [1, 2, 4];
-/// The largest bucket of the ladder, and the request count that keeps every bucket usable.
+/// The largest bucket of the bucket ladder, and the maximum batch that keeps every bucket
+/// usable.
 const LARGEST_BUCKET: usize = 4;
 /// Rows of the bucket both steps and the dummy run fill.
 const ROWS: usize = 2;
-/// That bucket: the ladder's second.
+/// That bucket: the bucket ladder's second.
 const BUCKET: BucketIdx = BucketIdx(1);
 /// Columns of the block table, wide enough that the largest bucket's table is longer than the
 /// alignment, so the buckets pack to different lengths.
@@ -83,7 +84,7 @@ const MAX_POSITION: usize = 512;
 // Bucket 2's packed offsets at 64 columns: token ids, positions and key lengths take 8 bytes
 // each and the slot mapping 16, every one of them padded to the 256-byte alignment; the block
 // table's two rows take 512; the sampler's two arrays follow, 8 bytes each and padded the same
-// way.
+// way, and its live-row count is one 4-byte word padded the same way again.
 const TOKEN_IDS_AT: usize = 0;
 const POSITIONS_AT: usize = 256;
 const KEY_LENGTHS_AT: usize = 512;
@@ -91,21 +92,22 @@ const SLOT_MAPPING_AT: usize = 768;
 const BLOCK_TABLE_AT: usize = 1024;
 const ROW_SLOTS_AT: usize = 1536;
 const GATHER_SLOTS_AT: usize = 1792;
-/// Bucket 2's packed length: the gather slots' offset plus their aligned length, which is what
+const LIVE_ROWS_AT: usize = 2048;
+/// Bucket 2's packed length: the live-row count's offset plus its aligned length, which is what
 /// one of its copies carries and where the device block is left as its allocation zeroed it.
-const PACKED_BYTES: usize = 2048;
+const PACKED_BYTES: usize = 2304;
 /// The device block: the largest bucket's packed length, whose block table takes 1024 bytes, so
-/// its sampler arrays sit 512 further on than bucket 2's.
-const BLOCK_BYTES: usize = 2560;
+/// its sampler arrays and its live-row count sit 512 further on than bucket 2's.
+const BLOCK_BYTES: usize = 2816;
 
 /// Columns of the block table the fence test stages at: bucket 2's two rows of them come to
 /// 16 MiB, so one copy takes tens of microseconds on the fastest link a host has to a device and
 /// hundreds on the links most have, against the two or three microseconds the host spends
 /// between enqueuing the copy and asking the fence.
 const WIDE_WIDTH: usize = 2 * 1024 * 1024;
-/// What one of those copies carries: bucket 2's four single-row arrays and the sampler's two,
-/// each padded to the alignment, and its two table rows.
-const WIDE_COPY_BYTES: usize = 4 * 256 + ROWS * WIDE_WIDTH * 4 + 2 * 256;
+/// What one of those copies carries: bucket 2's four single-row arrays, the sampler's two and
+/// its live-row count, each padded to the alignment, and its two table rows.
+const WIDE_COPY_BYTES: usize = 4 * 256 + ROWS * WIDE_WIDTH * 4 + 3 * 256;
 /// Staging entries the fence test runs at: one, so the staging entry a copy is reading is the
 /// staging entry the next query asks about.
 const FENCE_DEPTH: StagingDepth = StagingDepth::new(1).expect("nonzero");
@@ -191,8 +193,8 @@ impl Rig {
     }
 }
 
-/// What the seven arrays must read as on the device once a step's copy has landed: one value
-/// per row of the bucket, and each row's blocks.
+/// What the eight arrays must read as on the device once a step's copy has landed: one value
+/// per row of the bucket, each row's blocks, and the one live-row count.
 struct Staged {
     token_ids: [u32; ROWS],
     positions: [i32; ROWS],
@@ -202,10 +204,11 @@ struct Staged {
     blocks: [Vec<i32>; ROWS],
     row_slots: [i32; ROWS],
     gather_slots: [i32; ROWS],
+    live_rows: u32,
 }
 
 impl Staged {
-    /// Asserts `block` — the device block, read back — holds every one of the seven arrays at
+    /// Asserts `block` — the device block, read back — holds every one of the eight arrays at
     /// bucket 2's packed offsets.
     fn holds(&self, block: &[u8]) {
         assert_eq!(
@@ -227,6 +230,7 @@ impl Staged {
         held(BLOCK_TABLE_AT, &words(&self.table()), "block table");
         held(ROW_SLOTS_AT, &words(&self.row_slots), "row slots");
         held(GATHER_SLOTS_AT, &words(&self.gather_slots), "gather slots");
+        held(LIVE_ROWS_AT, &words(&[self.live_rows]), "live-row count");
         assert!(
             block[PACKED_BYTES..].iter().all(|&byte| byte == 0),
             "past bucket 2's packed length the device block is as its allocation zeroed it: the \
@@ -247,7 +251,7 @@ impl Staged {
     }
 }
 
-/// A value one of the seven arrays holds, in the native-endian bytes the device reads it as.
+/// A value one of the eight arrays holds, in the native-endian bytes the device reads it as.
 trait Word: Copy {
     fn bytes(self) -> Vec<u8>;
 }
@@ -283,7 +287,10 @@ fn dispatch_config() -> DispatchConfig {
 }
 
 fn buckets() -> DecodeBuckets {
-    DecodeBuckets::usable(&dispatch_config())
+    DecodeBuckets::usable(
+        &dispatch_config(),
+        RequestCount::new(LARGEST_BUCKET).expect("nonzero"),
+    )
 }
 
 /// The staging shape of [`LADDER`]'s largest bucket at `width` columns.
@@ -339,7 +346,7 @@ fn keyed(entries: Vec<CommandEntry>, width: usize) -> (BatchLayout, DecodeBatch)
     (layout, batch)
 }
 
-/// The first step under test, and what its seven arrays must read as: a token at position 3 over
+/// The first step under test, and what its eight arrays must read as: a token at position 3 over
 /// one block, and a token at position 20 over the second of two.
 /// Every value but the block table's padding is nonzero, so a device block still holding what
 /// its allocation zeroed cannot pass for this one.
@@ -356,6 +363,7 @@ fn first_step() -> (BatchLayout, DecodeBatch, Staged) {
         blocks: [vec![10], vec![20, 21]],
         row_slots: [5, 6],
         gather_slots: [7, 8],
+        live_rows: 2,
     };
     (layout, batch, staged)
 }
@@ -388,11 +396,12 @@ fn second_step() -> (BatchLayout, DecodeBatch, Staged) {
         blocks: [vec![12], vec![30, 31, 32]],
         row_slots: [13, 14],
         gather_slots: [15, 16],
+        live_rows: 1,
     };
     (layout, batch, staged)
 }
 
-/// The dummy run under test, and what its seven arrays must read as: every row a padding row
+/// The dummy run under test, and what its eight arrays must read as: every row a padding row
 /// over its own block. Its positions and its zero-filled table cells are read against a device
 /// block the second step left nonzero there.
 fn dummy_run() -> (DummyRun, Staged) {
@@ -407,6 +416,7 @@ fn dummy_run() -> (DummyRun, Staged) {
         // No row samples and every row keeps the token the host staged.
         row_slots: [-1, -1],
         gather_slots: [-1, -1],
+        live_rows: 0,
     };
     (run, staged)
 }
@@ -461,10 +471,11 @@ fn what_each_staging_entry_copies_in_is_what_the_device_block_holds() {
         .inputs
         .stage(&first_entry, &first_layout, &first_batch)
         .expect("the first step stages");
-    // The sampler decides these two per step; what one copy carries is what is under test here,
-    // so the test writes them itself, as the bucket's rows hold them.
+    // The sampler decides these three per step; what one copy carries is what is under test here,
+    // so the test writes them itself: the two at the bucket's rows, the count into its one word.
     arrays.row_slots.copy_from_slice(&first.row_slots);
     arrays.gather_slots.copy_from_slice(&first.gather_slots);
+    *arrays.live_rows = first.live_rows;
 
     // Nothing has signaled either fence yet, so this acquire waits on nothing.
     let second_entry = rig.inputs.acquire().expect("the second staging entry");
@@ -479,6 +490,7 @@ fn what_each_staging_entry_copies_in_is_what_the_device_block_holds() {
         .expect("the second step stages");
     arrays.row_slots.copy_from_slice(&second.row_slots);
     arrays.gather_slots.copy_from_slice(&second.gather_slots);
+    *arrays.live_rows = second.live_rows;
 
     first.holds(&rig.copy_in(first_entry, first_batch.bucket));
     second.holds(&rig.copy_in(second_entry, second_batch.bucket));

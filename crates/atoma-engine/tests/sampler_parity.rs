@@ -9,8 +9,11 @@
 //! overwrite a decoding row's token with what its slot sampled, leave a fresh slot's row to the
 //! host, and cover the token rows the caller stated rather than the rows the step samples; a
 //! step staged where the caller says must sample under the row slots uploaded from
-//! there; the eager upload must refuse a step staged where the caller says; and a view of other
-//! rows than the staged step's, or of another dtype, must be refused by name.
+//! there; a row at or past the live-row count must keep the token it had and leave both what its
+//! slot last sampled and its slot's draw counter alone; the eager upload must refuse a step
+//! staged where the caller says; a sample
+//! with no copy described behind it must leave nothing to wait on; and a view of other rows than
+//! the staged step's, or of another dtype, must be refused by name.
 //!
 //! Run through `scripts/sampler-parity.sh`.
 
@@ -30,6 +33,7 @@ use atoma_core::types::{
 use atoma_engine::batch::BatchLayout;
 use atoma_engine::decode::staging::SamplerArrays;
 use atoma_engine::device::sampler::{ArraysIn, DeviceSampler, SamplerError};
+use atoma_engine::readback::ReadbackError;
 use atoma_engine::sampling::record::SlotRecord;
 use atoma_engine::sampling::reference;
 use atoma_runtime::context::RuntimeContext;
@@ -66,9 +70,9 @@ impl Lcg {
 }
 
 /// The device, its stream and the sampler under test, with a buffer for the logits, one for the
-/// token ids a step would copy in, and one for each of the sampler's two per-step arrays where a
-/// decode step's copy-in would put them, each viewed at its full rows as a decode step's views
-/// are minted.
+/// token ids a step would copy in, and one for each of the sampler's two per-step arrays and its
+/// live-row count where a decode step's copy-in would put them, each viewed at its full rows as a
+/// decode step's views are minted.
 struct Rig {
     sampler: DeviceSampler,
     stream: Arc<CudaStream>,
@@ -76,6 +80,7 @@ struct Rig {
     token_ids: CudaSlice<u32>,
     row_slots: CudaSlice<i32>,
     gather_slots: CudaSlice<i32>,
+    live_rows: CudaSlice<u32>,
     views: Views,
     _allocation: Allocation,
 }
@@ -91,6 +96,8 @@ struct Views {
     row_slots: Tensor,
     /// i32 `[MAX_ROWS]`.
     gather_slots: Tensor,
+    /// u32 `[1]`.
+    live_rows: Tensor,
 }
 
 impl Rig {
@@ -112,12 +119,16 @@ impl Rig {
         let gather_slots = stream
             .alloc_zeros::<i32>(MAX_ROWS.get())
             .expect("the gather slots allocate");
+        let live_rows = stream
+            .alloc_zeros::<u32>(1)
+            .expect("the live-row count allocates");
         let rows = MAX_ROWS.get();
         let views = Views {
             logits: view(&allocation, &stream, &logits, &[rows, VOCAB], Dtype::F32),
             token_ids: view(&allocation, &stream, &token_ids, &[rows], Dtype::U32),
             row_slots: view(&allocation, &stream, &row_slots, &[rows], Dtype::I32),
             gather_slots: view(&allocation, &stream, &gather_slots, &[rows], Dtype::I32),
+            live_rows: view(&allocation, &stream, &live_rows, &[1], Dtype::U32),
         };
         Self {
             sampler,
@@ -126,6 +137,7 @@ impl Rig {
             token_ids,
             row_slots,
             gather_slots,
+            live_rows,
             views,
             _allocation: allocation,
         }
@@ -143,11 +155,12 @@ impl Rig {
     }
 
     /// Stages `layout` where the caller says, covering its token rows with the gather, uploads
-    /// the two arrays to the rig's buffers as a decode step's block copy-in would, and enqueues
-    /// the record upload.
+    /// the two arrays and the live-row count to the rig's buffers as a decode step's block
+    /// copy-in would, and enqueues the record upload.
     fn stage_as_decode_step(&mut self, layout: &BatchLayout, gather_rows: usize) {
         let mut row_slots = vec![0; MAX_ROWS.get()];
         let mut gather_slots = vec![0; MAX_ROWS.get()];
+        let mut live_rows = 0;
         self.sampler
             .stage(
                 layout,
@@ -155,6 +168,7 @@ impl Rig {
                 SamplerArrays {
                     row_slots: &mut row_slots,
                     gather_slots: &mut gather_slots,
+                    live_rows: &mut live_rows,
                 },
             )
             .expect("the layout stages");
@@ -164,6 +178,7 @@ impl Rig {
         self.stream
             .memcpy_htod(&gather_slots, &mut self.gather_slots)
             .expect("the gather slots upload");
+        self.upload_live_rows(live_rows);
         // SAFETY: the stream is the sampler's, and every address is the sampler's own.
         unsafe {
             self.sampler
@@ -172,6 +187,14 @@ impl Rig {
                 .enqueue(self.stream.cu_stream())
                 .expect("the record upload enqueues");
         }
+    }
+
+    /// Uploads `live` as the step's live-row count, where a decode step's block copy-in puts
+    /// it: what bounds the sample, whatever rows the launch covers.
+    fn upload_live_rows(&mut self, live: u32) {
+        self.stream
+            .memcpy_htod(&[live], &mut self.live_rows)
+            .expect("the live-row count uploads");
     }
 
     /// Stages `layout` as a decode step would, uploads `token_ids` as the host would, runs the
@@ -232,19 +255,38 @@ impl Rig {
     }
 
     /// Samples `rows` under `layout` as a decode step would, staged where the caller says and
-    /// uploaded from there, and returns the tokens.
+    /// uploaded from there, with the readback enqueued behind the sample as the decode step
+    /// enqueues it, and returns the tokens.
     fn sample_as_decode_step(&mut self, layout: &BatchLayout, rows: &[Vec<f32>]) -> Vec<u32> {
+        let live = u32::try_from(rows.len()).expect("the rig's rows fit u32");
+        self.sample_bounded(layout, rows, live)
+    }
+
+    /// Samples `rows` under `layout` as a decode step would, with `live` uploaded over the count
+    /// the staging wrote: what a batch filling fewer rows than the launch covers carries. The
+    /// readback covers every staged row, so a row the count leaves out comes back holding the
+    /// token it had.
+    fn sample_bounded(&mut self, layout: &BatchLayout, rows: &[Vec<f32>], live: u32) -> Vec<u32> {
         self.upload_logits(rows);
         self.stage_as_decode_step(layout, rows.len());
+        self.upload_live_rows(live);
         let (logits, row_slots) = self.live_views(rows.len());
-        // SAFETY: the stream is the sampler's, and the logits and the row slots were uploaded to
-        // its device.
+        // SAFETY: the stream is the sampler's, and the logits, the row slots and the live-row
+        // count were uploaded to its device.
         unsafe {
-            self.sampler
-                .sample(&logits, &row_slots)
-                .expect("a step is staged")
+            let mut sample = self
+                .sampler
+                .sample(&logits, &row_slots, &self.views.live_rows)
+                .expect("a step is staged");
+            sample
                 .enqueue(self.stream.cu_stream())
                 .expect("the sample enqueues");
+            let sampled = sample.sampled().expect("the sample was enqueued");
+            self.sampler
+                .read_tokens(sampled)
+                .expect("a step is staged")
+                .enqueue(self.stream.cu_stream())
+                .expect("the readback enqueues");
         }
         self.sampler.wait().expect("the tokens come back").to_vec()
     }
@@ -636,6 +678,68 @@ fn a_step_staged_where_the_caller_says_samples_under_the_row_slots_uploaded_from
 
 #[test]
 #[ignore = "needs a device and the CUDA toolkit; run scripts/sampler-parity.sh"]
+fn a_row_past_the_live_row_count_keeps_its_token_and_leaves_its_slot_and_draw_counter_alone() {
+    let mut rig = Rig::open();
+    // Three tokens carry all the mass and the rest are far below, so every draw lands on one of
+    // the three; the seed is one whose first three draws are three different tokens, which the
+    // launches below check before they lean on it.
+    let mut spread = vec![-30.0f32; VOCAB];
+    for (&token, &probability) in [11usize, 222, 3333].iter().zip(&[0.5f32, 0.3, 0.2]) {
+        spread[token] = probability.ln();
+    }
+    let params = drawn(1.0, 0, 0.999, 21);
+    // Two requests drawing one seed's stream in two slots, over the same row. The first row is
+    // live every launch, so its tokens are that stream draw by draw; the second is the row the
+    // count leaves out, and where its stream has got to is what its draw counter says.
+    let decoding = vec![entry(1, 3, params), entry(2, 5, params)];
+    let rows = [spread.clone(), spread];
+
+    // Both rows live, then the same two rows with a live-row count of one: the launch covers the
+    // second row and the count does not.
+    let first = rig.sample_as_decode_step(&layout(decoding.clone()), &rows);
+    let bounded = rig.sample_bounded(&layout(decoding.clone()), &rows, 1);
+    // What each slot last sampled, read the way the next step reads it.
+    let gathered = rig.gather(&layout(decoding.clone()), &[999, 999]);
+    // Both live again: the row the count left out draws under the counter it still stands at.
+    let after = rig.sample_as_decode_step(&layout(decoding), &rows);
+
+    println!("=============== live-row bound ===============");
+    println!("two rows live:        {first:?}");
+    println!("one row live:         {bounded:?}");
+    println!("gathered after:       {gathered:?}");
+    println!("two rows live again:  {after:?}");
+    assert_eq!(
+        first[0], first[1],
+        "one seed's first draw, whichever slot draws it"
+    );
+    assert_ne!(
+        bounded[0], first[0],
+        "the seed's first two draws must differ, or a row that sampled where it should not have \
+         would keep its token anyway"
+    );
+    assert_ne!(
+        after[0], bounded[0],
+        "the seed's second and third draws must differ, or a draw counter that moved would not \
+         show"
+    );
+    assert_eq!(
+        bounded[1], first[1],
+        "the row past the count keeps the token it had, which drawing would have moved on"
+    );
+    assert_eq!(
+        gathered,
+        [bounded[0], first[1]],
+        "the slot of the row past the count keeps the token it last sampled"
+    );
+    assert_eq!(
+        after[1], bounded[0],
+        "the row past the count drew nothing, so its next token is the seed's second draw: the \
+         one the row that stayed live took while it was skipped"
+    );
+}
+
+#[test]
+#[ignore = "needs a device and the CUDA toolkit; run scripts/sampler-parity.sh"]
 fn the_eager_upload_refuses_a_step_staged_where_the_caller_says() {
     let mut rig = Rig::open();
     let step = layout(vec![entry(1, 0, SamplingParams::default())]);
@@ -650,6 +754,7 @@ fn the_eager_upload_refuses_a_step_staged_where_the_caller_says() {
             SamplerArrays {
                 row_slots: &mut row_slots,
                 gather_slots: &mut gather_slots,
+                live_rows: &mut 0,
             },
         )
         .expect("the layout stages");
@@ -677,9 +782,10 @@ fn a_view_of_other_rows_than_the_staged_step_or_of_another_dtype_is_refused_by_n
     // view handed as the logits is not f32.
     let (logits, row_slots) = rig.live_views(2);
     let (three, _) = rig.live_views(3);
+    let live_rows = &rig.views.live_rows;
     assert!(
         matches!(
-            rig.sampler.sample(&three, &row_slots),
+            rig.sampler.sample(&three, &row_slots, live_rows),
             Err(SamplerError::ViewShape {
                 what: "logits",
                 ref held,
@@ -690,7 +796,7 @@ fn a_view_of_other_rows_than_the_staged_step_or_of_another_dtype_is_refused_by_n
     );
     assert!(
         matches!(
-            rig.sampler.sample(&row_slots, &logits),
+            rig.sampler.sample(&row_slots, &logits, live_rows),
             Err(SamplerError::ViewDtype {
                 what: "logits",
                 held: Dtype::I32,
@@ -698,6 +804,17 @@ fn a_view_of_other_rows_than_the_staged_step_or_of_another_dtype_is_refused_by_n
             })
         ),
         "the row slots handed as the logits are refused"
+    );
+    assert!(
+        matches!(
+            rig.sampler.sample(&logits, &row_slots, &row_slots),
+            Err(SamplerError::ViewDtype {
+                what: "live rows",
+                held: Dtype::I32,
+                expected: Dtype::U32
+            })
+        ),
+        "the row slots handed as the live-row count are refused"
     );
 
     // The gather's two views swapped: the gather slots are not u32 token ids.
@@ -726,4 +843,35 @@ fn a_view_of_other_rows_than_the_staged_step_or_of_another_dtype_is_refused_by_n
         rig.sampler.gather(&ids, &slots).is_ok(),
         "the right views are taken"
     );
+}
+
+#[test]
+#[ignore = "needs a device and the CUDA toolkit; run scripts/sampler-parity.sh"]
+fn a_sample_with_no_copy_described_behind_it_leaves_nothing_to_wait_on() {
+    let mut rig = Rig::open();
+    let step = layout(vec![entry(1, 0, SamplingParams::default())]);
+    rig.stage_as_decode_step(&step, 1);
+
+    // The rig's zeroed logits: what the row samples does not matter here, only that the sample
+    // describes the launch and nothing else, so the tokens stay on the device until a copy is
+    // described behind it.
+    let (logits, row_slots) = rig.live_views(1);
+    // SAFETY: the stream is the sampler's, and the logits, the row slots and the live-row count
+    // are live on its device.
+    unsafe {
+        rig.sampler
+            .sample(&logits, &row_slots, &rig.views.live_rows)
+            .expect("a step is staged")
+            .enqueue(rig.stream.cu_stream())
+            .expect("the sample enqueues");
+    }
+    let refused = rig.sampler.wait().expect_err("no copy was described");
+    assert!(
+        matches!(
+            refused,
+            SamplerError::Readback(ReadbackError::NoCopyPending)
+        ),
+        "a sample with no copy described behind it leaves nothing to wait on: {refused}"
+    );
+    rig.stream.synchronize().expect("the stream drains");
 }

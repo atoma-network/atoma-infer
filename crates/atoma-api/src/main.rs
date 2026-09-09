@@ -21,9 +21,10 @@ mod startup {
     use atoma_core::attention::{CaptureContract, ModelDeclaration};
     use atoma_core::config::load;
     use atoma_core::engine::{Control, Engine};
+    use atoma_core::kv::PaddingReservation;
     use atoma_engine::decode::declaration;
     use atoma_engine::executor::spawn_ranks;
-    use atoma_engine::model::{check_eos_token_ids, eos_token_ids, fetch};
+    use atoma_engine::model::{check_eos_token_ids, eos_token_ids, fetch, kv_cache_spec};
     use clap::Parser;
     use tokenizers::Tokenizer;
     use tokio::net::TcpListener;
@@ -61,15 +62,24 @@ mod startup {
                 files.tokenizer.display()
             )
         })?;
+        // The padding dummies' KV is reserved for the process lifetime; what it costs is known
+        // from the model's geometry before the pool or the device holds anything.
+        let scheduler = &config.engine.scheduler;
+        let kv_spec = kv_cache_spec(&files.config, scheduler.block_size, config.model.dtype)?;
+        info!(
+            dummies = PaddingReservation::dummies_for(scheduler.max_batch),
+            bytes = PaddingReservation::cost_bytes(&kv_spec, scheduler.max_batch),
+            "padding dummies' KV cost"
+        );
 
-        let (handle, rings, engine) =
+        let (handle, handoff, engine) =
             Engine::spawn(&config.engine, &contract(config.model.id.as_str()))?;
         let executors = match spawn_ranks(
             &config.engine,
             &config.executor,
             &config.model,
             &files,
-            rings,
+            handoff,
         ) {
             Ok(executors) => executors,
             Err(error) => {
