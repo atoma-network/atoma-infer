@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 #
-# Decode parity and the capture check on a CUDA rig: runs the ignored integration test that
-# builds the decode step over runtime tensors beside the candle forward on the same weights and
-# KV cache, records the step under capture, and compares the two forwards' logits over decode
-# steps of varying ids, lengths and block tables.
+# Decode parity, the capture of the bucket ladder and its replay on a CUDA rig: runs the ignored
+# integration test that builds the decode step over runtime tensors beside the candle forward on
+# the same weights and KV cache, captures every bucket into a graph, compares the eager step's
+# logits with candle's over decode steps of varying ids, lengths and block tables, compares each
+# replay's sampled token and cache writes with the eager step's, and reads free device memory
+# around every step and across a soak of replays.
 #
 # Usage, from a checkout on the rig with a CUDA 12.x toolkit on PATH:
 #   HF_TOKEN=... scripts/decode-parity.sh [model-id]
@@ -12,8 +14,9 @@
 # fits the device works. The flash-attention kernels are a long nvcc build the first time; set
 # FLASH_ATTN_BUILD_DIR to keep the build across checkouts.
 #
-# The test prints an evidence block with the argmax agreement and the largest absolute
-# difference on the f32 logits; paste it into the pull request.
+# The test prints an evidence block with the argmax agreement, the largest absolute difference
+# on the f32 logits, what capturing the bucket ladder cost, and the replay's agreement with the
+# eager step; paste it into the pull request.
 
 set -euo pipefail
 
