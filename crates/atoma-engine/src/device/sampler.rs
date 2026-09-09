@@ -579,8 +579,10 @@ impl DeviceSampler {
     /// # Errors
     ///
     /// Returns [`SamplerError::NoStepStaged`] when no step is staged.
-    // The witness is taken by value on purpose: one sample, one readback described behind it.
-    #[allow(clippy::needless_pass_by_value)]
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "the witness is consumed on purpose: one sample, one readback described behind it"
+    )]
     pub fn read_tokens(&mut self, sampled: Sampled) -> Result<ReadbackCopy<'_, u32>, SamplerError> {
         let Sampled { _witnessed: () } = sampled;
         let staged = self.staged.ok_or(SamplerError::NoStepStaged)?;

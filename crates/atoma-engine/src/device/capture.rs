@@ -15,10 +15,12 @@
 //! over every row of the bucket and returns for each: no slot's sampling record or draw counter
 //! moves while the bucket ladder is captured.
 //!
-//! Free device memory is read ahead of and behind each bucket's warmup and recording, and ahead
-//! of and behind the whole capture, and each bucket is timed: what one graph cost and what the
-//! capture cost at startup, logged here on the executor thread and handed back as a
-//! [`CaptureReport`], with graph memory fitted to a fixed term plus a marginal term per graph.
+//! Free device memory is read ahead of and behind the whole capture, behind the one warmup
+//! ahead of every recording, and behind each bucket's warmup and recording, so that each bucket
+//! starts from the reading the one before it ended on; and each bucket is timed: what one graph
+//! cost and what the capture cost at startup, logged here on the executor thread and handed back
+//! as a [`CaptureReport`], with graph memory fitted to a fixed term plus a marginal term per
+//! graph.
 //! A reading can be the first call to check the context after a driver status was deferred
 //! onto it, in which case the reading fails under that status's own classification; every
 //! reading is propagated, never logged and passed over, so a deferred failure fails the capture
@@ -63,8 +65,11 @@ pub enum CaptureError {
 /// What capturing the bucket ladder produced: the session in its Replay phase, the graph serving
 /// each bucket, and what the capture cost.
 pub struct Captured {
+    /// The session in its Replay phase, every bucket's graph recorded in it.
     pub session: Replay,
+    /// The graph serving each bucket, at the bucket's index in `session`.
     pub graphs: GraphSet,
+    /// What the capture cost, as logged.
     pub report: CaptureReport,
 }
 
@@ -101,12 +106,25 @@ pub fn capture_bucket_ladder(
     }
     let mut graphs = Vec::with_capacity(runs.len());
     let mut costs = Vec::with_capacity(runs.len());
+    let mut free = context.free_memory()?;
     for run in &runs {
-        let (graph, cost) = capture_bucket(context, &mut capture, decode_step, sampler, run)?;
+        let bucket_started = Instant::now();
+        let graph = capture_bucket(&mut capture, decode_step, sampler, run)?;
+        let after = context.free_memory()?;
+        let cost = GraphCost::measured(run, bucket_started.elapsed(), free, after);
+        info!(
+            bucket = cost.bucket.0,
+            rows = cost.rows,
+            elapsed = ?cost.elapsed,
+            used_bytes = %cost.used,
+            free_bytes = %cost.free,
+            "bucket captured"
+        );
+        free = after;
         graphs.push(graph);
         costs.push(cost);
     }
-    let report = CaptureReport::measured(costs, started.elapsed(), before, context.free_memory()?);
+    let report = CaptureReport::measured(costs, started.elapsed(), before, free);
     log_report(&report);
     Ok(Captured {
         session: capture.into_replay(),
@@ -115,30 +133,16 @@ pub fn capture_bucket_ladder(
     })
 }
 
-/// Warms `run`'s bucket up and records it, timed and with free memory read ahead of and behind
-/// the two, and logs what the graph cost.
+/// Warms `run`'s bucket up and records it: the graph at the index the recording took.
 fn capture_bucket(
-    context: &RuntimeContext,
     capture: &mut Capture,
     decode_step: &mut DecodeStep,
     sampler: &mut DeviceSampler,
     run: &DummyRun,
-) -> Result<(GraphIdx, GraphCost), CaptureError> {
-    let started = Instant::now();
-    let before = context.free_memory()?;
+) -> Result<GraphIdx, CaptureError> {
     warm_up_bucket(capture, decode_step, sampler, run)?;
     let mut step = decode_step.bucket_step(sampler, run)?;
-    let graph = capture.record(&mut step, BakedBuffers::default())?;
-    let cost = GraphCost::measured(run, started.elapsed(), before, context.free_memory()?);
-    info!(
-        bucket = cost.bucket.0,
-        rows = cost.rows,
-        elapsed = ?cost.elapsed,
-        used_bytes = %cost.used,
-        free_bytes = %cost.free,
-        "bucket captured"
-    );
-    Ok((graph, cost))
+    Ok(capture.record(&mut step, BakedBuffers::default())?)
 }
 
 /// Runs `run`'s bucket eagerly at its exact shape: the dummy run staged on the sampler and in a
@@ -158,26 +162,26 @@ fn warm_up_bucket(
     Ok(())
 }
 
-/// Logs what the capture cost at startup: its time and memory in all, and graph memory as a
+/// Logs what the capture cost at startup: its time and memory in all, then graph memory as a
 /// fixed term plus a marginal term per graph where two or more graphs give the fit its two
-/// terms, the total alone where one graph does not.
+/// terms, and that one graph's reading names neither where it does not.
 fn log_report(report: &CaptureReport) {
+    info!(
+        graphs = report.graphs.len(),
+        elapsed = ?report.elapsed,
+        used_bytes = %report.used,
+        free_bytes = %report.free,
+        "bucket ladder captured"
+    );
     match report.graph_memory() {
         Ok(memory) => info!(
-            graphs = report.graphs().len(),
-            elapsed = ?report.elapsed(),
-            used_bytes = %report.used(),
-            free_bytes = %report.free(),
             fixed_bytes = %memory.fixed(),
             marginal_bytes_per_graph = %memory.marginal(),
-            "bucket ladder captured"
+            "graph memory fitted over what each graph used"
         ),
         Err(GraphMemoryError::FitWithoutTwoGraphs { graphs }) => info!(
             graphs,
-            elapsed = ?report.elapsed(),
-            used_bytes = %report.used(),
-            free_bytes = %report.free(),
-            "bucket ladder captured; one graph's used bytes name no fixed and marginal term"
+            "graph memory not fitted: one graph's used bytes name no fixed and marginal term"
         ),
     }
 }

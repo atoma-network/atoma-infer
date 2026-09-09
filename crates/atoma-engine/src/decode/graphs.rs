@@ -102,8 +102,11 @@ impl GraphSet {
 /// memory they used, and what the device had free once the graph was recorded.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GraphCost {
+    /// The bucket the graph was recorded for.
     pub bucket: BucketIdx,
+    /// The bucket's rows, which its dummy run filled.
     pub rows: usize,
+    /// How long the bucket's warmup and recording took.
     pub elapsed: Duration,
     /// The drop in free device memory across the bucket's warmup and recording, and none where
     /// it rose: a reading is the device's free memory, not this process's.
@@ -136,10 +139,14 @@ impl GraphCost {
 /// time and memory, the one warmup ahead of every recording included.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CaptureReport {
-    graphs: Vec<GraphCost>,
-    elapsed: Duration,
-    used: DeviceBytes,
-    free: DeviceBytes,
+    /// Each graph's cost, in bucket order.
+    pub graphs: Vec<GraphCost>,
+    /// How long the whole capture took.
+    pub elapsed: Duration,
+    /// The drop in free device memory across the whole capture, and none where it rose.
+    pub used: DeviceBytes,
+    /// Free device memory once the capture was over.
+    pub free: DeviceBytes,
 }
 
 impl CaptureReport {
@@ -160,37 +167,13 @@ impl CaptureReport {
         }
     }
 
-    /// Each graph's cost, in bucket order.
-    #[must_use]
-    pub fn graphs(&self) -> &[GraphCost] {
-        &self.graphs
-    }
-
-    /// How long the whole capture took.
-    #[must_use]
-    pub fn elapsed(&self) -> Duration {
-        self.elapsed
-    }
-
-    /// The drop in free device memory across the whole capture, and none where it rose.
-    #[must_use]
-    pub fn used(&self) -> DeviceBytes {
-        self.used
-    }
-
-    /// Free device memory once the capture was over.
-    #[must_use]
-    pub fn free(&self) -> DeviceBytes {
-        self.free
-    }
-
     /// Graph memory as a fixed term plus a marginal term per graph, fitted over what each graph
     /// used: a report of what these captures cost, and no ceiling for one that has not run.
     ///
     /// # Errors
     ///
     /// Returns [`GraphMemoryError::FitWithoutTwoGraphs`] when fewer than two graphs were
-    /// captured; [`CaptureReport::used`] is the whole of what there is to report then.
+    /// captured; the report's `used` is the whole of what there is to report then.
     pub fn graph_memory(&self) -> Result<GraphMemory, GraphMemoryError> {
         let used: Vec<DeviceBytes> = self.graphs.iter().map(|graph| graph.used).collect();
         GraphMemory::fit(&used)
@@ -367,10 +350,10 @@ mod tests {
             bytes(68 * MIB),
         );
 
-        assert_eq!(report.graphs(), &graphs[..]);
-        assert_eq!(report.elapsed(), Duration::from_millis(30));
-        assert_eq!(report.used(), bytes(32 * MIB));
-        assert_eq!(report.free(), bytes(68 * MIB));
+        assert_eq!(report.graphs, graphs);
+        assert_eq!(report.elapsed, Duration::from_millis(30));
+        assert_eq!(report.used, bytes(32 * MIB));
+        assert_eq!(report.free, bytes(68 * MIB));
     }
 
     #[test]
@@ -406,7 +389,7 @@ mod tests {
             GraphMemoryError::FitWithoutTwoGraphs { graphs: 1 }
         );
         assert_eq!(
-            report.used(),
+            report.used,
             bytes(MIB),
             "the total is what there is to report"
         );

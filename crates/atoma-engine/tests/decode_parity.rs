@@ -398,7 +398,7 @@ fn report_capture(captured: &Captured) -> Vec<GraphNodes> {
             }
         })
         .collect();
-    for cost in report.graphs() {
+    for cost in &report.graphs {
         println!(
             "capture: bucket {} of {} rows took {:?} and used {} bytes; {} bytes free after",
             cost.bucket.0, cost.rows, cost.elapsed, cost.used, cost.free
@@ -406,10 +406,10 @@ fn report_capture(captured: &Captured) -> Vec<GraphNodes> {
     }
     println!(
         "capture: {} graphs took {:?} and used {} bytes in all; {} bytes free after",
-        report.graphs().len(),
-        report.elapsed(),
-        report.used(),
-        report.free()
+        report.graphs.len(),
+        report.elapsed,
+        report.used,
+        report.free
     );
     match report.graph_memory() {
         Ok(memory) => println!(
@@ -928,7 +928,7 @@ fn print_evidence(
     println!("  bound:              {}", bounds.kv);
     let report = &capture.report;
     println!("bucket ladder capture, {} graphs:", capture.graphs.len());
-    for ((rows, graph), cost) in LADDER.iter().zip(&capture.graphs).zip(report.graphs()) {
+    for ((rows, graph), cost) in LADDER.iter().zip(&capture.graphs).zip(&report.graphs) {
         println!(
             "  bucket {rows:>2}: {} nodes, {} memory nodes, {:?}, {} bytes",
             graph.nodes, graph.memory_nodes, cost.elapsed, cost.used
@@ -936,9 +936,7 @@ fn print_evidence(
     }
     println!(
         "  in all:    {:?}, {} bytes; {} bytes free after",
-        report.elapsed(),
-        report.used(),
-        report.free()
+        report.elapsed, report.used, report.free
     );
     match report.graph_memory() {
         Ok(memory) => println!(
