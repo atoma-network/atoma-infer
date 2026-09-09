@@ -1,5 +1,5 @@
 //! Capturing the bucket ladder the decode step serves: one graph per bucket, each recorded over
-//! a dummy run of that bucket's rows, in the Capture session phase.
+//! a dummy run of that bucket's rows, in the Capture session phase, and what that cost.
 //!
 //! Before any recording, one eager warmup runs at the largest bucket, so a backend's one-time
 //! lazy allocations — cuBLAS workspaces, first-call setup — land before any bucket is recorded.
@@ -15,15 +15,29 @@
 //! over every row of the bucket and returns for each: no slot's sampling record or draw counter
 //! moves while the bucket ladder is captured.
 //!
+//! Free device memory is read ahead of and behind each bucket's warmup and recording, and ahead
+//! of and behind the whole capture, and each bucket is timed: what one graph cost and what the
+//! capture cost at startup, logged here on the executor thread and handed back as a
+//! [`CaptureReport`], with graph memory fitted to a fixed term plus a marginal term per graph.
+//! A reading can be the first call to check the context after a driver status was deferred
+//! onto it, in which case the reading fails under that status's own classification; every
+//! reading is propagated, never logged and passed over, so a deferred failure fails the capture
+//! rather than being read as a number.
+//!
 //! A bucket that will not capture is an error, and the session goes with it: there is no
 //! recapture and no per-bucket eager fallback, so the graph set is every bucket or nothing.
 
+use std::time::Instant;
+
 use atoma_core::types::BlockId;
-use atoma_runtime::session::{Allocation, BakedBuffers, Capture, Replay};
+use atoma_runtime::context::RuntimeContext;
+use atoma_runtime::error::RuntimeError;
+use atoma_runtime::graph_memory::GraphMemoryError;
+use atoma_runtime::session::{Allocation, BakedBuffers, Capture, GraphIdx, Replay};
 use thiserror::Error;
 use tracing::info;
 
-use crate::decode::graphs::{dummy_runs, GraphSet, GraphSetError};
+use crate::decode::graphs::{dummy_runs, CaptureReport, GraphCost, GraphSet, GraphSetError};
 use crate::decode::inputs::InputsError;
 use crate::decode::staging::DummyRun;
 use crate::device::decode::{DecodeStep, DecodeStepError};
@@ -40,11 +54,24 @@ pub enum CaptureError {
     Inputs(#[from] InputsError),
     #[error(transparent)]
     Sampler(#[from] SamplerError),
+    /// A reading of free device memory refused: under its own status, or one deferred onto the
+    /// context that the reading was the first to check.
+    #[error(transparent)]
+    Runtime(#[from] RuntimeError),
+}
+
+/// What capturing the bucket ladder produced: the session in its Replay phase, the graph serving
+/// each bucket, and what the capture cost.
+pub struct Captured {
+    pub session: Replay,
+    pub graphs: GraphSet,
+    pub report: CaptureReport,
 }
 
 /// Captures one graph for every bucket `decode_step` serves, over the padding dummies' `blocks`,
-/// and hands back the session in its Replay phase with the graph set to serve from: the graph at
-/// a bucket's index is the recording of that bucket.
+/// reading free memory through `context` around each, and hands back the session in its Replay
+/// phase with the graph set to serve from and the report of what it cost: the graph at a bucket's
+/// index is the recording of that bucket.
 ///
 /// No wait on candle's stream goes in front of a copy-in here: building the step joined that
 /// stream, and this runs before any forward is enqueued on it.
@@ -52,15 +79,18 @@ pub enum CaptureError {
 /// # Errors
 ///
 /// Returns [`CaptureError`] when a bucket has more rows than `blocks` holds or than the sampler
-/// holds, a dummy run cannot be staged or copied in, or a bucket's keyed step will not warm up
-/// or record. The session is consumed either way.
+/// holds, a dummy run cannot be staged or copied in, a bucket's keyed step will not warm up or
+/// record, or free memory cannot be read. The session is consumed either way.
 pub fn capture_bucket_ladder(
+    context: &RuntimeContext,
     allocation: Allocation,
     decode_step: &mut DecodeStep,
     sampler: &mut DeviceSampler,
     blocks: &[BlockId],
-) -> Result<(Replay, GraphSet), CaptureError> {
+) -> Result<Captured, CaptureError> {
     let runs = dummy_runs(decode_step.buckets(), blocks)?;
+    let started = Instant::now();
+    let before = context.free_memory()?;
     let mut capture = allocation.into_capture();
     // Each recording below consumes a warmup at its own bucket's shape; this one lands the
     // backend's one-time lazy allocations first. `DecodeStep::build` refuses a bucket ladder
@@ -70,19 +100,45 @@ pub fn capture_bucket_ladder(
         warm_up_bucket(&mut capture, decode_step, sampler, largest)?;
     }
     let mut graphs = Vec::with_capacity(runs.len());
+    let mut costs = Vec::with_capacity(runs.len());
     for run in &runs {
-        warm_up_bucket(&mut capture, decode_step, sampler, run)?;
-        let mut step = decode_step.bucket_step(sampler, run)?;
-        let graph = capture.record(&mut step, BakedBuffers::default())?;
-        info!(
-            bucket = run.bucket().0,
-            rows = run.rows(),
-            "bucket captured"
-        );
+        let (graph, cost) = capture_bucket(context, &mut capture, decode_step, sampler, run)?;
         graphs.push(graph);
+        costs.push(cost);
     }
-    info!(graphs = graphs.len(), "bucket ladder captured");
-    Ok((capture.into_replay(), GraphSet::new(graphs)))
+    let report = CaptureReport::measured(costs, started.elapsed(), before, context.free_memory()?);
+    log_report(&report);
+    Ok(Captured {
+        session: capture.into_replay(),
+        graphs: GraphSet::new(graphs),
+        report,
+    })
+}
+
+/// Warms `run`'s bucket up and records it, timed and with free memory read ahead of and behind
+/// the two, and logs what the graph cost.
+fn capture_bucket(
+    context: &RuntimeContext,
+    capture: &mut Capture,
+    decode_step: &mut DecodeStep,
+    sampler: &mut DeviceSampler,
+    run: &DummyRun,
+) -> Result<(GraphIdx, GraphCost), CaptureError> {
+    let started = Instant::now();
+    let before = context.free_memory()?;
+    warm_up_bucket(capture, decode_step, sampler, run)?;
+    let mut step = decode_step.bucket_step(sampler, run)?;
+    let graph = capture.record(&mut step, BakedBuffers::default())?;
+    let cost = GraphCost::measured(run, started.elapsed(), before, context.free_memory()?);
+    info!(
+        bucket = cost.bucket.0,
+        rows = cost.rows,
+        elapsed = ?cost.elapsed,
+        used_bytes = %cost.used,
+        free_bytes = %cost.free,
+        "bucket captured"
+    );
+    Ok((graph, cost))
 }
 
 /// Runs `run`'s bucket eagerly at its exact shape: the dummy run staged on the sampler and in a
@@ -100,4 +156,28 @@ fn warm_up_bucket(
     capture.warm_up(&mut decode_step.copy_in(entry, run.bucket())?)?;
     capture.warm_up(&mut decode_step.bucket_step(sampler, run)?)?;
     Ok(())
+}
+
+/// Logs what the capture cost at startup: its time and memory in all, and graph memory as a
+/// fixed term plus a marginal term per graph where two or more graphs give the fit its two
+/// terms, the total alone where one graph does not.
+fn log_report(report: &CaptureReport) {
+    match report.graph_memory() {
+        Ok(memory) => info!(
+            graphs = report.graphs().len(),
+            elapsed = ?report.elapsed(),
+            used_bytes = %report.used(),
+            free_bytes = %report.free(),
+            fixed_bytes = %memory.fixed(),
+            marginal_bytes_per_graph = %memory.marginal(),
+            "bucket ladder captured"
+        ),
+        Err(GraphMemoryError::FitWithoutTwoGraphs { graphs }) => info!(
+            graphs,
+            elapsed = ?report.elapsed(),
+            used_bytes = %report.used(),
+            free_bytes = %report.free(),
+            "bucket ladder captured; one graph's used bytes name no fixed and marginal term"
+        ),
+    }
 }
