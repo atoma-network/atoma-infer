@@ -38,6 +38,7 @@ use atoma_core::types::{
 use atoma_engine::batch::BatchLayout;
 use atoma_engine::config::{DeviceOrdinal, Dtype, ModelConfig, ModelId, PromptTemplate};
 use atoma_engine::decode::declaration;
+use atoma_engine::decode::graphs::GraphSet;
 use atoma_engine::decode::ring::StagingDepth;
 use atoma_engine::decode::staging::DummyRun;
 use atoma_engine::device::decode::{DecodeStep, DecodeStepPlan};
@@ -47,7 +48,7 @@ use atoma_engine::model::{fetch, llama_config};
 use atoma_engine::readback::Readback;
 use atoma_runtime::arena::BucketIdx;
 use atoma_runtime::context::RuntimeContext;
-use atoma_runtime::session::{Allocation, BakedBuffers, Replay};
+use atoma_runtime::session::{Allocation, BakedBuffers, GraphIdx, Replay};
 use candle_core::{DType, Tensor};
 use cudarc::driver::result::mem_get_info;
 use cudarc::driver::{sys, CudaContext};
@@ -260,12 +261,12 @@ fn open(model: &ModelConfig) -> Rig {
 
 /// The capture check: the bucket-of-one step, over a dummy run of one padding row on the dummy
 /// block, warms up and records without the driver invalidating it. Returns the Replay phase, the
-/// graph's node count, and how many of its nodes allocate or free memory.
+/// graph, its node count, and how many of its nodes allocate or free memory.
 fn record_bucket_of_one(
     allocation: Allocation,
     decode_step: &mut DecodeStep,
     dummy_block: u32,
-) -> (Replay, usize, usize) {
+) -> (Replay, GraphIdx, usize, usize) {
     let run = DummyRun::new(BucketIdx(0), vec![BlockId::new(dummy_block)]);
     let entry = decode_step.stage_dummy(&run).expect("the dummy run stages");
     let mut capture = allocation.into_capture();
@@ -290,7 +291,7 @@ fn record_bucket_of_one(
     let memory_nodes = recorded
         .memory_node_count()
         .expect("the graph reports its node types");
-    (capture.into_replay(), nodes, memory_nodes)
+    (capture.into_replay(), graph, nodes, memory_nodes)
 }
 
 /// Prefills every sequence through candle over its own blocks, and appends the token the
@@ -538,7 +539,7 @@ fn the_two_forwards_agree_on_every_decode_and_the_step_records_under_capture() {
     let dispatcher = Dispatcher::new(&dispatch_config(), &contract);
     let dummy_block = u32::try_from(BLOCK_COUNT - 1).expect("fits");
 
-    let (session, nodes, memory_nodes) =
+    let (session, graph, nodes, memory_nodes) =
         record_bucket_of_one(allocation, &mut decode_step, dummy_block);
     println!(
         "capture: the bucket-of-one step recorded as a graph of {nodes} nodes, {memory_nodes} of \
@@ -553,7 +554,10 @@ fn the_two_forwards_agree_on_every_decode_and_the_step_records_under_capture() {
     if pool.is_none() {
         println!("pool: the device has no stream-ordered allocator to watch");
     }
-    let forward = CudaForward::new(allocated, decode_step, session).expect("the forward builds");
+    // The harness reads logits through the eager step and replays nothing; the one graph it
+    // recorded is the bucket-of-one's, and no other bucket has one.
+    let forward = CudaForward::new(allocated, decode_step, GraphSet::new(vec![graph]), session)
+        .expect("the forward builds");
 
     let mut random = Lcg(0x5EED_2026_0903);
     let sequences = seed_sequences(&mut random, vocab);

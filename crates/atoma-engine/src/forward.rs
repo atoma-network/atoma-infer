@@ -45,7 +45,7 @@ mod tests {
     /// short of what teardown needs: reordering the declaration without `new`'s literal trips
     /// `clippy::inconsistent_struct_constructor`, which `-D warnings` makes a build failure, but
     /// reordering both together trips nothing, and adding or removing a field trips neither.
-    const TEARDOWN_ORDER: [&str; 4] = ["session", "decode_step", "baked", "allocated"];
+    const TEARDOWN_ORDER: [&str; 5] = ["session", "graphs", "decode_step", "baked", "allocated"];
 
     /// Reads a string to the `"` that closes it, the caller having read the `"` that opens it.
     /// An escape holds the character after it, so the `"` of a `\"` closes nothing.

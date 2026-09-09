@@ -5,8 +5,8 @@
 //! no live entry at all and fills every row of its bucket from the same dummies, which is what
 //! the reservation is sized for. The engine reserves them from the pool once at startup — a held
 //! lease already makes a block un-evictable, so permanence needs no second mechanism — and hands
-//! the block ids to the executor's Allocation phase. What a configuration's padding costs is
-//! answerable before any pool exists.
+//! the block ids to the executor, whose capture of the bucket ladder fills every dummy run from
+//! them. What a configuration's padding costs is answerable before any pool exists.
 
 use thiserror::Error;
 
@@ -74,7 +74,7 @@ impl PaddingReservation {
         self.leases.len()
     }
 
-    /// Each dummy's block, in reservation order — what the executor's Allocation phase receives.
+    /// Each dummy's block, in reservation order — what the executor receives to capture over.
     #[must_use]
     pub fn block_ids(&self) -> Vec<BlockId> {
         self.leases.iter().map(BlockLease::block).collect()

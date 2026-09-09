@@ -22,7 +22,9 @@
 //! the staged step's rows and no others — enqueued behind the sample and waited on once the
 //! step is enqueued through the readback's own event and nothing else: the host learns what was
 //! sampled for detokenisation and finish detection, and the device never waits for it. The
-//! sampled tokens stay in the per-slot array the next step's gather reads.
+//! readback is described behind a [`Sampled`] witness, minted where a sample is enqueued and
+//! nowhere else, so a copy of tokens no sample wrote cannot be asked for. The sampled tokens
+//! stay in the per-slot array the next step's gather reads.
 //!
 //! The candle forward samples through the same state on candle's stream. An eager step gathers
 //! nothing, so [`DeviceSampler::stage_eager`] writes its row slots and its live-row count into
@@ -78,6 +80,11 @@ pub enum SamplerError {
     /// A descriptor was asked for with no step staged, or a wait with none enqueued.
     #[error("no step is staged; stage the layout before running its sampling")]
     NoStepStaged,
+    /// A sample's witness was asked for before the sample was enqueued.
+    #[error(
+        "the sample was not enqueued; enqueue it before describing the readback of its tokens"
+    )]
+    SampleNotEnqueued,
     /// An upload from the other staging: an eager step's arrays are in the sampler's own memory,
     /// a decode step's in the caller's.
     #[error("the staged step's arrays are in {0}; upload them from there")]
@@ -556,23 +563,26 @@ impl DeviceSampler {
         };
         Ok(Sample {
             call,
+            enqueued: false,
             _while_staged: PhantomData,
         })
     }
 
     /// The descriptor that copies the staged step's tokens to the host, through the leading rows
     /// of the row tokens view: the rows the sample writes and no others, brought back in one
-    /// asynchronous copy for [`DeviceSampler::wait`]. It is the caller's to enqueue behind the
-    /// sample, on the stream the sample is enqueued on; describing it is already what
-    /// [`DeviceSampler::wait`] waits for, so one dropped unenqueued leaves that wait on an
-    /// earlier copy's event and returns stale rows. Nothing here checks either clause, or that a
-    /// sample was described at all: a step whose sampling never reached the stream brings back
-    /// whatever the row tokens hold.
+    /// asynchronous copy for [`DeviceSampler::wait`]. It is described behind `sampled`, the
+    /// witness that a sample of the staged step reached the stream, and is the caller's to
+    /// enqueue behind that sample, on the stream the sample is enqueued on; describing it is
+    /// already what [`DeviceSampler::wait`] waits for, so one dropped unenqueued leaves that wait
+    /// on an earlier copy's event and returns stale rows. Nothing here checks either clause.
     ///
     /// # Errors
     ///
     /// Returns [`SamplerError::NoStepStaged`] when no step is staged.
-    pub fn read_tokens(&mut self) -> Result<ReadbackCopy<'_, u32>, SamplerError> {
+    // The witness is taken by value on purpose: one sample, one readback described behind it.
+    #[allow(clippy::needless_pass_by_value)]
+    pub fn read_tokens(&mut self, sampled: Sampled) -> Result<ReadbackCopy<'_, u32>, SamplerError> {
+        let Sampled { _witnessed: () } = sampled;
         let staged = self.staged.ok_or(SamplerError::NoStepStaged)?;
         let tokens = self.staged_tokens(staged.rows)?;
         Ok(self.readback.copy(&tokens)?)
@@ -619,10 +629,15 @@ impl DeviceSampler {
         let at = SampleAddresses::eager(logits, stream, &self.row_slots, &self.live_rows);
         // SAFETY: candle's stream is live in the sampler's context, and every address the
         // descriptors name is this sampler's, or the logits the stream's earlier work wrote.
-        unsafe {
+        let sampled = unsafe {
             self.upload_eager()?.enqueue(stream.cu_stream())?;
-            self.sample_at(at)?.enqueue(stream.cu_stream())?;
-            self.read_tokens()?.enqueue(stream.cu_stream())?;
+            let mut sample = self.sample_at(at)?;
+            sample.enqueue(stream.cu_stream())?;
+            sample.sampled()?
+        };
+        // SAFETY: as above; the readback copies what the sample just enqueued wrote.
+        unsafe {
+            self.read_tokens(sampled)?.enqueue(stream.cu_stream())?;
         }
         self.wait()
     }
@@ -826,7 +841,23 @@ impl Descriptor for Gather<'_> {
 /// ```
 pub struct Sample<'a> {
     call: SampleCall,
+    enqueued: bool,
     _while_staged: WhileStaged<'a>,
+}
+
+impl Sample<'_> {
+    /// The witness that this sample reached the stream, once it has been enqueued: what the
+    /// readback of its tokens is described behind.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SamplerError::SampleNotEnqueued`] when it has not been.
+    pub fn sampled(self) -> Result<Sampled, SamplerError> {
+        if !self.enqueued {
+            return Err(SamplerError::SampleNotEnqueued);
+        }
+        Ok(Sampled::witnessed())
+    }
 }
 
 impl Descriptor for Sample<'_> {
@@ -841,7 +872,23 @@ impl Descriptor for Sample<'_> {
         // work wrote, the row slots and the live-row count came up in front of it, and every
         // other address is this sampler's, staged for these rows.
         unsafe { sample(&call) }?;
+        self.enqueued = true;
         Ok(())
+    }
+}
+
+/// That a sample of the staged step reached the stream: what a readback of its tokens is
+/// described behind. Minted by a [`Sample`] once it has been enqueued, and by the decode step
+/// once it has replayed a graph that holds one, and nowhere else, so
+/// [`DeviceSampler::read_tokens`] cannot be asked for a copy of tokens no sample wrote.
+pub struct Sampled {
+    _witnessed: (),
+}
+
+impl Sampled {
+    /// The witness, for an enqueued sample and for the replay of a graph that holds one.
+    pub(crate) fn witnessed() -> Self {
+        Self { _witnessed: () }
     }
 }
 

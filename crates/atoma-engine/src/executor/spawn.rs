@@ -16,6 +16,8 @@ use tracing::info;
 
 use crate::config::{DeviceOrdinal, ExecutorConfig, ModelConfig, Rank, RankConfig};
 #[cfg(not(feature = "nccl"))]
+use crate::device::capture::{capture_bucket_ladder, Captured};
+#[cfg(not(feature = "nccl"))]
 use crate::device::decode::{DecodeStep, DecodeStepPlan};
 use crate::device::forward::{Allocated, CudaForward};
 use crate::device::sampler::DeviceSampler;
@@ -61,8 +63,9 @@ struct RankPlan {
     /// The request slots whatever is indexed by slot is sized for.
     slot_count: usize,
     /// The block each padding dummy owns, in reservation order: what a dummy run fills a
-    /// bucket's rows over.
-    #[expect(dead_code, reason = "no bucket is captured over them yet")]
+    /// bucket's rows over. Under NCCL the decode step stays on candle and nothing is captured
+    /// over them.
+    #[cfg_attr(feature = "nccl", allow(dead_code))]
     dummy_blocks: Vec<BlockId>,
     dtype: DType,
     files: ModelFiles,
@@ -156,8 +159,10 @@ pub fn spawn_ranks(
 }
 
 /// Opens the forward of rank `rank` on the current thread: drives the rank's session from
-/// Allocation to Replay, allocating everything the rank holds in between, the step over runtime
-/// tensors included, and hands back the forward that holds it all.
+/// Allocation through Capture to Replay, allocating everything the rank holds in between, the
+/// step over runtime tensors included, capturing the bucket ladder that step serves over the
+/// padding dummies' blocks, and hands back the forward that holds it all. Under NCCL the decode
+/// step stays on candle, so the session goes to Replay with nothing captured.
 fn open_forward(rank: Rank, ordinal: DeviceOrdinal, plan: &RankPlan) -> Result<CudaForward, Cause> {
     let context = RuntimeContext::new(ordinal.get())?;
     let allocation = Allocation::new(&context)?;
@@ -178,22 +183,44 @@ fn open_forward(rank: Rank, ordinal: DeviceOrdinal, plan: &RankPlan) -> Result<C
     let geometry = KvGeometry::new(&config, plan.block_count, plan.block_size, plan.world_size)?;
     let kv_cache = KvCache::allocate(&allocation, &device, &config, geometry, plan.dtype)?;
     // Rank zero alone samples: a follower runs the forward for its share of the model and
-    // produces nothing, so it holds no sampler.
-    let sampler = if rank == Rank::ZERO {
-        Some(DeviceSampler::new(
-            &allocation,
+    // produces nothing, so it holds no sampler. Without NCCL there is one rank, and its
+    // sampler is what every recording of the bucket ladder holds the sample of.
+    let sampler = |allocation: &Allocation| {
+        DeviceSampler::new(
+            allocation,
             device.stream(),
             plan.slot_count,
             plan.max_batch,
             config.vocab_size,
-        )?)
-    } else {
-        None
+        )
     };
     #[cfg(not(feature = "nccl"))]
-    let decode_step =
-        DecodeStep::build(&allocation, &device, &weights, &kv_cache, &plan.decode_step)?;
-    let session = allocation.into_capture().into_replay();
+    let (sampler, decode_step, graphs, session) = {
+        let mut sampler = sampler(&allocation)?;
+        let mut decode_step =
+            DecodeStep::build(&allocation, &device, &weights, &kv_cache, &plan.decode_step)?;
+        let Captured {
+            session,
+            graphs,
+            report: _,
+        } = capture_bucket_ladder(
+            &context,
+            allocation,
+            &mut decode_step,
+            &mut sampler,
+            &plan.dummy_blocks,
+        )?;
+        (Some(sampler), decode_step, graphs, session)
+    };
+    #[cfg(feature = "nccl")]
+    let (sampler, session) = {
+        let sampler = if rank == Rank::ZERO {
+            Some(sampler(&allocation)?)
+        } else {
+            None
+        };
+        (sampler, allocation.into_capture().into_replay())
+    };
     info!(%rank, "session in its Replay phase; serving through it");
     Ok(CudaForward::new(
         Allocated {
@@ -205,6 +232,8 @@ fn open_forward(rank: Rank, ordinal: DeviceOrdinal, plan: &RankPlan) -> Result<C
         },
         #[cfg(not(feature = "nccl"))]
         decode_step,
+        #[cfg(not(feature = "nccl"))]
+        graphs,
         session,
     )?)
 }

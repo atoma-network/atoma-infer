@@ -274,13 +274,16 @@ impl Rig {
         // SAFETY: the stream is the sampler's, and the logits, the row slots and the live-row
         // count were uploaded to its device.
         unsafe {
-            self.sampler
+            let mut sample = self
+                .sampler
                 .sample(&logits, &row_slots, &self.views.live_rows)
-                .expect("a step is staged")
+                .expect("a step is staged");
+            sample
                 .enqueue(self.stream.cu_stream())
                 .expect("the sample enqueues");
+            let sampled = sample.sampled().expect("the sample was enqueued");
             self.sampler
-                .read_tokens()
+                .read_tokens(sampled)
                 .expect("a step is staged")
                 .enqueue(self.stream.cu_stream())
                 .expect("the readback enqueues");
