@@ -524,6 +524,30 @@ struct Harness {
     vocab: usize,
 }
 
+/// Runs each live entry through candle on its own, one row to a step, so every row has the
+/// reference computed in a second shape beside the one the live batch gives it.
+fn candle_alone(
+    forward: &mut CudaForward,
+    readback: &mut Readback,
+    live: &[(usize, &Sequence)],
+    step: usize,
+) -> Vec<Vec<f32>> {
+    live.iter()
+        .map(|&(index, sequence)| {
+            let command = StepCommand {
+                step: StepId::new(500 + step as u64),
+                entries: vec![sequence.entry(index, vec![sequence.next_token()])],
+                padding_count: 0,
+                dispatch: eager(),
+            };
+            let logits = forward
+                .forward_logits(&lay_out(&command), readback)
+                .expect("the one-entry step runs on candle");
+            logits.row(0).expect("row").to_vec()
+        })
+        .collect()
+}
+
 /// Runs one decode step over `chosen` three ways and compares them: the replay of the bucket's
 /// graph first, which must write each live row's slot and nothing else, then the eager decode
 /// step, whose cache writes must be the replay's bit for bit and whose logits are compared
@@ -593,21 +617,7 @@ fn compare_step(harness: &mut Harness, chosen: &[usize], step: usize) {
         .expect("a keyed batch is padded to a bucket of the bucket ladder");
     parity.replays_per_bucket[bucket] += 1;
 
-    let alone: Vec<Vec<f32>> = live
-        .iter()
-        .map(|&(index, sequence)| {
-            let command = StepCommand {
-                step: StepId::new(500 + step as u64),
-                entries: vec![sequence.entry(index, vec![sequence.next_token()])],
-                padding_count: 0,
-                dispatch: eager(),
-            };
-            let logits = forward
-                .forward_logits(&lay_out(&command), readback)
-                .expect("the one-entry step runs on candle");
-            logits.row(0).expect("row").to_vec()
-        })
-        .collect();
+    let alone = candle_alone(forward, readback, &live, step);
     let candle_logits = forward
         .forward_logits(&lay_out(&commands.on_candle), readback)
         .expect("the eager step runs on candle");
