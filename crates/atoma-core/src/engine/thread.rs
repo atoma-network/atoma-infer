@@ -63,6 +63,7 @@ pub struct EngineHandle {
 /// dummy owns.
 #[derive(Debug)]
 pub struct ExecutorHandoff {
+    /// The executor's ends of the rings the engine thread drives its steps over.
     pub rings: ExecutorRings,
     /// Each dummy's block, in reservation order. A dummy run fills a bucket's rows over them,
     /// so the executor's ranks are handed them as block ids and the blocks stay leased for the
