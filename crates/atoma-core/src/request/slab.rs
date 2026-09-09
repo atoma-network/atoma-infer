@@ -58,6 +58,13 @@ impl RequestSlab {
         self.requests.len()
     }
 
+    /// Requests the slab holds before it grows. Growing moves every request it holds, so a
+    /// caller that sized it for its whole population can check here that it stayed that size.
+    #[must_use]
+    pub fn capacity(&self) -> usize {
+        self.requests.capacity()
+    }
+
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.requests.is_empty()

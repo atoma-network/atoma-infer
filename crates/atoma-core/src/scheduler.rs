@@ -87,7 +87,7 @@ impl Scheduler {
         }
         let budget = TokenBudget::new(config.token_budget, config.max_batch);
         Ok(Self {
-            requests: RequestSlab::with_capacity(config.max_requests.get()),
+            requests: RequestSlab::with_capacity(config.slot_count()),
             config,
             pool,
             index: PrefixIndex::new(),
