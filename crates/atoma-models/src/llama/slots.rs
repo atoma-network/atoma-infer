@@ -878,7 +878,7 @@ mod tests {
     }
 
     #[test]
-    fn the_greedy_layout_schedules_no_fill() {
+    fn the_greedy_layout_schedules_no_poison_fill() {
         let arena = arena();
         let slots = ActivationSlots::resolve(&memory(&arena), &arena, bucket(1), &dims()).unwrap();
         assert!(slots.poison_fills().is_empty());

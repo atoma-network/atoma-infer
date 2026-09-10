@@ -223,9 +223,9 @@ fn timeline(layer: usize, op: usize) -> isize {
 
 /// The poison fills of a step still to be launched, in schedule order: each goes to the launcher
 /// ahead of the op it is scheduled before, and the ones scheduled past the last op follow it.
-struct PendingFills<'a>(&'a [PoisonFill]);
+struct PendingPoisonFills<'a>(&'a [PoisonFill]);
 
-impl PendingFills<'_> {
+impl PendingPoisonFills<'_> {
     /// Launches every pending fill scheduled at or before the op at `op` of the timeline.
     fn launch_before<L: OpLauncher>(
         &mut self,
@@ -366,8 +366,8 @@ impl LlamaDecode {
     ) -> Result<(), L::Error> {
         let activations = &slots.activations;
         let statics = &slots.statics;
-        let mut fills = PendingFills(activations.poison_fills());
-        fills.launch_before(timeline(0, 0) - 1, launcher)?;
+        let mut pending = PendingPoisonFills(activations.poison_fills());
+        pending.launch_before(timeline(0, 0) - 1, launcher)?;
         launcher.launch(
             StepOp::EmbeddingGather,
             &ResolvedOp::EmbeddingGather {
@@ -378,7 +378,7 @@ impl LlamaDecode {
         )?;
         for layer in 0..self.dims.layers {
             for (index, op) in LLAMA_LAYER.ops().iter().enumerate() {
-                fills.launch_before(timeline(layer, index), launcher)?;
+                pending.launch_before(timeline(layer, index), launcher)?;
                 let layer = LayerIdx(layer);
                 launcher.launch(
                     StepOp::Layer { layer, op: *op },
@@ -387,7 +387,7 @@ impl LlamaDecode {
             }
         }
         let last = activations.final_row();
-        fills.launch_before(timeline(self.dims.layers, 0), launcher)?;
+        pending.launch_before(timeline(self.dims.layers, 0), launcher)?;
         launcher.launch(
             StepOp::FinalNorm,
             &ResolvedOp::RmsNorm {
@@ -396,7 +396,7 @@ impl LlamaDecode {
                 output: last.role(Role::Normed),
             },
         )?;
-        fills.launch_before(timeline(self.dims.layers, 1), launcher)?;
+        pending.launch_before(timeline(self.dims.layers, 1), launcher)?;
         launcher.launch(
             StepOp::LmHead,
             &ResolvedOp::Projection {
@@ -405,7 +405,7 @@ impl LlamaDecode {
                 output: &statics.logits,
             },
         )?;
-        fills.launch_rest(launcher)
+        pending.launch_rest(launcher)
     }
 
     /// `op` of `layer`, with every role it names resolved against `slots`.
@@ -838,12 +838,12 @@ mod tests {
         assert_eq!(fill.to_string(), "the poison fill before op -1");
     }
 
-    fn is_fill(launch: &Launch) -> bool {
+    fn is_poison_fill(launch: &Launch) -> bool {
         matches!(launch.op, StepOp::PoisonFill { .. })
     }
 
     #[test]
-    fn each_fill_precedes_the_op_it_is_scheduled_before_and_the_trailing_ones_follow_the_head() {
+    fn each_poison_fill_precedes_its_op_and_the_trailing_ones_follow_the_head() {
         let (poisoned, arena) = decode_under(ArenaLayout::Poison);
         let (greedy, _) = decode();
         for bucket in 0..LADDER.len() {
@@ -853,25 +853,25 @@ mod tests {
             // a fill scheduled before op `t` precedes the walk's op `t + 1`, in schedule order;
             // one scheduled past the head projection follows it.
             let mut expected = Vec::new();
-            let mut fills = schedule.iter().peekable();
+            let mut pending = schedule.iter().peekable();
             for (index, launch) in record(&greedy, bucket).iter().enumerate() {
                 let at = isize::try_from(index).unwrap() - 1;
-                while let Some(fill) = fills.next_if(|fill| fill.before_op <= at) {
+                while let Some(fill) = pending.next_if(|fill| fill.before_op <= at) {
                     expected.push(StepOp::PoisonFill {
                         before_op: fill.before_op,
                     });
                 }
                 expected.push(launch.op);
             }
-            expected.extend(fills.map(|fill| StepOp::PoisonFill {
+            expected.extend(pending.map(|fill| StepOp::PoisonFill {
                 before_op: fill.before_op,
             }));
             let recorded: Vec<StepOp> = launches.iter().map(|launch| launch.op).collect();
             assert_eq!(recorded, expected, "bucket {bucket}");
 
-            let fill_writes: Vec<Vec<u64>> = launches
+            let poison_fill_writes: Vec<Vec<u64>> = launches
                 .iter()
-                .filter(|launch| is_fill(launch))
+                .filter(|launch| is_poison_fill(launch))
                 .map(|launch| {
                     assert!(launch.reads.is_empty(), "a fill reads nothing");
                     launch.writes.clone()
@@ -882,12 +882,12 @@ mod tests {
                 .map(|fill| vec![ARENA_BASE + fill.offset as u64])
                 .collect();
             assert_eq!(
-                fill_writes, scheduled,
+                poison_fill_writes, scheduled,
                 "bucket {bucket}: each fill writes its slot"
             );
-            assert_eq!(fill_writes.len(), 2 * (LAYERS + 1) * Role::ALL.len());
+            assert_eq!(poison_fill_writes.len(), 2 * (LAYERS + 1) * Role::ALL.len());
             assert!(
-                is_fill(launches.last().unwrap()),
+                is_poison_fill(launches.last().unwrap()),
                 "the trailing fills close the walk"
             );
         }
@@ -906,7 +906,7 @@ mod tests {
             let fills: Vec<usize> = launches
                 .iter()
                 .enumerate()
-                .filter(|(_, launch)| is_fill(launch) && launch.writes == [address])
+                .filter(|(_, launch)| is_poison_fill(launch) && launch.writes == [address])
                 .map(|(index, _)| index)
                 .collect();
             assert_eq!(fills.len(), 2, "two fills over the slot at {address:#x}");
@@ -940,7 +940,7 @@ mod tests {
         for layout in [ArenaLayout::Greedy, ArenaLayout::NoReuse] {
             let (decode, _) = decode_under(layout);
             let launches = record(&decode, 1);
-            assert!(!launches.iter().any(is_fill), "{layout}");
+            assert!(!launches.iter().any(is_poison_fill), "{layout}");
             assert_eq!(launches.len(), 1 + LAYERS * LLAMA_OPS.len() + 2);
         }
     }
