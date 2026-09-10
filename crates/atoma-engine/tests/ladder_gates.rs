@@ -28,9 +28,10 @@
 //! greedy, where the host proof shows the lie moves no slot, the logits stay the reference's.
 //!
 //! `LADDER_GATE_MODEL` names the checkpoint, Llama 3.2 1B Instruct unless set;
-//! `LADDER_GATE_MAX_BATCH` the maximum batch the bucket ladder is cut at, 128 unless set and 512
-//! for the whole Hopper ladder; `LADDER_GATE_STEPS` the identity steps, never fewer than twice
-//! the bucket count. Needs a device, the CUDA toolkit and the checkpoint; run through
+//! `LADDER_GATE_MAX_BATCH` the maximum batch the bucket ladder is cut at, which must be a bucket
+//! of that ladder: 128 unless set, and 512 for the whole Hopper ladder. `LADDER_GATE_STEPS`
+//! raises the identity steps, which are never fewer than 32 or twice the bucket count, and never
+//! lowers them. Needs a device, the CUDA toolkit and the checkpoint; run through
 //! `scripts/ladder-gates.sh`, which enables `test-support`. Under NCCL the decode step stays on
 //! candle and there is nothing to gate.
 
@@ -60,8 +61,9 @@ use support::{
 
 const DEFAULT_MODEL: &str = "unsloth/Llama-3.2-1B-Instruct";
 const DEFAULT_MAX_BATCH: usize = 128;
-/// Identity steps unless `LADDER_GATE_STEPS` says otherwise; a run makes at least twice the
-/// bucket count either way, so every bucket is replayed twice.
+/// The fewest identity steps a run makes. `LADDER_GATE_STEPS` raises it and never lowers it,
+/// and a run makes at least twice the bucket count either way, so every bucket is replayed
+/// twice.
 const DEFAULT_STEPS: usize = 32;
 const BLOCK_SIZE: usize = 16;
 /// The longest a sequence grows: its prompt, the identity steps, and the soak's one position.
@@ -84,7 +86,9 @@ impl Settings {
         Self {
             model: model_config(model),
             max_batch: count_from_env("LADDER_GATE_MAX_BATCH", DEFAULT_MAX_BATCH),
-            steps: count_from_env("LADDER_GATE_STEPS", DEFAULT_STEPS),
+            // Raising the floor, never lowering it: a run that made fewer steps than the gates
+            // require would capture the whole ladder and soak it before failing on the count.
+            steps: count_from_env("LADDER_GATE_STEPS", DEFAULT_STEPS).max(DEFAULT_STEPS),
         }
     }
 }
@@ -119,9 +123,17 @@ fn usable_ladder(max_batch: usize) -> Vec<usize> {
 /// greedily, as serving places it.
 fn rig_plan(settings: &Settings) -> RigPlan {
     let blocks_each = MAX_MODEL_LEN / BLOCK_SIZE;
+    let ladder = usable_ladder(settings.max_batch);
+    assert_eq!(
+        ladder.last().copied(),
+        Some(settings.max_batch),
+        "LADDER_GATE_MAX_BATCH is {}, which is not a bucket of the Hopper bucket ladder; the \
+         soak decodes every sequence in one keyed step, and a batch off the ladder has no graph",
+        settings.max_batch
+    );
     RigPlan {
         model: settings.model.clone(),
-        ladder: usable_ladder(settings.max_batch),
+        ladder,
         max_batch: settings.max_batch,
         block_size: BLOCK_SIZE,
         block_count: settings.max_batch * blocks_each + settings.max_batch,
