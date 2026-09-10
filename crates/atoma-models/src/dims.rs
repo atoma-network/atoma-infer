@@ -185,6 +185,26 @@ pub(crate) mod test_support {
             },
         }
     }
+
+    /// Llama 3.2 1B's shape with `layers` layers: hidden 2048, 32 query and 8 key-value heads
+    /// of 64, feed-forward 8192, vocabulary 128256.
+    pub(crate) fn llama_1b(layers: usize) -> LlamaDims {
+        LlamaDims {
+            layers,
+            hidden: 2048,
+            num_heads: 32,
+            num_kv_heads: 8,
+            head_dim: 64,
+            ffn: 8192,
+            vocab: 128_256,
+            rms_eps: 1e-5,
+            rope: RopeParams {
+                theta: 500_000.0,
+                scaling: None,
+                max_position: 8192,
+            },
+        }
+    }
 }
 
 #[cfg(test)]
