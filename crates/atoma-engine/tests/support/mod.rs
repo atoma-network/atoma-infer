@@ -63,6 +63,9 @@ pub const SCRATCH_BYTES: usize = 64 * 1024 * 1024;
 /// Prompt tokens are drawn below this id: Llama 3's special tokens sit at the top of the
 /// vocabulary, and a prompt of those is not a prompt.
 pub const TOKEN_ID_CEILING: usize = 120_000;
+/// A sequence's prompt is this many tokens plus fewer than [`PROMPT_SPREAD`] more.
+pub const SHORTEST_PROMPT: usize = 8;
+pub const PROMPT_SPREAD: usize = 40;
 
 pub fn tokens(value: usize) -> TokenCount {
     TokenCount::new(value).expect("nonzero")
@@ -651,7 +654,7 @@ pub fn seed_sequences(plan: &RigPlan, random: &mut Lcg, vocab: usize) -> Vec<Seq
     );
     (0..plan.sequences)
         .map(|index| Sequence {
-            tokens: (0..8 + random.below(40))
+            tokens: (0..SHORTEST_PROMPT + random.below(PROMPT_SPREAD))
                 .map(|_| u32::try_from(random.below(vocab.min(TOKEN_ID_CEILING))).expect("fits"))
                 .collect(),
             blocks: (0..blocks_each)
