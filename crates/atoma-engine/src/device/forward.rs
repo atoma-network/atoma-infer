@@ -4,8 +4,10 @@
 //! comes back to the host is one copy of the sampled tokens and never the logits.
 //!
 //! The logits path stays reachable as [`CudaForward::forward_logits`], which reads them back into
-//! a readback the caller owns: what the decode parity harness compares the two forwards through,
-//! and the only way logits reach the host.
+//! a readback the caller owns: what the decode parity harness compares the two forwards through.
+//! [`CudaForward::replay_logits`] reads a replay's logits back the same way, beside the tokens
+//! its sample drew, so a gate can hold a replay to the eager step bit for bit. Those two are the
+//! only way logits reach the host.
 //!
 //! The step over runtime tensors and the sampler bake every address they read, and candle owns
 //! the weights and the cache among them. Building the forward reads every baked address by name,
@@ -44,7 +46,7 @@ use crate::decode::batch::{Checked, DecodeBatch};
 #[cfg(not(feature = "nccl"))]
 use crate::decode::graphs::{GraphSet, GraphSetError};
 #[cfg(not(feature = "nccl"))]
-use crate::device::decode::{DecodeStep, DecodeStepError};
+use crate::device::decode::{DecodeStep, DecodeStepError, LogitsReplay, ReplayedLogits};
 
 /// Why a step could not be run on the device.
 #[derive(Debug, Error)]
@@ -68,6 +70,11 @@ pub enum CudaForwardError {
     #[cfg(not(feature = "nccl"))]
     #[error("a keyed batch reached the decode step on a rank that holds no sampler")]
     NoSampler,
+    /// A replay asked of a layout the graph set holds no graph for: dispatched eagerly, or keyed
+    /// to a shape the decode step does not serve, which is logged where it is checked.
+    #[cfg(not(feature = "nccl"))]
+    #[error("the layout is not keyed to a graph the decode step serves, so there is no replay")]
+    NothingToReplay,
     /// The forward's logits came back on the host, which no device forward should produce.
     #[error("the logits are not on the device")]
     LogitsNotOnDevice,
@@ -217,6 +224,48 @@ impl CudaForward {
             return Ok(Logits::new(&[], *vocab));
         }
         read_back(readback, device.stream(), &logits, rows, *vocab)
+    }
+
+    /// Replays the graph `layout`'s bucket was captured into and reads the logits of its live
+    /// rows into `readback`, beside the tokens the graph's sample drew for them: what a gate
+    /// holds a replay to the eager step through, since serving never reads a replay's logits.
+    /// The sample is the graph's, so each live row's record and draw counter move as they do
+    /// in serving.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CudaForwardError::NothingToReplay`] when the layout is not keyed to a graph the
+    /// step serves, [`CudaForwardError::NoSampler`] on a rank without one, and the step's error
+    /// when it cannot be staged, replayed or read back.
+    #[cfg(not(feature = "nccl"))]
+    pub fn replay_logits<'a>(
+        &'a mut self,
+        layout: &BatchLayout,
+        readback: &'a mut Readback<f32>,
+    ) -> Result<ReplayedLogits<'a>, CudaForwardError> {
+        let Some(batch) = self.keyed_batch(layout)? else {
+            return Err(CudaForwardError::NothingToReplay);
+        };
+        #[cfg(debug_assertions)]
+        self.assert_unmoved();
+        let Self {
+            session,
+            graphs,
+            decode_step,
+            #[cfg(debug_assertions)]
+                baked: _,
+            allocated,
+        } = self;
+        let Some(sampler) = allocated.sampler.as_mut() else {
+            return Err(CudaForwardError::NoSampler);
+        };
+        let graph = graphs.graph(batch.bucket)?;
+        let replay = LogitsReplay {
+            graph,
+            sampler,
+            readback,
+        };
+        Ok(decode_step.replay_for_logits(session, layout, batch, replay)?)
     }
 
     /// The batch as the decode step serves it, when the layout is keyed and the shape its graphs

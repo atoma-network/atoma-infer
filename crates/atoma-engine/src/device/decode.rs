@@ -370,6 +370,59 @@ impl DecodeStep {
         batch: DecodeBatch,
         sampler: &'a mut DeviceSampler,
     ) -> Result<&'a [u32], DecodeStepError> {
+        self.stage_and_replay(session, graph, layout, batch, sampler)?;
+        // The graph holds the bucket's sample, so the replay is where it reached the stream.
+        session.run(&mut sampler.read_tokens(Sampled::witnessed())?)?;
+        Ok(sampler.wait()?)
+    }
+
+    /// Runs `batch`'s step through `session` as [`DecodeStep::run`] does, by replaying its
+    /// bucket's graph, and reads the logits of its live rows back beside the tokens the graph's
+    /// sample drew from them: what a gate holds a replay to the eager step through, since
+    /// serving never reads a replay's logits. The sample is the graph's, so each live row's
+    /// record and draw counter move as they do in serving, and the readback of the logits is
+    /// enqueued behind the replay, where it sees what the graph wrote and the sample only read.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DecodeStepError`] when the inputs cannot be staged, a descriptor cannot be
+    /// enqueued, the graph cannot be launched, or a wait fails.
+    pub fn replay_for_logits<'a>(
+        &mut self,
+        session: &Replay,
+        layout: &BatchLayout,
+        batch: DecodeBatch,
+        replay: LogitsReplay<'a>,
+    ) -> Result<ReplayedLogits<'a>, DecodeStepError> {
+        let LogitsReplay {
+            graph,
+            sampler,
+            readback,
+        } = replay;
+        self.stage_and_replay(session, graph, layout, batch, sampler)?;
+        let logits = self.live_logits(&batch)?;
+        session.run(&mut readback.copy(&logits)?)?;
+        // As in `run`: the graph holds the sample, so the replay is where it reached the stream.
+        session.run(&mut sampler.read_tokens(Sampled::witnessed())?)?;
+        let tokens = sampler.wait()?;
+        Ok(ReplayedLogits {
+            logits: Logits::new(readback.wait()?, logits.dim(1)),
+            tokens,
+        })
+    }
+
+    /// What every replay of `batch`'s step enqueues ahead of its readback: a staging entry
+    /// acquired and the inputs and the sampler staged into its block, then the wait on candle's
+    /// stream, the sampler's record upload, the block's copy-in and the replay of `graph`, in
+    /// that order.
+    fn stage_and_replay(
+        &mut self,
+        session: &Replay,
+        graph: GraphIdx,
+        layout: &BatchLayout,
+        batch: DecodeBatch,
+        sampler: &mut DeviceSampler,
+    ) -> Result<(), DecodeStepError> {
         let entry = self.inputs.acquire()?;
         let arrays = self.inputs.stage(&entry, layout, &batch)?;
         sampler.stage(layout, batch.tokens, arrays)?;
@@ -377,9 +430,7 @@ impl DecodeStep {
         session.run(&mut sampler.upload_records()?)?;
         session.run(&mut self.copy_in(entry, batch.bucket)?)?;
         session.replay(graph)?;
-        // The graph holds the bucket's sample, so the replay is where it reached the stream.
-        session.run(&mut sampler.read_tokens(Sampled::witnessed())?)?;
-        Ok(sampler.wait()?)
+        Ok(())
     }
 
     /// The descriptor a recording of `run`'s bucket holds: `sampler`'s gather over the bucket's
@@ -514,6 +565,21 @@ impl DecodeStep {
             .map_err(RuntimeError::from)?;
         Ok(())
     }
+}
+
+/// One replay whose logits are read back: the graph to launch, the sampler whose gather and
+/// sample the graph holds, and the readback the live rows' logits come back through.
+pub struct LogitsReplay<'a> {
+    pub graph: GraphIdx,
+    pub sampler: &'a mut DeviceSampler,
+    pub readback: &'a mut Readback<f32>,
+}
+
+/// What a replay for logits brought back: the live rows' logits as the graph wrote them, and
+/// the tokens its sample drew from them, which the device now holds for the rows' slots.
+pub struct ReplayedLogits<'a> {
+    pub logits: Logits<'a>,
+    pub tokens: &'a [u32],
 }
 
 /// One bucket's gather, model step and sample as one descriptor, enqueued in that order over
