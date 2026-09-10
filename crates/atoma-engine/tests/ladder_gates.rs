@@ -45,11 +45,13 @@ use core::fmt;
 use std::env;
 
 use atoma_core::dispatch::{BucketLadder, DispatchConfig, Platform};
+use atoma_engine::batch::BatchLayout;
 use atoma_engine::config::{ModelConfig, ModelId};
 use atoma_engine::decode::batch::DecodeBuckets;
 use atoma_engine::device::forward::CudaForward;
 use atoma_engine::forward::Forward;
 use atoma_engine::logits::Logits;
+use atoma_engine::readback::Readback;
 use atoma_runtime::arena::ArenaLayout;
 use atoma_runtime::context::DeviceBytes;
 
@@ -196,6 +198,19 @@ fn baked_checked(forward: &CudaForward, at: impl fmt::Display) -> usize {
     1
 }
 
+/// The rows of the logits `keyed` leaves when it runs on the eager decode step: the reference a
+/// replay and every reuse layout are held to.
+fn forward_rows(
+    forward: &mut CudaForward,
+    readback: &mut Readback<f32>,
+    keyed: &BatchLayout,
+) -> Vec<Vec<f32>> {
+    let logits = forward
+        .forward_logits(keyed, readback)
+        .expect("the keyed batch runs on the decode step");
+    rows_of(&logits)
+}
+
 /// The rows of `logits`, copied off the readback.
 fn rows_of(logits: &Logits<'_>) -> Vec<Vec<f32>> {
     (0..logits.rows())
@@ -246,10 +261,7 @@ fn identity_step(harness: &mut Harness, identity: &mut Identity, chosen: &[usize
     identity.baked_checks += baked_checked(forward, format_args!("step {step}, after the replay"));
     let eager_rows: Vec<Vec<f32>> =
         holding_free_memory(context, *pool, step, "the eager decode step", || {
-            let logits = forward
-                .forward_logits(&keyed, readback)
-                .expect("the keyed batch runs on the decode step");
-            rows_of(&logits)
+            forward_rows(forward, readback, &keyed)
         });
     assert_eq!(replayed_rows.len(), chosen.len(), "one row per live entry");
     assert_eq!(eager_rows.len(), chosen.len(), "one row per live entry");
@@ -458,34 +470,55 @@ fn every_bucket_captures_and_every_replay_is_the_eager_step_bit_for_bit() {
 /// `test-support`, which is what lets a rig state a role table that is not the model's.
 #[cfg(feature = "test-support")]
 mod layout {
+    use core::fmt;
+
     use atoma_models::layer::normed_one_op_short;
-    use atoma_runtime::arena::ArenaLayout;
+    use atoma_runtime::arena::{ArenaLayout, RoleTable};
 
     use crate::support::{
         argmax, build_harness, decode_commands, holding_free_memory, lay_out, live_sequences,
         model_dims, shuffled, Harness, Lcg,
     };
-    use crate::{rig_plan, rows_of, Settings, BLOCK_SIZE};
+    use crate::{forward_rows, rig_plan, Settings, BLOCK_SIZE};
 
     /// Every run draws the same sequences and the same rows for each step from this seed.
     const SEED: u64 = 0x5EED_2026_0911;
 
-    /// How a run's arena was placed: under which layout, and from the model's role table or
-    /// from the one with `Normed`'s lifetime declared one op short.
+    /// Which role table a run's arena was placed from.
+    #[derive(Clone, Copy)]
+    enum Roles {
+        /// The model's own, which every serving step places under.
+        Model,
+        /// The model's with `Normed`'s lifetime declared one op short: the one lie the gates run.
+        NormedOneOpShort,
+    }
+
+    impl Roles {
+        /// The table to state on the plan, or `None` for the model's own, which the decode step
+        /// builds for itself.
+        fn table(self, settings: &Settings) -> Option<RoleTable> {
+            match self {
+                Roles::Model => None,
+                Roles::NormedOneOpShort => Some(normed_one_op_short(&model_dims(&settings.model))),
+            }
+        }
+    }
+
+    /// How a run's arena was placed: under which layout, and from which role table.
     #[derive(Clone, Copy)]
     struct Placement {
         layout: ArenaLayout,
-        normed_one_op_short: bool,
+        roles: Roles,
     }
 
-    impl Placement {
-        fn name(self) -> String {
-            let table = if self.normed_one_op_short {
-                " over Normed one op short"
-            } else {
-                ""
+    impl fmt::Display for Placement {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            let table = match self.roles {
+                Roles::Model => "",
+                Roles::NormedOneOpShort => " over Normed one op short",
             };
-            format!("{}{table}", self.layout)
+            // Padded through `pad` so the evidence block's column width reaches this.
+            f.pad(&format!("{}{table}", self.layout))
         }
     }
 
@@ -504,9 +537,7 @@ mod layout {
     fn run(settings: &Settings, placed: Placement, reference: Option<&Run>) -> Run {
         let mut plan = rig_plan(settings);
         plan.arena_layout = placed.layout;
-        plan.roles = placed
-            .normed_one_op_short
-            .then(|| normed_one_op_short(&model_dims(&settings.model)));
+        plan.roles = placed.roles.table(settings);
         let mut random = Lcg(SEED);
         let (mut harness, _capture) = build_harness(plan.clone(), &mut random);
         let mut run = Run {
@@ -550,10 +581,7 @@ mod layout {
         let commands = decode_commands(&live, dispatcher, plan, *vocab, 300 + step as u64);
         let keyed = lay_out(&commands.keyed, BLOCK_SIZE);
         holding_free_memory(context, *pool, step, "the eager decode step", || {
-            let logits = forward
-                .forward_logits(&keyed, readback)
-                .expect("the keyed batch runs on the decode step");
-            rows_of(&logits)
+            forward_rows(forward, readback, &keyed)
         })
     }
 
@@ -594,9 +622,7 @@ mod layout {
                     eprintln!(
                         "step {step} row {row}: {} is not the reference's at index {index}: {} \
                          against {}",
-                        run.placed.name(),
-                        logits[index],
-                        reference[index]
+                        run.placed, logits[index], reference[index]
                     );
                 }
             }
@@ -608,31 +634,18 @@ mod layout {
     #[ignore = "needs a device, the CUDA toolkit and a checkpoint; run scripts/ladder-gates.sh"]
     fn the_reuse_layout_is_the_reference_and_the_layout_gates_bite() {
         let settings = Settings::from_env();
-        let placed = |layout, normed_one_op_short| Placement {
-            layout,
-            normed_one_op_short,
-        };
-        let reference = run(&settings, placed(ArenaLayout::NoReuse, false), None);
-        let greedy = run(
-            &settings,
-            placed(ArenaLayout::Greedy, false),
-            Some(&reference),
-        );
-        let poison = run(
-            &settings,
-            placed(ArenaLayout::Poison, false),
-            Some(&reference),
-        );
-        let greedy_lie = run(
-            &settings,
-            placed(ArenaLayout::Greedy, true),
-            Some(&reference),
-        );
-        let poison_lie = run(
-            &settings,
-            placed(ArenaLayout::Poison, true),
-            Some(&reference),
-        );
+        let placed = |layout, roles| Placement { layout, roles };
+        let reference = run(&settings, placed(ArenaLayout::NoReuse, Roles::Model), None);
+        let runs = [
+            placed(ArenaLayout::Greedy, Roles::Model),
+            placed(ArenaLayout::Poison, Roles::Model),
+            placed(ArenaLayout::Greedy, Roles::NormedOneOpShort),
+            placed(ArenaLayout::Poison, Roles::NormedOneOpShort),
+        ]
+        .map(|placed| {
+            let compared = run(&settings, placed, Some(&reference));
+            (placed, against(&compared, &reference))
+        });
 
         println!("=============== arena layout gate evidence ===============");
         println!("model:                {}", settings.model.id);
@@ -641,42 +654,35 @@ mod layout {
             reference.logits.len()
         );
         println!("against the no-reuse reference, bit for bit:");
-        for run in [&greedy, &poison, &greedy_lie, &poison_lie] {
-            let against = against(run, &reference);
+        for (placed, against) in &runs {
             println!(
-                "  {:<32} rows {:>5}, apart {:>5}, not-a-number {:>5}",
-                run.placed.name(),
-                against.rows,
-                against.apart,
-                against.nan
+                "  {placed:<32} rows {:>5}, apart {:>5}, not-a-number {:>5}",
+                against.rows, against.apart, against.nan
             );
         }
 
-        let greedy = against(&greedy, &reference);
+        let [(_, greedy), (_, poison), (_, greedy_lie), (_, poison_lie)] = runs;
         assert!(greedy.rows > 0, "rows were compared");
         assert_eq!(
             greedy.apart, 0,
             "greedy's logits are the no-reuse reference's bit for bit"
         );
         assert_eq!(
-            against(&poison, &reference).apart,
-            0,
+            poison.apart, 0,
             "poison's fills touch no live slot, so its logits are the reference's"
         );
         assert_eq!(
-            against(&greedy_lie, &reference).apart,
-            0,
+            greedy_lie.apart, 0,
             "greedy places nothing differently over Normed one op short, as the host proof \
              predicts"
         );
-        let bitten = against(&poison_lie, &reference);
         assert_eq!(
-            bitten.nan, bitten.rows,
+            poison_lie.nan, poison_lie.rows,
             "poison fills Normed ahead of the up projection that reads it, so every row is \
-             not-a-number: poison mode caught the lie"
+             not-a-number: the poison layout caught the lie"
         );
         assert_eq!(
-            bitten.apart, bitten.rows,
+            poison_lie.apart, poison_lie.rows,
             "and no row is the reference's: the bit-identity gate is red under a broken layout"
         );
     }
