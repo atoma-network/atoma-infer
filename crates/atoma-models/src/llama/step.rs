@@ -26,7 +26,7 @@ use core::fmt;
 use atoma_kernels::decode_ops;
 use atoma_kernels::error::KernelError;
 use atoma_kernels::paged_decode;
-use atoma_runtime::arena::{BucketIdx, LayerIdx, POISON_BYTE};
+use atoma_runtime::arena::{op_timeline_index, BucketIdx, LayerIdx, POISON_BYTE};
 use atoma_runtime::error::RuntimeError;
 use atoma_runtime::session::Descriptor;
 use atoma_runtime::tensor::Tensor;
@@ -215,10 +215,10 @@ impl fmt::Display for StepOp {
     }
 }
 
-/// The index of `layer`'s op `op` in the arena's op timeline, which a poison fill's `before_op`
-/// indexes: the layers' op orders laid end to end.
+/// The index of `layer`'s op `op` in the op timeline, which a poison fill's `before_op` indexes:
+/// the arena's own count over the Llama layer's op order.
 fn timeline(layer: usize, op: usize) -> isize {
-    isize::try_from(layer * LLAMA_LAYER.ops_per_layer() + op).expect("an op timeline fits isize")
+    op_timeline_index(LLAMA_LAYER.ops_per_layer(), layer, op)
 }
 
 /// The poison fills of a step still to be launched, in schedule order: each goes to the launcher

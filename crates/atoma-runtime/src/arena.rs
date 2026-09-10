@@ -122,13 +122,27 @@ impl fmt::Display for ArenaLayout {
     }
 }
 
+/// The index of `layer`'s op `op` in the op timeline: the layers' op orders laid end to end,
+/// `ops_per_layer` apiece, which is how a slot's lifetime and a poison fill's place are both
+/// stated. The ops a step runs outside the layers take the indices around the layers': the
+/// embedding gather, which writes the first layer's residual, sits at `-1`, and the final norm
+/// and the head projection at `layers * ops_per_layer` and the one after it.
+///
+/// # Panics
+///
+/// Panics when the index does not fit an `isize`, which no step's op count approaches.
+#[must_use]
+pub fn op_timeline_index(ops_per_layer: usize, layer: usize, op: usize) -> isize {
+    isize::try_from(layer * ops_per_layer + op).expect("an op timeline index fits isize")
+}
+
 /// The byte every poison fill writes. All-ones bytes decode to NaN in f32, f16, and bf16, so a
 /// stale read of poisoned bytes surfaces as NaN under any float interpretation instead of as
 /// plausible numbers.
 pub const POISON_BYTE: u8 = 0xFF;
 
 /// One entry of the poison fill schedule: fill `len` bytes at `offset` with [`POISON_BYTE`],
-/// enqueued immediately before the op at global index `before_op`.
+/// enqueued immediately before the op at index `before_op` of the op timeline.
 ///
 /// `before_op` may fall outside the step's op range, and such fills are still part of the step.
 /// A negative index precedes the first op. An index at or past the op count follows the final
@@ -264,8 +278,7 @@ impl CaptureArena {
             first_use,
             last_use,
         } = self.role_table.roles[role].lifetime;
-        let base = isize::try_from(layer * self.role_table.ops_per_layer)
-            .expect("op timeline fits in isize");
+        let base = op_timeline_index(self.role_table.ops_per_layer, layer, 0);
         (base + first_use, base + last_use)
     }
 

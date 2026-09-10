@@ -453,7 +453,7 @@ pub fn normed_one_op_short(dims: &LlamaDims) -> RoleTable {
 mod tests {
     use std::ops::Range;
 
-    use atoma_runtime::arena::{ArenaLayout, BucketIdx, CaptureArena, LayerIdx};
+    use atoma_runtime::arena::{op_timeline_index, ArenaLayout, BucketIdx, CaptureArena, LayerIdx};
 
     use super::*;
     use crate::dims::test_support::{llama_1b, llama_8b};
@@ -596,12 +596,12 @@ mod tests {
     fn normed_declared_dead_one_op_early_is_poisoned_ahead_of_the_projection_that_reads_it() {
         for dims in [llama_8b(4), llama_1b(16)] {
             let arena = arena_under(&dims, normed_one_op_short(&dims), ArenaLayout::Poison);
-            let per_layer = isize::try_from(LLAMA_LAYER.ops_per_layer()).unwrap();
+            let ops_per_layer = LLAMA_LAYER.ops_per_layer();
             for (bucket, &tokens) in GATE_LADDER.iter().enumerate() {
                 let fills = arena.poison_fills(BucketIdx(bucket));
                 for layer in 0..dims.layers {
                     let normed = slot_bytes(&arena, bucket, layer, Role::Normed);
-                    let up_projection = isize::try_from(layer).unwrap() * per_layer + 11;
+                    let up_projection = op_timeline_index(ops_per_layer, layer, 11);
                     assert!(
                         fills.iter().any(|fill| fill.before_op == up_projection
                             && fill.offset == normed.start
