@@ -67,7 +67,7 @@ use atoma_engine::device::{Checkpoint, KvCache, KvGeometry, RankDevice, Weights}
 use atoma_engine::forward::Forward;
 use atoma_engine::model::{fetch, llama_config};
 use atoma_engine::readback::Readback;
-use atoma_runtime::arena::BucketIdx;
+use atoma_runtime::arena::{ArenaLayout, BucketIdx};
 use atoma_runtime::context::{DeviceBytes, RuntimeContext};
 use atoma_runtime::session::Allocation;
 use candle_core::{DType, Tensor};
@@ -338,6 +338,7 @@ fn open(model: &ModelConfig) -> Rig {
         block_size: tokens(BLOCK_SIZE),
         dtype: model.dtype,
         staging_depth: StagingDepth::default(),
+        arena_layout: ArenaLayout::Greedy,
     };
     let decode_step = DecodeStep::build(&allocation, &device, &weights, &kv_cache, &plan)
         .expect("the decode step builds");

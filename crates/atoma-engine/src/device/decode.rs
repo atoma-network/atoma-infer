@@ -2,8 +2,9 @@
 //! from the addresses candle loaded the weights and cache at, and run for every keyed batch.
 //!
 //! Candle keeps owning the weights and the cache; this module snapshots their device addresses
-//! into tensor views, allocates the arena, the step's fixed buffers and the cuBLAS workspace,
-//! resolves every usable bucket's slot tables, and holds the step descriptor over them. A keyed
+//! into tensor views, allocates the arena, placed as the plan's layout places it, the step's
+//! fixed buffers and the cuBLAS workspace, resolves every usable bucket's slot tables, and holds
+//! the step descriptor over them. A keyed
 //! batch's step is then four descriptors and a replay on the capture stream: the wait on
 //! candle's stream, the sampler's record upload, the copy-in of the bucket's packed block (the
 //! five inputs, the sampler's two per-step arrays and its live-row count in one copy, with the
@@ -137,6 +138,10 @@ pub struct DecodeStepPlan {
     pub dtype: ConfiguredDtype,
     /// How many staging entries the inputs' staging ring holds.
     pub staging_depth: StagingDepth,
+    /// How the arena places each bucket's slots: greedy in serving, where lifetime-disjoint roles
+    /// share bytes, and the no-reuse reference or the poison layout in a gate that holds greedy
+    /// to them.
+    pub arena_layout: ArenaLayout,
 }
 
 /// The step's outputs and workspace on the device, owned here for as long as the views over
@@ -235,6 +240,7 @@ impl DecodeStep {
             plans: &plans,
             shape,
             buckets: &buckets,
+            arena_layout: plan.arena_layout,
         };
         let inputs = DecodeInputs::new(allocation, stream, shape, &buckets, plan.staging_depth)?;
         let (statics, step_statics) = allocate_statics(allocation, stream, &sizing)?;
@@ -258,6 +264,7 @@ impl DecodeStep {
         stream.synchronize().map_err(RuntimeError::from)?;
         info!(
             buckets = ?buckets.tokens(),
+            arena_layout = %plan.arena_layout,
             arena_bytes,
             block_table_width = shape.block_table_width,
             multiprocessors = sm_count,
@@ -523,11 +530,13 @@ struct Sizing<'a> {
     shape: StagingShape,
     /// The buckets served, one plan each in `plans`, in bucket-ladder order.
     buckets: &'a DecodeBuckets,
+    /// How the arena places the slots, which is what its size follows from.
+    arena_layout: ArenaLayout,
 }
 
-/// Allocates the arena and resolves every bucket's slot tables over it, each bucket's inputs
-/// the views `inputs` minted for it: the arena's memory (owned for as long as the tables are
-/// read), its size, and the tables in bucket order.
+/// Allocates the arena, placed as the sizing's layout places it, and resolves every bucket's
+/// slot tables over it, each bucket's inputs the views `inputs` minted for it: the arena's
+/// memory (owned for as long as the tables are read), its size, and the tables in bucket order.
 fn resolve_slots(
     allocation: &Allocation,
     stream: &Arc<CudaStream>,
@@ -540,7 +549,7 @@ fn resolve_slots(
         dims.layers + 1,
         LLAMA_LAYER.role_table(dims),
         sizing.buckets.tokens(),
-        ArenaLayout::Greedy,
+        sizing.arena_layout,
     )?;
     let arena_memory = zeroed(stream, arena.total_size())?;
     let memory = Tensor::new(
