@@ -339,6 +339,8 @@ fn open(model: &ModelConfig) -> Rig {
         dtype: model.dtype,
         staging_depth: StagingDepth::default(),
         arena_layout: ArenaLayout::Greedy,
+        #[cfg(feature = "test-support")]
+        roles: None,
     };
     let decode_step = DecodeStep::build(&allocation, &device, &weights, &kv_cache, &plan)
         .expect("the decode step builds");

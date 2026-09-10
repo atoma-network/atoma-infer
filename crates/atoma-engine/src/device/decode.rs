@@ -44,7 +44,7 @@ use atoma_models::llama::slots::{
 };
 use atoma_models::llama::step::{LlamaDecode, LlamaStep, StepError};
 use atoma_models::rope::RotaryTables;
-use atoma_runtime::arena::{ArenaError, ArenaLayout, BucketIdx, CaptureArena};
+use atoma_runtime::arena::{ArenaError, ArenaLayout, BucketIdx, CaptureArena, RoleTable};
 use atoma_runtime::error::RuntimeError;
 use atoma_runtime::session::{Allocation, Descriptor, GraphIdx, Replay};
 use atoma_runtime::tensor::{Dtype, Layout, Tensor, TensorError};
@@ -142,6 +142,23 @@ pub struct DecodeStepPlan {
     /// share bytes, and the no-reuse reference or the poison layout in a gate that holds greedy
     /// to them.
     pub arena_layout: ArenaLayout,
+    /// The role table the arena is built from in place of the model's own: what a gate declares
+    /// one lifetime short to show poison mode catch it. Behind the `test-support` feature, which
+    /// nothing in a serving build enables: a step over a table that is not the model's is wrong
+    /// by construction.
+    #[cfg(feature = "test-support")]
+    pub roles: Option<RoleTable>,
+}
+
+impl DecodeStepPlan {
+    /// The role table the arena is built from: the model's, unless a gate stated one.
+    fn role_table(&self, dims: &LlamaDims) -> RoleTable {
+        #[cfg(feature = "test-support")]
+        if let Some(roles) = &self.roles {
+            return roles.clone();
+        }
+        LLAMA_LAYER.role_table(dims)
+    }
 }
 
 /// The step's outputs and workspace on the device, owned here for as long as the views over
@@ -235,12 +252,14 @@ impl DecodeStep {
                 )
             })
             .collect::<Result<Vec<_>, _>>()?;
+        let role_table = plan.role_table(&dims);
         let sizing = Sizing {
             dims: &dims,
             plans: &plans,
             shape,
             buckets: &buckets,
             arena_layout: plan.arena_layout,
+            role_table: &role_table,
         };
         let inputs = DecodeInputs::new(allocation, stream, shape, &buckets, plan.staging_depth)?;
         let (statics, step_statics) = allocate_statics(allocation, stream, &sizing)?;
@@ -532,11 +551,14 @@ struct Sizing<'a> {
     buckets: &'a DecodeBuckets,
     /// How the arena places the slots, which is what its size follows from.
     arena_layout: ArenaLayout,
+    /// The roles the arena places, with their widths and lifetimes.
+    role_table: &'a RoleTable,
 }
 
-/// Allocates the arena, placed as the sizing's layout places it, and resolves every bucket's
-/// slot tables over it, each bucket's inputs the views `inputs` minted for it: the arena's
-/// memory (owned for as long as the tables are read), its size, and the tables in bucket order.
+/// Allocates the arena, placed as the sizing's layout places its role table, and resolves every
+/// bucket's slot tables over it, each bucket's inputs the views `inputs` minted for it: the
+/// arena's memory (owned for as long as the tables are read), its size, and the tables in bucket
+/// order.
 fn resolve_slots(
     allocation: &Allocation,
     stream: &Arc<CudaStream>,
@@ -547,7 +569,7 @@ fn resolve_slots(
     let dims = sizing.dims;
     let arena = CaptureArena::new(
         dims.layers + 1,
-        LLAMA_LAYER.role_table(dims),
+        sizing.role_table.clone(),
         sizing.buckets.tokens(),
         sizing.arena_layout,
     )?;
@@ -583,8 +605,13 @@ fn resolve_slots(
     Ok((arena_memory, arena.total_size(), slots))
 }
 
-/// The dimensions the step reads off the checkpoint's configuration.
-fn llama_dims(config: &Config) -> Result<LlamaDims, DecodeStepError> {
+/// The dimensions the step reads off the checkpoint's configuration: what the model's role table
+/// is built from, so a gate that states a table of its own starts from the same one.
+///
+/// # Errors
+///
+/// Returns [`DecodeStepError::Dims`] when the configuration does not describe a Llama.
+pub fn llama_dims(config: &Config) -> Result<LlamaDims, DecodeStepError> {
     let scaling = config.rope_scaling.as_ref().and_then(|scaling| {
         matches!(scaling.rope_type, Llama3RopeType::Llama3).then(|| Llama3RopeScaling {
             factor: scaling.factor,
