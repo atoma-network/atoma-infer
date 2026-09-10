@@ -153,6 +153,9 @@ pub struct DecodeStepPlan {
 
 impl DecodeStepPlan {
     /// The role table the arena is built from: the model's, unless a gate stated one.
+    // Without `test-support` there is no stated table to read, so the plan itself goes unread; the
+    // method stays a method because that is what every call site holds.
+    #[cfg_attr(not(feature = "test-support"), allow(clippy::unused_self))]
     fn role_table(&self, dims: &LlamaDims) -> RoleTable {
         #[cfg(feature = "test-support")]
         if let Some(roles) = &self.roles {
