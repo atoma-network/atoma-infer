@@ -40,11 +40,13 @@
 
 mod support;
 
+use core::fmt;
 use std::env;
 
 use atoma_core::dispatch::{BucketLadder, DispatchConfig, Platform};
 use atoma_engine::config::{ModelConfig, ModelId};
 use atoma_engine::decode::batch::DecodeBuckets;
+use atoma_engine::device::forward::CudaForward;
 use atoma_engine::forward::Forward;
 use atoma_engine::logits::Logits;
 use atoma_runtime::arena::ArenaLayout;
@@ -167,6 +169,20 @@ impl Identity {
     }
 }
 
+/// Reads every baked address again through its owner and holds it to where it was baked,
+/// panicking with the first that moved and naming `at`.
+///
+/// Returns the one check it made, so a running total counts the checks that were performed and
+/// never the replays a caller meant to make: a total assembled from a constant would hold
+/// however few checks ran.
+#[must_use]
+fn baked_checked(forward: &CudaForward, at: impl fmt::Display) -> usize {
+    forward
+        .baked_unmoved()
+        .unwrap_or_else(|error| panic!("{at}: {error}"));
+    1
+}
+
 /// The rows of `logits`, copied off the readback.
 fn rows_of(logits: &Logits<'_>) -> Vec<Vec<f32>> {
     (0..logits.rows())
@@ -214,10 +230,7 @@ fn identity_step(harness: &mut Harness, identity: &mut Identity, chosen: &[usize
                 .expect("the keyed batch replays its bucket's graph");
             (rows_of(&replayed.logits), replayed.tokens.to_vec())
         });
-    forward
-        .baked_unmoved()
-        .unwrap_or_else(|error| panic!("step {step}, after the replay: {error}"));
-    identity.baked_checks += 1;
+    identity.baked_checks += baked_checked(forward, format_args!("step {step}, after the replay"));
     let eager_rows: Vec<Vec<f32>> =
         holding_free_memory(context, *pool, step, "the eager decode step", || {
             let logits = forward
@@ -288,19 +301,18 @@ fn soak(harness: &mut Harness) -> Soak {
     let commands = decode_commands(&live, dispatcher, plan, *vocab, 900);
     let replayed = lay_out(&commands.replayed, BLOCK_SIZE);
     let before = free_memory(context);
+    let mut baked_checks = 0;
     for replay in 0..SOAK_REPLAYS {
         forward
             .forward(&replayed)
             .expect("the keyed batch replays its bucket's graph");
-        forward
-            .baked_unmoved()
-            .unwrap_or_else(|error| panic!("soak replay {replay}: {error}"));
+        baked_checks += baked_checked(forward, format_args!("soak replay {replay}"));
     }
     let after = free_memory(context);
     Soak {
         before,
         after,
-        baked_checks: SOAK_REPLAYS,
+        baked_checks,
     }
 }
 
