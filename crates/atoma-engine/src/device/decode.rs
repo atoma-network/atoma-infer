@@ -143,7 +143,8 @@ pub struct DecodeStepPlan {
     /// to them.
     pub arena_layout: ArenaLayout,
     /// The role table the arena is built from in place of the model's own: what a gate declares
-    /// one lifetime short to show poison mode catch it. Behind the `test-support` feature, which
+    /// one lifetime short to show the poison layout catch it. Behind the `test-support` feature,
+    /// which
     /// nothing in a serving build enables: a step over a table that is not the model's is wrong
     /// by construction.
     #[cfg(feature = "test-support")]
@@ -567,11 +568,15 @@ impl DecodeStep {
     }
 }
 
-/// One replay whose logits are read back: the graph to launch, the sampler whose gather and
-/// sample the graph holds, and the readback the live rows' logits come back through.
+/// One replay whose logits are read back, bundled so the call that takes it stays inside the
+/// positional-parameter limit.
 pub struct LogitsReplay<'a> {
+    /// The graph to launch: the one the batch's bucket was captured into.
     pub graph: GraphIdx,
+    /// The sampler whose gather and sample that graph holds, staged for this batch before the
+    /// replay and read for its tokens after.
     pub sampler: &'a mut DeviceSampler,
+    /// Where the live rows' logits come back to, copied behind the replay.
     pub readback: &'a mut Readback<f32>,
 }
 

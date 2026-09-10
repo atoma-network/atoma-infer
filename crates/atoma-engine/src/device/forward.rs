@@ -48,7 +48,23 @@ use crate::decode::batch::{Checked, DecodeBatch};
 #[cfg(not(feature = "nccl"))]
 use crate::decode::graphs::{GraphSet, GraphSetError};
 #[cfg(not(feature = "nccl"))]
+use atoma_runtime::arena::BucketIdx;
+#[cfg(not(feature = "nccl"))]
+use atoma_runtime::session::GraphIdx;
+
+#[cfg(not(feature = "nccl"))]
 use crate::device::decode::{DecodeStep, DecodeStepError, LogitsReplay, ReplayedLogits};
+
+/// The parts one replay runs over, borrowed from the forward that holds them: the session it is
+/// replayed through, the step that stages it, the graph serving the batch's bucket, and the
+/// sampler whose gather and sample that graph holds.
+#[cfg(not(feature = "nccl"))]
+struct Replaying<'a> {
+    session: &'a Replay,
+    decode_step: &'a mut DecodeStep,
+    graph: GraphIdx,
+    sampler: &'a mut DeviceSampler,
+}
 
 /// Why a step could not be run on the device.
 #[derive(Debug, Error)]
@@ -266,6 +282,30 @@ impl CudaForward {
         let Some(batch) = self.keyed_batch(layout)? else {
             return Err(CudaForwardError::NothingToReplay);
         };
+        let Replaying {
+            session,
+            decode_step,
+            graph,
+            sampler,
+        } = self.replaying(batch.bucket)?;
+        let replay = LogitsReplay {
+            graph,
+            sampler,
+            readback,
+        };
+        Ok(decode_step.replay_for_logits(session, layout, batch, replay)?)
+    }
+
+    /// What a replay of `bucket`'s graph runs over, with the baked addresses held to where they
+    /// were baked first, before anything is enqueued: the session, the decode step, the graph
+    /// serving the bucket and the sampler whose gather and sample that graph holds.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CudaForwardError::NoSampler`] on a rank without one and the graph set's error
+    /// when no graph serves the bucket.
+    #[cfg(not(feature = "nccl"))]
+    fn replaying(&mut self, bucket: BucketIdx) -> Result<Replaying<'_>, CudaForwardError> {
         #[cfg(debug_assertions)]
         self.assert_unmoved();
         let Self {
@@ -278,13 +318,12 @@ impl CudaForward {
         let Some(sampler) = allocated.sampler.as_mut() else {
             return Err(CudaForwardError::NoSampler);
         };
-        let graph = graphs.graph(batch.bucket)?;
-        let replay = LogitsReplay {
-            graph,
+        Ok(Replaying {
+            session,
+            decode_step,
+            graph: graphs.graph(bucket)?,
             sampler,
-            readback,
-        };
-        Ok(decode_step.replay_for_logits(session, layout, batch, replay)?)
+        })
     }
 
     /// The batch as the decode step serves it, when the layout is keyed and the shape its graphs
@@ -312,19 +351,12 @@ impl CudaForward {
         layout: &BatchLayout,
         batch: DecodeBatch,
     ) -> Result<&[u32], CudaForwardError> {
-        #[cfg(debug_assertions)]
-        self.assert_unmoved();
-        let Self {
+        let Replaying {
             session,
-            graphs,
             decode_step,
-            baked: _,
-            allocated,
-        } = self;
-        let Some(sampler) = allocated.sampler.as_mut() else {
-            return Err(CudaForwardError::NoSampler);
-        };
-        let graph = graphs.graph(batch.bucket)?;
+            graph,
+            sampler,
+        } = self.replaying(batch.bucket)?;
         Ok(decode_step.run(session, graph, layout, batch, sampler)?)
     }
 

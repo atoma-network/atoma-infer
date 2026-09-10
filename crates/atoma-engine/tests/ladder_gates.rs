@@ -24,7 +24,7 @@
 //! all be the same bit for bit. Then the same steps over the model's role table with `Normed`'s
 //! lifetime declared one op short, which the up projection reads at, show the gates bite: under
 //! poison the fill scheduled ahead of that projection turns every row not-a-number, so the
-//! logits fail bit-identity against the reference and poison mode has caught the lie; under
+//! logits fail bit-identity against the reference and the poison layout has caught the lie; under
 //! greedy, where the host proof shows the lie moves no slot, the logits stay the reference's.
 //!
 //! `LADDER_GATE_MODEL` names the checkpoint, Llama 3.2 1B Instruct unless set;
