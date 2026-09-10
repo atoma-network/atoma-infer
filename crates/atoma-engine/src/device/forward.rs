@@ -10,11 +10,13 @@
 //! only way logits reach the host.
 //!
 //! The step over runtime tensors and the sampler bake every address they read, and candle owns
-//! the weights and the cache among them. Building the forward reads every baked address by name,
-//! and a debug build reads them all again before each keyed step and panics naming the first that
-//! moved, before the step's own work is enqueued. Each address is re-read through its owner, and
-//! candle's tensors carry cudarc's event guard, so the reading enqueues a wait and a record for
-//! each weight and cache first. A release build carries no such list and reads nothing.
+//! the weights and the cache among them. Building the forward reads every baked address by name
+//! and keeps the list; a debug build reads them all again before each keyed step and panics
+//! naming the first that moved, before the step's own work is enqueued, and any build reads them
+//! again on demand through [`CudaForward::baked_unmoved`], which is what a gate asserts after a
+//! replay and across a soak. Each address is re-read through its owner, and candle's tensors
+//! carry cudarc's event guard, so the reading enqueues a wait and a record for each weight and
+//! cache first. A release build reads nothing on its own.
 //!
 //! The forward drops its session before the memory a recording bakes addresses in;
 //! [`CudaForward`]'s field order is what does it.
@@ -39,8 +41,8 @@ use atoma_core::dispatch::DispatchDecision;
 #[cfg(not(feature = "nccl"))]
 use tracing::debug;
 
-#[cfg(all(not(feature = "nccl"), debug_assertions))]
-use crate::decode::baked::{BakedAddress, BakedAddresses};
+#[cfg(not(feature = "nccl"))]
+use crate::decode::baked::{BakedAddress, BakedAddresses, BakedError};
 #[cfg(not(feature = "nccl"))]
 use crate::decode::batch::{Checked, DecodeBatch};
 #[cfg(not(feature = "nccl"))]
@@ -75,6 +77,11 @@ pub enum CudaForwardError {
     #[cfg(not(feature = "nccl"))]
     #[error("the layout is not keyed to a graph the decode step serves, so there is no replay")]
     NothingToReplay,
+    /// A baked address read again is not where it was baked: what [`CudaForward::baked_unmoved`]
+    /// returns for the first that moved.
+    #[cfg(not(feature = "nccl"))]
+    #[error(transparent)]
+    Baked(#[from] BakedError),
     /// The forward's logits came back on the host, which no device forward should produce.
     #[error("the logits are not on the device")]
     LogitsNotOnDevice,
@@ -134,10 +141,10 @@ pub struct CudaForward {
     #[cfg(not(feature = "nccl"))]
     decode_step: DecodeStep,
     /// Every address the decode step and the sampler bake, read when the forward was built; a
-    /// debug build reads them again before each keyed step, and a release build carries no list.
-    /// Names and `u64` addresses only: it owns none of the memory a recording bakes, so where it
-    /// sits in the order is free.
-    #[cfg(all(not(feature = "nccl"), debug_assertions))]
+    /// debug build reads them again before each keyed step, and any build on demand. Names and
+    /// `u64` addresses only: it owns none of the memory a recording bakes, so where it sits in
+    /// the order is free.
+    #[cfg(not(feature = "nccl"))]
     baked: BakedAddresses,
     /// Dropped last: candle's weights and cache and the sampler's arrays are most of what a
     /// recording bakes, and the device itself is here.
@@ -146,8 +153,9 @@ pub struct CudaForward {
 
 impl CudaForward {
     /// Holds what the rank allocated, the step over runtime tensors and the graph set `graphs`
-    /// its capture made for the Replay phase `session`, and, in a debug build, bakes every
-    /// address the step and the sampler read, by name, to check before each keyed step.
+    /// its capture made for the Replay phase `session`, and bakes every address the step and the
+    /// sampler read, by name, to check before each keyed step in a debug build and on demand in
+    /// any.
     ///
     /// # Errors
     ///
@@ -159,7 +167,7 @@ impl CudaForward {
         #[cfg(not(feature = "nccl"))] graphs: GraphSet,
         session: Replay,
     ) -> Result<Self, CudaForwardError> {
-        #[cfg(all(not(feature = "nccl"), debug_assertions))]
+        #[cfg(not(feature = "nccl"))]
         let baked = BakedAddresses::bake(addresses(&allocated, &decode_step)?);
         Ok(Self {
             session,
@@ -167,21 +175,34 @@ impl CudaForward {
             graphs,
             #[cfg(not(feature = "nccl"))]
             decode_step,
-            #[cfg(all(not(feature = "nccl"), debug_assertions))]
+            #[cfg(not(feature = "nccl"))]
             baked,
             allocated,
         })
     }
 
-    /// Reads every baked address again and panics naming the first that moved, before the step's
-    /// own work is enqueued: what a debug build runs before each keyed step. Each address is read
-    /// through its owner, so the reading enqueues cudarc's event guard for each weight and cache
-    /// candle holds. A release build trusts the addresses and reads none.
+    /// Reads every baked address again and holds it to where it was baked: what a gate asserts
+    /// after a replay and across a soak, in any build. Each address is read through its owner,
+    /// so the reading enqueues cudarc's event guard for each weight and cache candle holds.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CudaForwardError::Baked`] naming the first address that moved, or the error of
+    /// an address that cannot be read again.
+    #[cfg(not(feature = "nccl"))]
+    pub fn baked_unmoved(&self) -> Result<(), CudaForwardError> {
+        let current = addresses(&self.allocated, &self.decode_step)?;
+        Ok(self.baked.check(current)?)
+    }
+
+    /// Panics naming the first baked address that moved, before the step's own work is
+    /// enqueued: what a debug build runs before each keyed step. A release build trusts the
+    /// addresses between steps and reads none on its own.
     #[cfg(all(not(feature = "nccl"), debug_assertions))]
     fn assert_unmoved(&self) {
-        let current = addresses(&self.allocated, &self.decode_step)
-            .expect("every address the forward baked can be read again before a step");
-        self.baked.assert_unmoved(current);
+        if let Err(error) = self.baked_unmoved() {
+            panic!("{error}");
+        }
     }
 
     /// Runs `layout` and reads the logits of the rows it selected into `readback`: one row per
@@ -205,8 +226,7 @@ impl CudaForward {
                 session,
                 graphs: _,
                 decode_step,
-                #[cfg(debug_assertions)]
-                    baked: _,
+                baked: _,
                 allocated: _,
             } = self;
             return Ok(decode_step.run_for_logits(session, layout, batch, readback)?);
@@ -252,8 +272,7 @@ impl CudaForward {
             session,
             graphs,
             decode_step,
-            #[cfg(debug_assertions)]
-                baked: _,
+            baked: _,
             allocated,
         } = self;
         let Some(sampler) = allocated.sampler.as_mut() else {
@@ -299,8 +318,7 @@ impl CudaForward {
             session,
             graphs,
             decode_step,
-            #[cfg(debug_assertions)]
-                baked: _,
+            baked: _,
             allocated,
         } = self;
         let Some(sampler) = allocated.sampler.as_mut() else {
@@ -401,7 +419,7 @@ impl CudaForward {
 
 /// Every address the decode step and the sampler bake, read from the memory that holds each, in
 /// one fixed order: the step's, then the sampler's when this rank holds one.
-#[cfg(all(not(feature = "nccl"), debug_assertions))]
+#[cfg(not(feature = "nccl"))]
 fn addresses(
     allocated: &Allocated,
     decode_step: &DecodeStep,
