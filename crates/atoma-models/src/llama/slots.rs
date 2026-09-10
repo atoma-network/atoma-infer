@@ -12,6 +12,11 @@
 //! A row is one layer's frame in the arena. There are `layers + 1` rows: the last layer's
 //! residual add writes the row after it, which the final norm then reads, and whose `Normed`
 //! slot the head projection reads.
+//!
+//! The arena's layout may schedule poison fills over the slots — under its poison layout, one
+//! before each role's first use and one after its last — and those are resolved here too, each
+//! to the view of the whole slot it writes, so the walk enqueues them from a table as it does
+//! every op.
 
 use std::fmt;
 
@@ -164,15 +169,32 @@ impl LayerSlots {
     }
 }
 
-/// Every activation view of one bucket: one [`LayerSlots`] per arena row, `layers + 1` rows.
+/// One poison fill of a bucket's step: the whole of one slot, viewed over the arena's memory,
+/// which the walk writes [`POISON_BYTE`](atoma_runtime::arena::POISON_BYTE) over before the op
+/// at `before_op` of the step's op timeline. Resolved from the arena's schedule, so under the
+/// greedy and no-reuse layouts a bucket has none.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PoisonFill {
+    /// Where in the step's op timeline the fill goes: before the op at this index, which the
+    /// arena counts as layer `l`'s op `i` at `l * ops_per_layer + i`, so the embedding gather
+    /// sits at -1 and an index past the last layer's ops names the final norm, the head
+    /// projection, or the trailing fills that follow them.
+    pub before_op: isize,
+    /// The slot's bytes as bf16 elements: the fill writes every one.
+    pub slot: Tensor,
+}
+
+/// Every activation view of one bucket: one [`LayerSlots`] per arena row, `layers + 1` rows, and
+/// the poison fills the arena's layout schedules over them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ActivationSlots {
     rows: Vec<LayerSlots>,
+    poison_fills: Vec<PoisonFill>,
 }
 
 impl ActivationSlots {
     /// Resolves every row of `bucket` through `arena`'s offset lookup over `memory`, the bf16
-    /// view of the arena's whole buffer.
+    /// view of the arena's whole buffer, and every fill of `arena`'s schedule for the bucket.
     ///
     /// # Errors
     ///
@@ -206,13 +228,33 @@ impl ActivationSlots {
         let rows = (0..=dims.layers)
             .map(|row| LayerSlots::resolve(&flat, arena, bucket, LayerIdx(row), dims))
             .collect::<Result<Vec<_>, _>>()?;
-        Ok(Self { rows })
+        // A fill covers a whole slot, and the arena aligns every slot's offset and size, so both
+        // are whole numbers of activation elements.
+        let element = ACTIVATION.size_in_bytes();
+        let poison_fills = arena
+            .poison_fills(bucket.index)
+            .into_iter()
+            .map(|fill| {
+                Ok(PoisonFill {
+                    before_op: fill.before_op,
+                    slot: flat.narrow(0, fill.offset / element, fill.len / element)?,
+                })
+            })
+            .collect::<Result<Vec<_>, TensorError>>()?;
+        Ok(Self { rows, poison_fills })
     }
 
     /// Rows resolved: the model's layers and one more.
     #[must_use]
     pub fn rows(&self) -> usize {
         self.rows.len()
+    }
+
+    /// The poison fills the arena's layout schedules for this bucket, in enqueue order: none
+    /// under the greedy and no-reuse layouts.
+    #[must_use]
+    pub fn poison_fills(&self) -> &[PoisonFill] {
+        &self.poison_fills
     }
 
     /// The views of arena row `row`.
@@ -791,6 +833,55 @@ mod tests {
             hidden.address(),
             ARENA_BASE + arena.offset(BucketIdx(0), LayerIdx(1), TensorRole(0)) as u64
         );
+    }
+
+    fn poison_arena() -> CaptureArena {
+        CaptureArena::new(
+            LAYERS + 1,
+            LLAMA_LAYER.role_table(&dims()),
+            &LADDER,
+            ArenaLayout::Poison,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn under_the_poison_layout_every_scheduled_fill_is_resolved_to_the_whole_slot_it_writes() {
+        let arena = poison_arena();
+        let slots = ActivationSlots::resolve(&memory(&arena), &arena, bucket(1), &dims()).unwrap();
+        let scheduled = arena.poison_fills(BucketIdx(1));
+
+        let fills = slots.poison_fills();
+        assert_eq!(fills.len(), scheduled.len());
+        assert_eq!(fills.len(), 2 * (LAYERS + 1) * Role::ALL.len());
+        for (fill, scheduled) in fills.iter().zip(&scheduled) {
+            assert_eq!(fill.before_op, scheduled.before_op);
+            assert_eq!(fill.slot.address(), ARENA_BASE + scheduled.offset as u64);
+            assert_eq!(fill.slot.extent_bytes(), scheduled.len);
+            assert_eq!(fill.slot.dtype(), Dtype::Bf16);
+            assert!(fill.slot.is_contiguous());
+        }
+        let normed = slots.row(LayerIdx(0)).role(Role::Normed);
+        let over_normed: Vec<isize> = fills
+            .iter()
+            .filter(|fill| fill.slot.address() == normed.address())
+            .map(|fill| fill.before_op)
+            .collect();
+        assert_eq!(
+            over_normed,
+            [
+                Role::Normed.lifetime().first_use,
+                Role::Normed.lifetime().last_use
+            ],
+            "one fill before the role's first use and one after its last"
+        );
+    }
+
+    #[test]
+    fn the_greedy_layout_schedules_no_fill() {
+        let arena = arena();
+        let slots = ActivationSlots::resolve(&memory(&arena), &arena, bucket(1), &dims()).unwrap();
+        assert!(slots.poison_fills().is_empty());
     }
 
     #[test]
