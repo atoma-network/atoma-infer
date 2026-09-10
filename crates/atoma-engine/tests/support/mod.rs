@@ -42,12 +42,13 @@ use atoma_engine::decode::declaration;
 use atoma_engine::decode::graphs::CaptureReport;
 use atoma_engine::decode::ring::StagingDepth;
 use atoma_engine::device::capture::{capture_bucket_ladder, Captured};
-use atoma_engine::device::decode::{DecodeStep, DecodeStepPlan};
+use atoma_engine::device::decode::{llama_dims, DecodeStep, DecodeStepPlan};
 use atoma_engine::device::forward::{Allocated, CudaForward};
 use atoma_engine::device::sampler::DeviceSampler;
 use atoma_engine::device::{Checkpoint, KvCache, KvGeometry, RankDevice, Weights};
 use atoma_engine::model::{fetch, llama_config};
 use atoma_engine::readback::Readback;
+use atoma_models::dims::LlamaDims;
 #[cfg(feature = "test-support")]
 use atoma_runtime::arena::RoleTable;
 use atoma_runtime::arena::{ArenaLayout, BucketIdx};
@@ -84,6 +85,14 @@ pub fn model_config(id: ModelId) -> ModelConfig {
         dtype: Dtype::Bf16,
         prompt_template: PromptTemplate::Llama3,
     }
+}
+
+/// The dimensions the decode step reads off `model`'s checkpoint: what its role table is built
+/// from, so a gate that states a table of its own starts from the same one.
+pub fn model_dims(model: &ModelConfig) -> LlamaDims {
+    let files = fetch(model).expect("the checkpoint fetches");
+    let config = llama_config(&files.config).expect("the config reads");
+    llama_dims(&config).expect("the configuration describes a Llama")
 }
 
 /// What a harness's rig is built from.

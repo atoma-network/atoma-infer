@@ -18,12 +18,21 @@
 //! the device and the host agree on every row's input, and a decoy token in the host's copy of
 //! every row the device holds the token of shows the graph's gather is what supplies it.
 //!
+//! The arena's reuse layout is gated against its reference in a second run, behind the
+//! `test-support` feature: one step per bucket over the same sequences and tokens on a rig placed
+//! greedily, one placed without reuse, and one placed under the poison layout, whose logits must
+//! all be the same bit for bit. Then the same steps over the model's role table with `Normed`'s
+//! lifetime declared one op short, which the up projection reads at, show the gates bite: under
+//! poison the fill scheduled ahead of that projection turns every row not-a-number, so the
+//! logits fail bit-identity against the reference and poison mode has caught the lie; under
+//! greedy, where the host proof shows the lie moves no slot, the logits stay the reference's.
+//!
 //! `LADDER_GATE_MODEL` names the checkpoint, Llama 3.2 1B Instruct unless set;
 //! `LADDER_GATE_MAX_BATCH` the maximum batch the bucket ladder is cut at, 128 unless set and 512
 //! for the whole Hopper ladder; `LADDER_GATE_STEPS` the identity steps, never fewer than twice
 //! the bucket count. Needs a device, the CUDA toolkit and the checkpoint; run through
-//! `scripts/ladder-gates.sh`. Under NCCL the decode step stays on candle and there is nothing to
-//! gate.
+//! `scripts/ladder-gates.sh`, which enables `test-support`. Under NCCL the decode step stays on
+//! candle and there is nothing to gate.
 
 #![cfg(all(feature = "cuda", not(feature = "nccl")))]
 // The evidence block is this test's product; it goes to stdout on purpose.
@@ -418,4 +427,241 @@ fn every_bucket_captures_and_every_replay_is_the_eager_step_bit_for_bit() {
 
     print_evidence(&plan, &capture, &identity, soak);
     assert_evidence(&plan, &capture, &identity, soak);
+}
+
+/// The reuse layout against the reference, and the layout gates shown to bite. Behind
+/// `test-support`, which is what lets a rig state a role table that is not the model's.
+#[cfg(feature = "test-support")]
+mod layout {
+    use atoma_models::layer::{Role, LLAMA_LAYER};
+    use atoma_runtime::arena::{ArenaLayout, RoleTable};
+
+    use crate::support::{
+        self, argmax, decode_commands, holding_free_memory, lay_out, model_dims, Harness, Lcg,
+    };
+    use crate::{rig_plan, rows_of, Settings, BLOCK_SIZE};
+
+    /// Every run draws the same sequences and the same rows for each step from this seed.
+    const SEED: u64 = 0x5EED_2026_0911;
+
+    /// How a run's arena was placed: under which layout, and from the model's role table or
+    /// from the one with `Normed`'s lifetime declared one op short.
+    #[derive(Clone, Copy)]
+    struct Placement {
+        layout: ArenaLayout,
+        normed_one_op_short: bool,
+    }
+
+    impl Placement {
+        fn name(self) -> String {
+            let table = if self.normed_one_op_short {
+                " over Normed one op short"
+            } else {
+                ""
+            };
+            format!("{}{table}", self.layout)
+        }
+    }
+
+    /// One rig's run: how its arena was placed, the eager step's logits at every step, and the
+    /// tokens the sequences advanced by.
+    struct Run {
+        placed: Placement,
+        logits: Vec<Vec<Vec<f32>>>,
+        tokens: Vec<Vec<u32>>,
+    }
+
+    /// The model's role table with `Normed`'s lifetime declared one op short, `[0, 11)` for
+    /// `[0, 12)`: the declaration says the slot is dead while the up projection, op 11, reads
+    /// it. Under poison the fill scheduled before op 11 lands ahead of that projection; under
+    /// greedy the host proof shows the lie moves no slot.
+    fn normed_one_op_short(settings: &Settings) -> RoleTable {
+        let mut table = LLAMA_LAYER.role_table(&model_dims(&settings.model));
+        table.roles[Role::Normed as usize].lifetime.last_use -= 1;
+        table
+    }
+
+    /// Runs one step per bucket, ascending, over a fresh rig placed as `placed` says, and
+    /// advances each step's sequences by `reference`'s tokens where there is one and by the
+    /// step's own argmax otherwise, so every run decodes the same tokens over the same blocks
+    /// and its logits compare with the reference's step by step.
+    fn run(settings: &Settings, placed: Placement, reference: Option<&Run>) -> Run {
+        let mut plan = rig_plan(settings);
+        plan.arena_layout = placed.layout;
+        plan.roles = placed
+            .normed_one_op_short
+            .then(|| normed_one_op_short(settings));
+        let mut random = Lcg(SEED);
+        let (mut harness, _capture) = support::build_harness(plan.clone(), &mut random);
+        let mut run = Run {
+            placed,
+            logits: Vec::new(),
+            tokens: Vec::new(),
+        };
+        for (step, &rows) in plan.ladder.iter().enumerate() {
+            let mut chosen = support::shuffled(plan.sequences, &mut random);
+            chosen.truncate(rows);
+            chosen.sort_unstable();
+            let logits = eager_step(&mut harness, &chosen, step);
+            let tokens: Vec<u32> = reference.map_or_else(
+                || logits.iter().map(|row| argmax(row)).collect(),
+                |reference| reference.tokens[step].clone(),
+            );
+            for (&index, &next) in chosen.iter().zip(&tokens) {
+                harness.sequences[index].advance(next);
+            }
+            run.logits.push(logits);
+            run.tokens.push(tokens);
+        }
+        run
+    }
+
+    /// Runs the eager decode step over `chosen` and reads its logits back, with free device
+    /// memory and the pool held still around it.
+    fn eager_step(harness: &mut Harness, chosen: &[usize], step: usize) -> Vec<Vec<f32>> {
+        let Harness {
+            plan,
+            context,
+            forward,
+            readback,
+            sequences,
+            dispatcher,
+            pool,
+            vocab,
+            ..
+        } = harness;
+        let live = support::live(sequences, chosen);
+        let commands = decode_commands(&live, dispatcher, plan, *vocab, 300 + step as u64);
+        let keyed = lay_out(&commands.keyed, BLOCK_SIZE);
+        holding_free_memory(context, *pool, step, "the eager decode step", || {
+            let logits = forward
+                .forward_logits(&keyed, readback)
+                .expect("the keyed batch runs on the decode step");
+            rows_of(&logits)
+        })
+    }
+
+    /// How a run compares with the reference: rows compared, rows that are not the reference's
+    /// bit for bit, and rows holding not-a-number.
+    struct Against {
+        rows: usize,
+        apart: usize,
+        nan: usize,
+    }
+
+    fn against(run: &Run, reference: &Run) -> Against {
+        let mut against = Against {
+            rows: 0,
+            apart: 0,
+            nan: 0,
+        };
+        for (step, (logits, reference)) in run.logits.iter().zip(&reference.logits).enumerate() {
+            assert_eq!(
+                logits.len(),
+                reference.len(),
+                "step {step}: one row per live entry in both runs"
+            );
+            for (row, (logits, reference)) in logits.iter().zip(reference).enumerate() {
+                against.rows += 1;
+                if logits.iter().any(|value| value.is_nan()) {
+                    against.nan += 1;
+                }
+                let apart = logits
+                    .iter()
+                    .zip(reference)
+                    .position(|(value, reference)| value.to_bits() != reference.to_bits());
+                let Some(index) = apart else {
+                    continue;
+                };
+                against.apart += 1;
+                if against.apart == 1 {
+                    eprintln!(
+                        "step {step} row {row}: {} is not the reference's at index {index}: {} \
+                         against {}",
+                        run.placed.name(),
+                        logits[index],
+                        reference[index]
+                    );
+                }
+            }
+        }
+        against
+    }
+
+    #[test]
+    #[ignore = "needs a device, the CUDA toolkit and a checkpoint; run scripts/ladder-gates.sh"]
+    fn the_reuse_layout_is_the_reference_and_the_layout_gates_bite() {
+        let settings = Settings::from_env();
+        let placed = |layout, normed_one_op_short| Placement {
+            layout,
+            normed_one_op_short,
+        };
+        let reference = run(&settings, placed(ArenaLayout::NoReuse, false), None);
+        let greedy = run(
+            &settings,
+            placed(ArenaLayout::Greedy, false),
+            Some(&reference),
+        );
+        let poison = run(
+            &settings,
+            placed(ArenaLayout::Poison, false),
+            Some(&reference),
+        );
+        let greedy_lie = run(
+            &settings,
+            placed(ArenaLayout::Greedy, true),
+            Some(&reference),
+        );
+        let poison_lie = run(
+            &settings,
+            placed(ArenaLayout::Poison, true),
+            Some(&reference),
+        );
+
+        println!("=============== arena layout gate evidence ===============");
+        println!("model:                {}", settings.model.id);
+        println!(
+            "steps:                {}, one per bucket, the same rows and tokens in every run",
+            reference.logits.len()
+        );
+        println!("against the no-reuse reference, bit for bit:");
+        for run in [&greedy, &poison, &greedy_lie, &poison_lie] {
+            let against = against(run, &reference);
+            println!(
+                "  {:<32} rows {:>5}, apart {:>5}, not-a-number {:>5}",
+                run.placed.name(),
+                against.rows,
+                against.apart,
+                against.nan
+            );
+        }
+
+        let greedy = against(&greedy, &reference);
+        assert!(greedy.rows > 0, "rows were compared");
+        assert_eq!(
+            greedy.apart, 0,
+            "greedy's logits are the no-reuse reference's bit for bit"
+        );
+        assert_eq!(
+            against(&poison, &reference).apart,
+            0,
+            "poison's fills touch no live slot, so its logits are the reference's"
+        );
+        assert_eq!(
+            against(&greedy_lie, &reference).apart,
+            0,
+            "greedy places nothing differently over Normed one op short, as the host proof \
+             predicts"
+        );
+        let bitten = against(&poison_lie, &reference);
+        assert_eq!(
+            bitten.nan, bitten.rows,
+            "poison fills Normed ahead of the up projection that reads it, so every row is \
+             not-a-number: poison mode caught the lie"
+        );
+        assert_eq!(
+            bitten.apart, bitten.rows,
+            "and no row is the reference's: the bit-identity gate is red under a broken layout"
+        );
+    }
 }
