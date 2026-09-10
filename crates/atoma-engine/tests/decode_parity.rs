@@ -57,9 +57,9 @@ use atoma_runtime::arena::ArenaLayout;
 use atoma_runtime::context::DeviceBytes;
 
 use support::{
-    argmax, at, check_step_writes, decode_commands, eager, free_memory, holding_free_memory,
-    identical, kv_width, lay_out, model_config, snapshot, widest, widest_slot_diff,
-    CaptureEvidence, Harness, Lcg, RigPlan, Sequence,
+    argmax, at, build_harness, check_step_writes, decode_commands, eager, free_memory,
+    holding_free_memory, identical, kv_width, lay_out, live_sequences, model_config, shuffled,
+    snapshot, widest, widest_slot_diff, CaptureEvidence, Harness, Lcg, RigPlan, Sequence,
 };
 
 const DEFAULT_MODEL: &str = "NousResearch/Meta-Llama-3.1-8B-Instruct";
@@ -170,7 +170,7 @@ fn compare_step(harness: &mut Harness, parity: &mut Parity, chosen: &[usize], st
         pool,
         vocab,
     } = harness;
-    let live = support::live(sequences, chosen);
+    let live = live_sequences(sequences, chosen);
     let commands = decode_commands(&live, dispatcher, plan, *vocab, 200 + step as u64);
     let keyed = lay_out(&commands.keyed, BLOCK_SIZE);
     let written: Vec<usize> = keyed.slot_mapping[..chosen.len()]
@@ -495,11 +495,11 @@ fn the_two_forwards_agree_on_every_decode_and_every_bucket_captures_and_replays(
     let model = model_under_test();
     let bounds = Bounds::from_env();
     let mut random = Lcg(0x5EED_2026_0903);
-    let (mut harness, capture) = support::build_harness(rig_plan(model.clone()), &mut random);
+    let (mut harness, capture) = build_harness(rig_plan(model.clone()), &mut random);
     let mut parity = Parity::default();
 
     for step in 0..STEPS {
-        let mut chosen = support::shuffled(SEQUENCES, &mut random);
+        let mut chosen = shuffled(SEQUENCES, &mut random);
         chosen.truncate(batch_size(step, &mut random));
         chosen.sort_unstable();
         compare_step(&mut harness, &mut parity, &chosen, step);

@@ -538,7 +538,10 @@ pub struct Harness {
 }
 
 /// The sequences `chosen` names, each with its index.
-pub fn live<'a>(sequences: &'a [Sequence], chosen: &[usize]) -> Vec<(usize, &'a Sequence)> {
+pub fn live_sequences<'a>(
+    sequences: &'a [Sequence],
+    chosen: &[usize],
+) -> Vec<(usize, &'a Sequence)> {
     chosen
         .iter()
         .map(|&index| (index, &sequences[index]))

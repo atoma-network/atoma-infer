@@ -53,8 +53,9 @@ use atoma_runtime::arena::ArenaLayout;
 use atoma_runtime::context::DeviceBytes;
 
 use support::{
-    decode_commands, free_memory, holding_free_memory, lay_out, model_config, requests,
-    CaptureEvidence, Harness, Lcg, RigPlan, Sequence, PROMPT_SPREAD, SHORTEST_PROMPT,
+    build_harness, decode_commands, free_memory, holding_free_memory, lay_out, live_sequences,
+    model_config, requests, shuffled, CaptureEvidence, Harness, Lcg, RigPlan, Sequence,
+    PROMPT_SPREAD, SHORTEST_PROMPT,
 };
 
 const DEFAULT_MODEL: &str = "unsloth/Llama-3.2-1B-Instruct";
@@ -219,7 +220,7 @@ fn identity_step(harness: &mut Harness, identity: &mut Identity, chosen: &[usize
         vocab,
         ..
     } = harness;
-    let live = support::live(sequences, chosen);
+    let live = live_sequences(sequences, chosen);
     let commands = decode_commands(&live, dispatcher, plan, *vocab, 200 + step as u64);
     let keyed = lay_out(&commands.keyed, BLOCK_SIZE);
     let replayed = lay_out(&commands.replayed, BLOCK_SIZE);
@@ -426,11 +427,11 @@ fn every_bucket_captures_and_every_replay_is_the_eager_step_bit_for_bit() {
         "{steps} identity steps grow a sequence past the longest the rig holds"
     );
     let mut random = Lcg(0x5EED_2026_0910);
-    let (mut harness, capture) = support::build_harness(plan.clone(), &mut random);
+    let (mut harness, capture) = build_harness(plan.clone(), &mut random);
     let mut identity = Identity::new(plan.ladder.len());
 
     for step in 0..steps {
-        let mut chosen = support::shuffled(plan.sequences, &mut random);
+        let mut chosen = shuffled(plan.sequences, &mut random);
         chosen.truncate(batch_size(step, &plan.ladder, &mut random));
         chosen.sort_unstable();
         identity_step(&mut harness, &mut identity, &chosen, step);
@@ -449,7 +450,8 @@ mod layout {
     use atoma_runtime::arena::{ArenaLayout, RoleTable};
 
     use crate::support::{
-        self, argmax, decode_commands, holding_free_memory, lay_out, model_dims, Harness, Lcg,
+        argmax, build_harness, decode_commands, holding_free_memory, lay_out, live_sequences,
+        model_dims, shuffled, Harness, Lcg,
     };
     use crate::{rig_plan, rows_of, Settings, BLOCK_SIZE};
 
@@ -504,14 +506,14 @@ mod layout {
             .normed_one_op_short
             .then(|| normed_one_op_short(settings));
         let mut random = Lcg(SEED);
-        let (mut harness, _capture) = support::build_harness(plan.clone(), &mut random);
+        let (mut harness, _capture) = build_harness(plan.clone(), &mut random);
         let mut run = Run {
             placed,
             logits: Vec::new(),
             tokens: Vec::new(),
         };
         for (step, &rows) in plan.ladder.iter().enumerate() {
-            let mut chosen = support::shuffled(plan.sequences, &mut random);
+            let mut chosen = shuffled(plan.sequences, &mut random);
             chosen.truncate(rows);
             chosen.sort_unstable();
             let logits = eager_step(&mut harness, &chosen, step);
@@ -542,7 +544,7 @@ mod layout {
             vocab,
             ..
         } = harness;
-        let live = support::live(sequences, chosen);
+        let live = live_sequences(sequences, chosen);
         let commands = decode_commands(&live, dispatcher, plan, *vocab, 300 + step as u64);
         let keyed = lay_out(&commands.keyed, BLOCK_SIZE);
         holding_free_memory(context, *pool, step, "the eager decode step", || {
