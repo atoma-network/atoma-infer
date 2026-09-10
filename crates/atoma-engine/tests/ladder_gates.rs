@@ -446,8 +446,8 @@ fn every_bucket_captures_and_every_replay_is_the_eager_step_bit_for_bit() {
 /// `test-support`, which is what lets a rig state a role table that is not the model's.
 #[cfg(feature = "test-support")]
 mod layout {
-    use atoma_models::layer::{Role, LLAMA_LAYER};
-    use atoma_runtime::arena::{ArenaLayout, RoleTable};
+    use atoma_models::layer::normed_one_op_short;
+    use atoma_runtime::arena::ArenaLayout;
 
     use crate::support::{
         argmax, build_harness, decode_commands, holding_free_memory, lay_out, live_sequences,
@@ -485,16 +485,6 @@ mod layout {
         tokens: Vec<Vec<u32>>,
     }
 
-    /// The model's role table with `Normed`'s lifetime declared one op short, `[0, 11)` for
-    /// `[0, 12)`: the declaration says the slot is dead while the up projection, op 11, reads
-    /// it. Under poison the fill scheduled before op 11 lands ahead of that projection; under
-    /// greedy the host proof shows the lie moves no slot.
-    fn normed_one_op_short(settings: &Settings) -> RoleTable {
-        let mut table = LLAMA_LAYER.role_table(&model_dims(&settings.model));
-        table.roles[Role::Normed as usize].lifetime.last_use -= 1;
-        table
-    }
-
     /// Runs one step per bucket, ascending, over a fresh rig placed as `placed` says, and
     /// advances each step's sequences by `reference`'s tokens where there is one and by the
     /// step's own argmax otherwise, so every run decodes the same tokens over the same blocks
@@ -504,7 +494,7 @@ mod layout {
         plan.arena_layout = placed.layout;
         plan.roles = placed
             .normed_one_op_short
-            .then(|| normed_one_op_short(settings));
+            .then(|| normed_one_op_short(&model_dims(&settings.model)));
         let mut random = Lcg(SEED);
         let (mut harness, _capture) = build_harness(plan.clone(), &mut random);
         let mut run = Run {

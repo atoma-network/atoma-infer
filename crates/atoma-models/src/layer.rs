@@ -431,6 +431,24 @@ pub const LLAMA_OPS: [LayerOp; 15] = [
     },
 ];
 
+/// The Llama role table with `Normed`'s lifetime declared one op short, `[0, 11)` for `[0, 12)`.
+///
+/// Op 11 is the up projection, the last op that reads `Normed`, so the declaration says the slot
+/// is dead while that projection still reads it. This is the one lie the correctness gates run,
+/// and it is stated here once so the host proofs of what it does and the device gate that runs it
+/// cannot drift apart.
+///
+/// Under the poison layout a fill lands over `Normed` ahead of that projection and the step reads
+/// not-a-number. Under greedy it moves no slot: `Up`, which the projection writes, is feed-forward
+/// wide, and the hole the lie frees is hidden wide with live neighbours.
+#[cfg(any(test, feature = "test-support"))]
+#[must_use]
+pub fn normed_one_op_short(dims: &LlamaDims) -> RoleTable {
+    let mut table = LLAMA_LAYER.role_table(dims);
+    table.roles[Role::Normed as usize].lifetime.last_use -= 1;
+    table
+}
+
 #[cfg(test)]
 mod tests {
     use std::ops::Range;
@@ -542,15 +560,6 @@ mod tests {
     fn slot_bytes(arena: &CaptureArena, bucket: usize, layer: usize, role: Role) -> Range<usize> {
         let start = arena.offset(BucketIdx(bucket), LayerIdx(layer), role.tensor_role());
         start..start + arena.slot_size(BucketIdx(bucket), role.tensor_role())
-    }
-
-    /// The role table with `Normed`'s lifetime declared one op short, `[0, 11)` for `[0, 12)`:
-    /// op 11 is the up projection, the last op that reads `Normed`, so the declaration says the
-    /// slot is dead while that projection reads it. The one lie the device gates run.
-    fn normed_one_op_short(dims: &LlamaDims) -> RoleTable {
-        let mut table = LLAMA_LAYER.role_table(dims);
-        table.roles[Role::Normed as usize].lifetime.last_use -= 1;
-        table
     }
 
     fn arena_under(dims: &LlamaDims, table: RoleTable, layout: ArenaLayout) -> CaptureArena {

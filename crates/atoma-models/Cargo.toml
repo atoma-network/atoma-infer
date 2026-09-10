@@ -13,6 +13,9 @@ thiserror     = { workspace = true }
 
 [features]
 cuda = [ "atoma-kernels/cuda" ]
+# What a gate needs that a serving build must not have: the one mutated role table the
+# correctness gates run.
+test-support = [  ]
 
 [dev-dependencies]
 atoma-runtime = { workspace = true, features = [ "test-support" ] }
