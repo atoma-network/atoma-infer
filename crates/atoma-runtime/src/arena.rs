@@ -142,13 +142,14 @@ pub fn op_timeline_index(ops_per_layer: usize, layer: usize, op: usize) -> isize
 pub const POISON_BYTE: u8 = 0xFF;
 
 /// One entry of the poison fill schedule: fill `len` bytes at `offset` with [`POISON_BYTE`],
-/// enqueued immediately before the op at index `before_op` of the op timeline.
+/// enqueued immediately before the op at index `before_op` of the op timeline. A consumer
+/// resolves each against a bucket's slot tables into the poison fill it launches.
 ///
 /// `before_op` may fall outside the step's op range, and such fills are still part of the step.
 /// A negative index precedes the first op. An index at or past the op count follows the final
 /// op; those trailing fills restore the pattern for the next replay, so do not drop them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PoisonFill {
+pub struct ScheduledPoisonFill {
     pub before_op: isize,
     pub offset: usize,
     pub len: usize,
@@ -247,7 +248,7 @@ impl CaptureArena {
     /// replay's last-use fill: that holds only within one bucket. Buckets share addresses under
     /// different slot geometry, so after a bucket switch the first-use fill is what restores
     /// this bucket's slot. It also keeps each replay's schedule correct on its own.
-    pub fn poison_fills(&self, bucket: BucketIdx) -> Vec<PoisonFill> {
+    pub fn poison_fills(&self, bucket: BucketIdx) -> Vec<ScheduledPoisonFill> {
         if self.layout != ArenaLayout::Poison {
             return Vec::new();
         }
@@ -258,7 +259,7 @@ impl CaptureArena {
                 let offset = self.offset(bucket, LayerIdx(layer), TensorRole(role));
                 let len = self.slot_size(bucket, TensorRole(role));
                 for before_op in [live_from, live_until] {
-                    fills.push(PoisonFill {
+                    fills.push(ScheduledPoisonFill {
                         before_op,
                         offset,
                         len,
@@ -889,7 +890,7 @@ mod tests {
         assert_eq!(fills.len(), 2 * 2 * 2);
         for ((live_from, live_until), (start, end)) in live_ranges(&arena, BucketIdx(0)) {
             for boundary in [live_from, live_until] {
-                let fill = PoisonFill {
+                let fill = ScheduledPoisonFill {
                     before_op: boundary,
                     offset: start,
                     len: end - start,

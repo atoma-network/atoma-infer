@@ -151,7 +151,8 @@ not-a-number, and after its last use, so a read behind it does too and the patte
 the next replay. Resolved with the bucket's tables to the view of the slot it writes, and
 launched by the step's walk as an op of its own through the op launcher, as an async memset on
 the capture stream; the greedy and no-reuse layouts schedule none, so a serving step launches
-none. `PoisonFill`.
+none. `ScheduledPoisonFill` while it is an offset and a length in the arena's schedule,
+`PoisonFill` once a bucket's tables have resolved it to the slot it writes.
 _Avoid_: poison write, canary, memset (as the name), fill (unqualified)
 
 **Activation**:
