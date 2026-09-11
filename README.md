@@ -75,6 +75,16 @@ forward on the same weights and KV cache, records the step under capture, and co
 forwards' logits over decode steps of varying ids, lengths and block tables. It needs a device, the
 toolkit and a Llama checkpoint loadable in bf16, and prints its own evidence block.
 
+`scripts/ladder-gates.sh` runs the correctness gates over the full bucket ladder: every bucket the
+decode step serves at the maximum batch is captured and the capture matrix reported, the replay
+of each bucket's graph is held to the same decode step run eagerly bit for bit over decode steps
+of varying ids, lengths and block tables, every baked address is read again after each replay
+and across a thousand replays that must leave free memory where they found it, and the greedy
+arena layout is held to the no-reuse reference bit for bit, with the gates shown to bite over a
+role table that declares one lifetime one op short. It needs a device, the toolkit and a Llama
+checkpoint loadable in bf16, Llama 3.2 1B unless told otherwise, builds with `test-support`, and
+prints two evidence blocks.
+
 `scripts/sampler-parity.sh` runs the device sampler over synthetic logits against the host
 reference it is written to: every row's token, a seeded request's tokens across batches, rows and
 slots, the draw frequencies against the distribution the filters leave, and the gather of a

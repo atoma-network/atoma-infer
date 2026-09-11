@@ -2,8 +2,9 @@
 //! from the addresses candle loaded the weights and cache at, and run for every keyed batch.
 //!
 //! Candle keeps owning the weights and the cache; this module snapshots their device addresses
-//! into tensor views, allocates the arena, the step's fixed buffers and the cuBLAS workspace,
-//! resolves every usable bucket's slot tables, and holds the step descriptor over them. A keyed
+//! into tensor views, allocates the arena, placed as the plan's layout places it, the step's
+//! fixed buffers and the cuBLAS workspace, resolves every usable bucket's slot tables, and holds
+//! the step descriptor over them. A keyed
 //! batch's step is then four descriptors and a replay on the capture stream: the wait on
 //! candle's stream, the sampler's record upload, the copy-in of the bucket's packed block (the
 //! five inputs, the sampler's two per-step arrays and its live-row count in one copy, with the
@@ -43,7 +44,7 @@ use atoma_models::llama::slots::{
 };
 use atoma_models::llama::step::{LlamaDecode, LlamaStep, StepError};
 use atoma_models::rope::RotaryTables;
-use atoma_runtime::arena::{ArenaError, ArenaLayout, BucketIdx, CaptureArena};
+use atoma_runtime::arena::{ArenaError, ArenaLayout, BucketIdx, CaptureArena, RoleTable};
 use atoma_runtime::error::RuntimeError;
 use atoma_runtime::session::{Allocation, Descriptor, GraphIdx, Replay};
 use atoma_runtime::tensor::{Dtype, Layout, Tensor, TensorError};
@@ -137,6 +138,31 @@ pub struct DecodeStepPlan {
     pub dtype: ConfiguredDtype,
     /// How many staging entries the inputs' staging ring holds.
     pub staging_depth: StagingDepth,
+    /// How the arena places each bucket's slots: greedy in serving, where lifetime-disjoint roles
+    /// share bytes, and the no-reuse reference or the poison layout in a gate that holds greedy
+    /// to them.
+    pub arena_layout: ArenaLayout,
+    /// The role table the arena is built from in place of the model's own: what a gate declares
+    /// one lifetime short to show the poison layout catch it. Behind the `test-support` feature,
+    /// which
+    /// nothing in a serving build enables: a step over a table that is not the model's is wrong
+    /// by construction.
+    #[cfg(feature = "test-support")]
+    pub roles: Option<RoleTable>,
+}
+
+impl DecodeStepPlan {
+    /// The role table the arena is built from: the model's, unless a gate stated one.
+    // Without `test-support` there is no stated table to read, so the plan itself goes unread; the
+    // method stays a method because that is what every call site holds.
+    #[cfg_attr(not(feature = "test-support"), allow(clippy::unused_self))]
+    fn role_table(&self, dims: &LlamaDims) -> RoleTable {
+        #[cfg(feature = "test-support")]
+        if let Some(roles) = &self.roles {
+            return roles.clone();
+        }
+        LLAMA_LAYER.role_table(dims)
+    }
 }
 
 /// The step's outputs and workspace on the device, owned here for as long as the views over
@@ -230,11 +256,14 @@ impl DecodeStep {
                 )
             })
             .collect::<Result<Vec<_>, _>>()?;
+        let role_table = plan.role_table(&dims);
         let sizing = Sizing {
             dims: &dims,
             plans: &plans,
             shape,
             buckets: &buckets,
+            arena_layout: plan.arena_layout,
+            role_table: &role_table,
         };
         let inputs = DecodeInputs::new(allocation, stream, shape, &buckets, plan.staging_depth)?;
         let (statics, step_statics) = allocate_statics(allocation, stream, &sizing)?;
@@ -258,6 +287,7 @@ impl DecodeStep {
         stream.synchronize().map_err(RuntimeError::from)?;
         info!(
             buckets = ?buckets.tokens(),
+            arena_layout = %plan.arena_layout,
             arena_bytes,
             block_table_width = shape.block_table_width,
             multiprocessors = sm_count,
@@ -344,6 +374,59 @@ impl DecodeStep {
         batch: DecodeBatch,
         sampler: &'a mut DeviceSampler,
     ) -> Result<&'a [u32], DecodeStepError> {
+        self.stage_and_replay(session, graph, layout, batch, sampler)?;
+        // The graph holds the bucket's sample, so the replay is where it reached the stream.
+        session.run(&mut sampler.read_tokens(Sampled::witnessed())?)?;
+        Ok(sampler.wait()?)
+    }
+
+    /// Runs `batch`'s step through `session` as [`DecodeStep::run`] does, by replaying its
+    /// bucket's graph, and reads the logits of its live rows back beside the tokens the graph's
+    /// sample drew from them: what a gate holds a replay to the eager step through, since
+    /// serving never reads a replay's logits. The sample is the graph's, so each live row's
+    /// record and draw counter move as they do in serving, and the readback of the logits is
+    /// enqueued behind the replay, where it sees what the graph wrote and the sample only read.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DecodeStepError`] when the inputs cannot be staged, a descriptor cannot be
+    /// enqueued, the graph cannot be launched, or a wait fails.
+    pub fn replay_for_logits<'a>(
+        &mut self,
+        session: &Replay,
+        layout: &BatchLayout,
+        batch: DecodeBatch,
+        replay: LogitsReplay<'a>,
+    ) -> Result<ReplayedLogits<'a>, DecodeStepError> {
+        let LogitsReplay {
+            graph,
+            sampler,
+            readback,
+        } = replay;
+        self.stage_and_replay(session, graph, layout, batch, sampler)?;
+        let logits = self.live_logits(&batch)?;
+        session.run(&mut readback.copy(&logits)?)?;
+        // As in `run`: the graph holds the sample, so the replay is where it reached the stream.
+        session.run(&mut sampler.read_tokens(Sampled::witnessed())?)?;
+        let tokens = sampler.wait()?;
+        Ok(ReplayedLogits {
+            logits: Logits::new(readback.wait()?, logits.dim(1)),
+            tokens,
+        })
+    }
+
+    /// What every replay of `batch`'s step enqueues ahead of its readback: a staging entry
+    /// acquired and the inputs and the sampler staged into its block, then the wait on candle's
+    /// stream, the sampler's record upload, the block's copy-in and the replay of `graph`, in
+    /// that order.
+    fn stage_and_replay(
+        &mut self,
+        session: &Replay,
+        graph: GraphIdx,
+        layout: &BatchLayout,
+        batch: DecodeBatch,
+        sampler: &mut DeviceSampler,
+    ) -> Result<(), DecodeStepError> {
         let entry = self.inputs.acquire()?;
         let arrays = self.inputs.stage(&entry, layout, &batch)?;
         sampler.stage(layout, batch.tokens, arrays)?;
@@ -351,9 +434,7 @@ impl DecodeStep {
         session.run(&mut sampler.upload_records()?)?;
         session.run(&mut self.copy_in(entry, batch.bucket)?)?;
         session.replay(graph)?;
-        // The graph holds the bucket's sample, so the replay is where it reached the stream.
-        session.run(&mut sampler.read_tokens(Sampled::witnessed())?)?;
-        Ok(sampler.wait()?)
+        Ok(())
     }
 
     /// The descriptor a recording of `run`'s bucket holds: `sampler`'s gather over the bucket's
@@ -490,6 +571,25 @@ impl DecodeStep {
     }
 }
 
+/// One replay whose logits are read back, bundled so the call that takes it stays inside the
+/// positional-parameter limit.
+pub struct LogitsReplay<'a> {
+    /// The graph to launch: the one the batch's bucket was captured into.
+    pub graph: GraphIdx,
+    /// The sampler whose gather and sample that graph holds, staged for this batch before the
+    /// replay and read for its tokens after.
+    pub sampler: &'a mut DeviceSampler,
+    /// Where the live rows' logits come back to, copied behind the replay.
+    pub readback: &'a mut Readback<f32>,
+}
+
+/// What a replay for logits brought back: the live rows' logits as the graph wrote them, and
+/// the tokens its sample drew from them, which the device now holds for the rows' slots.
+pub struct ReplayedLogits<'a> {
+    pub logits: Logits<'a>,
+    pub tokens: &'a [u32],
+}
+
 /// One bucket's gather, model step and sample as one descriptor, enqueued in that order over
 /// every row of the bucket: what a recording of the bucket holds, and what its replay launches
 /// for every keyed batch of the bucket. The record upload and the copy-in are enqueued in front
@@ -523,11 +623,16 @@ struct Sizing<'a> {
     shape: StagingShape,
     /// The buckets served, one plan each in `plans`, in bucket-ladder order.
     buckets: &'a DecodeBuckets,
+    /// How the arena places the slots, which is what its size follows from.
+    arena_layout: ArenaLayout,
+    /// The roles the arena places, with their widths and lifetimes.
+    role_table: &'a RoleTable,
 }
 
-/// Allocates the arena and resolves every bucket's slot tables over it, each bucket's inputs
-/// the views `inputs` minted for it: the arena's memory (owned for as long as the tables are
-/// read), its size, and the tables in bucket order.
+/// Allocates the arena, placed as the sizing's layout places its role table, and resolves every
+/// bucket's slot tables over it, each bucket's inputs the views `inputs` minted for it: the
+/// arena's memory (owned for as long as the tables are read), its size, and the tables in bucket
+/// order.
 fn resolve_slots(
     allocation: &Allocation,
     stream: &Arc<CudaStream>,
@@ -538,9 +643,9 @@ fn resolve_slots(
     let dims = sizing.dims;
     let arena = CaptureArena::new(
         dims.layers + 1,
-        LLAMA_LAYER.role_table(dims),
+        sizing.role_table.clone(),
         sizing.buckets.tokens(),
-        ArenaLayout::Greedy,
+        sizing.arena_layout,
     )?;
     let arena_memory = zeroed(stream, arena.total_size())?;
     let memory = Tensor::new(
@@ -574,8 +679,13 @@ fn resolve_slots(
     Ok((arena_memory, arena.total_size(), slots))
 }
 
-/// The dimensions the step reads off the checkpoint's configuration.
-fn llama_dims(config: &Config) -> Result<LlamaDims, DecodeStepError> {
+/// The dimensions the step reads off the checkpoint's configuration: what the model's role table
+/// is built from, so a gate that states a table of its own starts from the same one.
+///
+/// # Errors
+///
+/// Returns [`DecodeStepError::Dims`] when the configuration does not describe a Llama.
+pub fn llama_dims(config: &Config) -> Result<LlamaDims, DecodeStepError> {
     let scaling = config.rope_scaling.as_ref().and_then(|scaling| {
         matches!(scaling.rope_type, Llama3RopeType::Llama3).then(|| Llama3RopeScaling {
             factor: scaling.factor,

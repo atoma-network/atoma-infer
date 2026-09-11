@@ -7,6 +7,13 @@
 //! tests, turns each into the addresses it would have touched, so the walk is held to the table
 //! and the arena's lookup without a device.
 //!
+//! The poison fills the bucket's tables resolved are launches of the walk too, each ahead of the
+//! op it is scheduled before in the arena's op timeline: the timeline counts layer `l`'s op `i`
+//! at `l * ops_per_layer + i`, so the embedding gather, which writes the first layer's residual,
+//! sits at -1, the final norm at `layers * ops_per_layer` and the head projection one after it,
+//! and a fill scheduled past that follows the last launch. The greedy and no-reuse layouts
+//! schedule none, so a serving step's walk launches none.
+//!
 //! [`LlamaStep`] is the [`Descriptor`] the session enqueues: one bucket's walk over the CUDA
 //! launcher. Nothing in the walk allocates or looks anything up: every view was resolved when the
 //! tables were built. Each launch still holds its views to what its kernel assumes, through the
@@ -19,11 +26,11 @@ use core::fmt;
 use atoma_kernels::decode_ops;
 use atoma_kernels::error::KernelError;
 use atoma_kernels::paged_decode;
-use atoma_runtime::arena::{BucketIdx, LayerIdx};
+use atoma_runtime::arena::{op_timeline_index, BucketIdx, LayerIdx, POISON_BYTE};
 use atoma_runtime::error::RuntimeError;
 use atoma_runtime::session::Descriptor;
 use atoma_runtime::tensor::Tensor;
-use cudarc::driver::sys;
+use cudarc::driver::{result, sys};
 use thiserror::Error;
 
 use crate::attention::{
@@ -33,7 +40,7 @@ use crate::dims::LlamaDims;
 use crate::gemm::{GemmError, StepBlas};
 use crate::kernels::{DecodeKernels, RotaryTensors};
 use crate::layer::{LayerOp, Role, RoleRef, LLAMA_LAYER};
-use crate::llama::slots::{BucketSlots, LlamaCache, LlamaWeights, SlotError};
+use crate::llama::slots::{BucketSlots, LlamaCache, LlamaWeights, PoisonFill, SlotError};
 use crate::operand::OperandError;
 
 /// Why the step could not be built or enqueued.
@@ -103,6 +110,8 @@ pub enum ResolvedOp<'a> {
         delta: &'a Tensor,
         output: &'a Tensor,
     },
+    /// Every byte of `slot` written with [`POISON_BYTE`].
+    PoisonFill { slot: &'a Tensor },
 }
 
 impl ResolvedOp<'_> {
@@ -134,6 +143,7 @@ impl ResolvedOp<'_> {
             ResolvedOp::ResidualAdd {
                 residual, delta, ..
             } => vec![residual, delta],
+            ResolvedOp::PoisonFill { .. } => Vec::new(),
         };
         tensors.into_iter().map(Tensor::address).collect()
     }
@@ -148,6 +158,7 @@ impl ResolvedOp<'_> {
             | ResolvedOp::SiluMul { output, .. }
             | ResolvedOp::ResidualAdd { output, .. } => vec![output],
             ResolvedOp::Rope { qkv, .. } => vec![qkv],
+            ResolvedOp::PoisonFill { slot } => vec![slot],
             ResolvedOp::KvWrite { cache, .. } => vec![&cache.k, &cache.v],
             ResolvedOp::Attention { tensors, .. } => vec![
                 tensors.out,
@@ -172,6 +183,8 @@ pub enum StepOp {
     FinalNorm,
     /// The head projection into the logits.
     LmHead,
+    /// A poison fill of one slot, scheduled before the op at `before_op` of the op timeline.
+    PoisonFill { before_op: isize },
 }
 
 impl StepOp {
@@ -183,6 +196,7 @@ impl StepOp {
             StepOp::Layer { op, .. } => op.name(),
             StepOp::FinalNorm => "final_norm",
             StepOp::LmHead => "lm_head",
+            StepOp::PoisonFill { .. } => "poison_fill",
         }
     }
 }
@@ -191,10 +205,52 @@ impl fmt::Display for StepOp {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             StepOp::Layer { layer, op } => write!(f, "layer {}'s {}", layer.0, op.name()),
+            StepOp::PoisonFill { before_op } => {
+                write!(f, "the poison fill before op {before_op}")
+            }
             StepOp::EmbeddingGather | StepOp::FinalNorm | StepOp::LmHead => {
                 f.write_str(self.name())
             }
         }
+    }
+}
+
+/// The index of `layer`'s op `op` in the op timeline, which a poison fill's `before_op` indexes:
+/// the arena's own count over the Llama layer's op order.
+fn timeline(layer: usize, op: usize) -> isize {
+    op_timeline_index(LLAMA_LAYER.ops_per_layer(), layer, op)
+}
+
+/// The poison fills of a step still to be launched, in schedule order: each goes to the launcher
+/// ahead of the op it is scheduled before, and the ones scheduled past the last op follow it.
+struct PendingPoisonFills<'a>(&'a [PoisonFill]);
+
+impl PendingPoisonFills<'_> {
+    /// Launches every pending fill scheduled at or before the op at `op` of the timeline.
+    fn launch_before<L: OpLauncher>(
+        &mut self,
+        op: isize,
+        launcher: &mut L,
+    ) -> Result<(), L::Error> {
+        while let Some((fill, rest)) = self.0.split_first() {
+            if fill.before_op > op {
+                break;
+            }
+            launcher.launch(
+                StepOp::PoisonFill {
+                    before_op: fill.before_op,
+                },
+                &ResolvedOp::PoisonFill { slot: &fill.slot },
+            )?;
+            self.0 = rest;
+        }
+        Ok(())
+    }
+
+    /// Launches every fill still pending: the ones scheduled past the last op, which restore
+    /// the pattern for the next replay.
+    fn launch_rest<L: OpLauncher>(mut self, launcher: &mut L) -> Result<(), L::Error> {
+        self.launch_before(isize::MAX, launcher)
     }
 }
 
@@ -296,7 +352,9 @@ impl LlamaDecode {
     }
 
     /// Walks `slots`' step through `launcher`: the gather, every layer's op table, the final
-    /// norm and the head projection, stopping at the first launch that fails.
+    /// norm and the head projection, each behind the poison fills scheduled before it in the
+    /// op timeline, and the fills scheduled past the head projection last, stopping at the
+    /// first launch that fails.
     ///
     /// # Errors
     ///
@@ -308,6 +366,8 @@ impl LlamaDecode {
     ) -> Result<(), L::Error> {
         let activations = &slots.activations;
         let statics = &slots.statics;
+        let mut pending = PendingPoisonFills(activations.poison_fills());
+        pending.launch_before(timeline(0, 0) - 1, launcher)?;
         launcher.launch(
             StepOp::EmbeddingGather,
             &ResolvedOp::EmbeddingGather {
@@ -317,8 +377,9 @@ impl LlamaDecode {
             },
         )?;
         for layer in 0..self.dims.layers {
-            let layer = LayerIdx(layer);
-            for op in LLAMA_LAYER.ops() {
+            for (index, op) in LLAMA_LAYER.ops().iter().enumerate() {
+                pending.launch_before(timeline(layer, index), launcher)?;
+                let layer = LayerIdx(layer);
                 launcher.launch(
                     StepOp::Layer { layer, op: *op },
                     &self.resolve(slots, layer, *op),
@@ -326,6 +387,7 @@ impl LlamaDecode {
             }
         }
         let last = activations.final_row();
+        pending.launch_before(timeline(self.dims.layers, 0), launcher)?;
         launcher.launch(
             StepOp::FinalNorm,
             &ResolvedOp::RmsNorm {
@@ -334,6 +396,7 @@ impl LlamaDecode {
                 output: last.role(Role::Normed),
             },
         )?;
+        pending.launch_before(timeline(self.dims.layers, 1), launcher)?;
         launcher.launch(
             StepOp::LmHead,
             &ResolvedOp::Projection {
@@ -341,7 +404,8 @@ impl LlamaDecode {
                 weight: &self.weights.lm_head,
                 output: &statics.logits,
             },
-        )
+        )?;
+        pending.launch_rest(launcher)
     }
 
     /// `op` of `layer`, with every role it names resolved against `slots`.
@@ -523,6 +587,19 @@ impl OpLauncher for CudaLauncher<'_> {
                 // SAFETY: as for the gather.
                 unsafe { decode_ops::add(&call) }?;
             }
+            ResolvedOp::PoisonFill { slot } => {
+                // SAFETY: the slot is a view over the arena, live device memory the step was
+                // resolved over, and the fill is enqueued on the session's own stream.
+                unsafe {
+                    result::memset_d8_async(
+                        slot.address(),
+                        POISON_BYTE,
+                        slot.extent_bytes(),
+                        stream.cast(),
+                    )
+                }
+                .map_err(RuntimeError::from)?;
+            }
         }
         Ok(())
     }
@@ -624,20 +701,26 @@ mod tests {
         }
     }
 
-    fn arena(dims: &LlamaDims) -> CaptureArena {
+    fn arena(dims: &LlamaDims, layout: ArenaLayout) -> CaptureArena {
         CaptureArena::new(
             dims.layers + 1,
             LLAMA_LAYER.role_table(dims),
             &LADDER,
-            ArenaLayout::Greedy,
+            layout,
         )
         .unwrap()
     }
 
-    /// The step over a two-layer 8B shape with buckets of one and eight tokens.
+    /// The step over a two-layer 8B shape with buckets of one and eight tokens, its slots placed
+    /// under the greedy layout.
     fn decode() -> (LlamaDecode, CaptureArena) {
+        decode_under(ArenaLayout::Greedy)
+    }
+
+    /// The step over the same shape with its slots placed under `layout`.
+    fn decode_under(layout: ArenaLayout) -> (LlamaDecode, CaptureArena) {
         let dims = llama_8b(LAYERS);
-        let arena = arena(&dims);
+        let arena = arena(&dims, layout);
         let memory = view(ARENA_BASE, &[arena.total_size() / 2], Dtype::Bf16);
         let statics = statics(&dims);
         let sources = SlotSources {
@@ -750,6 +833,116 @@ mod tests {
         assert_eq!(rope.to_string(), "layer 3's rope");
         assert_eq!(StepOp::LmHead.to_string(), "lm_head");
         assert_eq!(StepOp::EmbeddingGather.name(), "embedding_gather");
+        let fill = StepOp::PoisonFill { before_op: -1 };
+        assert_eq!(fill.name(), "poison_fill");
+        assert_eq!(fill.to_string(), "the poison fill before op -1");
+    }
+
+    fn is_poison_fill(launch: &Launch) -> bool {
+        matches!(launch.op, StepOp::PoisonFill { .. })
+    }
+
+    #[test]
+    fn each_poison_fill_precedes_its_op_and_the_trailing_ones_follow_the_head() {
+        let (poisoned, arena) = decode_under(ArenaLayout::Poison);
+        let (greedy, _) = decode();
+        for bucket in 0..LADDER.len() {
+            let launches = record(&poisoned, bucket);
+            let schedule = arena.poison_fills(BucketIdx(bucket));
+            // The ops of the walk laid end to end index the timeline from the gather at -1, so
+            // a fill scheduled before op `t` precedes the walk's op `t + 1`, in schedule order;
+            // one scheduled past the head projection follows it.
+            let mut expected = Vec::new();
+            let mut pending = schedule.iter().peekable();
+            for (index, launch) in record(&greedy, bucket).iter().enumerate() {
+                let at = isize::try_from(index).unwrap() - 1;
+                while let Some(fill) = pending.next_if(|fill| fill.before_op <= at) {
+                    expected.push(StepOp::PoisonFill {
+                        before_op: fill.before_op,
+                    });
+                }
+                expected.push(launch.op);
+            }
+            expected.extend(pending.map(|fill| StepOp::PoisonFill {
+                before_op: fill.before_op,
+            }));
+            let recorded: Vec<StepOp> = launches.iter().map(|launch| launch.op).collect();
+            assert_eq!(recorded, expected, "bucket {bucket}");
+
+            let poison_fill_writes: Vec<Vec<u64>> = launches
+                .iter()
+                .filter(|launch| is_poison_fill(launch))
+                .map(|launch| {
+                    assert!(launch.reads.is_empty(), "a fill reads nothing");
+                    launch.writes.clone()
+                })
+                .collect();
+            let scheduled: Vec<Vec<u64>> = schedule
+                .iter()
+                .map(|fill| vec![ARENA_BASE + fill.offset as u64])
+                .collect();
+            assert_eq!(
+                poison_fill_writes, scheduled,
+                "bucket {bucket}: each fill writes its slot"
+            );
+            assert_eq!(poison_fill_writes.len(), 2 * (LAYERS + 1) * Role::ALL.len());
+            assert!(
+                is_poison_fill(launches.last().unwrap()),
+                "the trailing fills close the walk"
+            );
+        }
+    }
+
+    #[test]
+    fn a_slot_is_poisoned_before_its_roles_first_use_and_again_after_its_last_use() {
+        let (poisoned, arena) = decode_under(ArenaLayout::Poison);
+        let launches = record(&poisoned, 0);
+        let position = |op: StepOp| launches.iter().position(|launch| launch.op == op).unwrap();
+        let layer_op = |layer: usize, op: usize| StepOp::Layer {
+            layer: LayerIdx(layer),
+            op: LLAMA_OPS[op],
+        };
+        let fills_over = |address: u64| -> (usize, usize) {
+            let fills: Vec<usize> = launches
+                .iter()
+                .enumerate()
+                .filter(|(_, launch)| is_poison_fill(launch) && launch.writes == [address])
+                .map(|(index, _)| index)
+                .collect();
+            assert_eq!(fills.len(), 2, "two fills over the slot at {address:#x}");
+            (fills[0], fills[1])
+        };
+
+        // Layer 1's `Normed` lives over ops [0, 12): filled after layer 0's last op and before
+        // layer 1's first, then after its up projection, the last op that reads it, and before
+        // its silu_mul.
+        let normed = slot(&arena, 0, 1, RoleRef::same(Role::Normed));
+        let (first, last) = fills_over(normed);
+        assert!(position(layer_op(0, 14)) < first && first < position(layer_op(1, 0)));
+        assert!(position(layer_op(1, 11)) < last && last < position(layer_op(1, 12)));
+
+        // Layer 0's residual enters at -1: its first fill precedes the embedding gather.
+        let hidden = slot(&arena, 0, 0, RoleRef::same(Role::Hidden));
+        let (first, _) = fills_over(hidden);
+        assert!(first < position(StepOp::EmbeddingGather));
+
+        // The final row's `Normed` is written by the final norm and read by the head
+        // projection: filled before the one and after the other, past every op of the step.
+        let final_normed = slot(&arena, 0, LAYERS, RoleRef::same(Role::Normed));
+        let (first, last) = fills_over(final_normed);
+        assert!(position(layer_op(LAYERS - 1, 14)) < first);
+        assert!(first < position(StepOp::FinalNorm));
+        assert!(position(StepOp::LmHead) < last);
+    }
+
+    #[test]
+    fn the_greedy_and_no_reuse_layouts_add_no_launch_to_the_walk() {
+        for layout in [ArenaLayout::Greedy, ArenaLayout::NoReuse] {
+            let (decode, _) = decode_under(layout);
+            let launches = record(&decode, 1);
+            assert!(!launches.iter().any(is_poison_fill), "{layout}");
+            assert_eq!(launches.len(), 1 + LAYERS * LLAMA_OPS.len() + 2);
+        }
     }
 
     #[test]

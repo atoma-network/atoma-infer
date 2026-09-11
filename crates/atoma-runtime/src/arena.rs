@@ -122,19 +122,34 @@ impl fmt::Display for ArenaLayout {
     }
 }
 
+/// The index of `layer`'s op `op` in the op timeline: the layers' op orders laid end to end,
+/// `ops_per_layer` apiece, which is how a slot's lifetime and a poison fill's place are both
+/// stated. The ops a step runs outside the layers take the indices around the layers': the
+/// embedding gather, which writes the first layer's residual, sits at `-1`, and the final norm
+/// and the head projection at `layers * ops_per_layer` and the one after it.
+///
+/// # Panics
+///
+/// Panics when the index does not fit an `isize`, which no step's op count approaches.
+#[must_use]
+pub fn op_timeline_index(ops_per_layer: usize, layer: usize, op: usize) -> isize {
+    isize::try_from(layer * ops_per_layer + op).expect("an op timeline index fits isize")
+}
+
 /// The byte every poison fill writes. All-ones bytes decode to NaN in f32, f16, and bf16, so a
 /// stale read of poisoned bytes surfaces as NaN under any float interpretation instead of as
 /// plausible numbers.
 pub const POISON_BYTE: u8 = 0xFF;
 
 /// One entry of the poison fill schedule: fill `len` bytes at `offset` with [`POISON_BYTE`],
-/// enqueued immediately before the op at global index `before_op`.
+/// enqueued immediately before the op at index `before_op` of the op timeline. A consumer
+/// resolves each against a bucket's slot tables into the poison fill it launches.
 ///
 /// `before_op` may fall outside the step's op range, and such fills are still part of the step.
 /// A negative index precedes the first op. An index at or past the op count follows the final
 /// op; those trailing fills restore the pattern for the next replay, so do not drop them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PoisonFill {
+pub struct ScheduledPoisonFill {
     pub before_op: isize,
     pub offset: usize,
     pub len: usize,
@@ -233,7 +248,7 @@ impl CaptureArena {
     /// replay's last-use fill: that holds only within one bucket. Buckets share addresses under
     /// different slot geometry, so after a bucket switch the first-use fill is what restores
     /// this bucket's slot. It also keeps each replay's schedule correct on its own.
-    pub fn poison_fills(&self, bucket: BucketIdx) -> Vec<PoisonFill> {
+    pub fn poison_fills(&self, bucket: BucketIdx) -> Vec<ScheduledPoisonFill> {
         if self.layout != ArenaLayout::Poison {
             return Vec::new();
         }
@@ -244,7 +259,7 @@ impl CaptureArena {
                 let offset = self.offset(bucket, LayerIdx(layer), TensorRole(role));
                 let len = self.slot_size(bucket, TensorRole(role));
                 for before_op in [live_from, live_until] {
-                    fills.push(PoisonFill {
+                    fills.push(ScheduledPoisonFill {
                         before_op,
                         offset,
                         len,
@@ -264,8 +279,7 @@ impl CaptureArena {
             first_use,
             last_use,
         } = self.role_table.roles[role].lifetime;
-        let base = isize::try_from(layer * self.role_table.ops_per_layer)
-            .expect("op timeline fits in isize");
+        let base = op_timeline_index(self.role_table.ops_per_layer, layer, 0);
         (base + first_use, base + last_use)
     }
 
@@ -876,7 +890,7 @@ mod tests {
         assert_eq!(fills.len(), 2 * 2 * 2);
         for ((live_from, live_until), (start, end)) in live_ranges(&arena, BucketIdx(0)) {
             for boundary in [live_from, live_until] {
-                let fill = PoisonFill {
+                let fill = ScheduledPoisonFill {
                     before_op: boundary,
                     offset: start,
                     len: end - start,

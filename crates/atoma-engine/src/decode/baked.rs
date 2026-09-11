@@ -172,18 +172,6 @@ impl BakedAddresses {
         }
         Ok(())
     }
-
-    /// Checks `reading` as [`BakedAddresses::check`] does and panics with the first address that
-    /// differs, naming it: what a debug build runs before each keyed step.
-    ///
-    /// # Panics
-    ///
-    /// Panics with the [`BakedError`] the check returns.
-    pub fn assert_unmoved(&self, reading: impl IntoIterator<Item = BakedAddress>) {
-        if let Err(error) = self.check(reading) {
-            panic!("{error}");
-        }
-    }
 }
 
 #[cfg(test)]
@@ -329,11 +317,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(
-        expected = "layer 3's key projection was baked at 0x7f0000001000 and is at 0x7f0000009000 \
-                    before this step"
-    )]
-    fn the_assert_panics_naming_the_first_address_that_moved() {
+    fn the_refusal_names_the_first_address_that_moved_and_both_of_its_places() {
         let mut memory = Memory::held();
         let baked = BakedAddresses::bake(memory.addresses());
         memory.relocate(
@@ -345,7 +329,15 @@ mod tests {
         );
         memory.relocate(BakedName::RowTokens, BASE + 0xb000);
 
-        baked.assert_unmoved(memory.addresses());
+        let refused = baked
+            .check(memory.addresses())
+            .expect_err("the key projection moved");
+
+        assert_eq!(
+            refused.to_string(),
+            "layer 3's key projection was baked at 0x7f0000001000 and is at 0x7f0000009000 \
+             before this step"
+        );
     }
 
     #[test]

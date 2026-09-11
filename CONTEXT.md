@@ -136,6 +136,25 @@ _Avoid_: liveness, span
 The arena extent reserved for one tensor role in one layer.
 _Avoid_: buffer (for arena extents), region
 
+**Op timeline**:
+The step's launches indexed as the arena counts them, which is where a poison fill's place is
+stated: layer `l`'s op `i` at `l * ops_per_layer + i`, so the embedding gather, which writes the
+first layer's residual, sits at -1, and the final norm and the head projection sit at the index
+after the last layer's last op and the one after that, where the arena's extra row holds their
+slots.
+_Avoid_: global op index, step index (for this), op order (which is one layer's)
+
+**Poison fill**:
+One write of the poison byte over the whole of one slot, scheduled by the arena's poison layout
+before one index of the op timeline: before a role's first use, so a read ahead of it sees
+not-a-number, and after its last use, so a read behind it does too and the pattern stands for
+the next replay. Resolved with the bucket's tables to the view of the slot it writes, and
+launched by the step's walk as an op of its own through the op launcher, as an async memset on
+the capture stream; the greedy and no-reuse layouts schedule none, so a serving step launches
+none. `ScheduledPoisonFill` while it is an offset and a length in the arena's schedule,
+`PoisonFill` once a bucket's tables have resolved it to the slot it writes.
+_Avoid_: poison write, canary, memset (as the name), fill (unqualified)
+
 **Activation**:
 An intermediate tensor produced and consumed within a single step.
 _Avoid_: scratch, temporary

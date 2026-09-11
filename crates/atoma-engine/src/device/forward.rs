@@ -4,15 +4,19 @@
 //! comes back to the host is one copy of the sampled tokens and never the logits.
 //!
 //! The logits path stays reachable as [`CudaForward::forward_logits`], which reads them back into
-//! a readback the caller owns: what the decode parity harness compares the two forwards through,
-//! and the only way logits reach the host.
+//! a readback the caller owns: what the decode parity harness compares the two forwards through.
+//! [`CudaForward::replay_logits`] reads a replay's logits back the same way, beside the tokens
+//! its sample drew, so a gate can hold a replay to the eager step bit for bit. Those two are the
+//! only way logits reach the host.
 //!
 //! The step over runtime tensors and the sampler bake every address they read, and candle owns
-//! the weights and the cache among them. Building the forward reads every baked address by name,
-//! and a debug build reads them all again before each keyed step and panics naming the first that
-//! moved, before the step's own work is enqueued. Each address is re-read through its owner, and
-//! candle's tensors carry cudarc's event guard, so the reading enqueues a wait and a record for
-//! each weight and cache first. A release build carries no such list and reads nothing.
+//! the weights and the cache among them. Building the forward reads every baked address by name
+//! and keeps the list; a debug build reads them all again before each keyed step and panics
+//! naming the first that moved, before the step's own work is enqueued, and any build reads them
+//! again on demand through [`CudaForward::baked_unmoved`], which is what a gate asserts after a
+//! replay and across a soak. Each address is re-read through its owner, and candle's tensors
+//! carry cudarc's event guard, so the reading enqueues a wait and a record for each weight and
+//! cache first. A release build reads nothing on its own.
 //!
 //! The forward drops its session before the memory a recording bakes addresses in;
 //! [`CudaForward`]'s field order is what does it.
@@ -37,14 +41,30 @@ use atoma_core::dispatch::DispatchDecision;
 #[cfg(not(feature = "nccl"))]
 use tracing::debug;
 
-#[cfg(all(not(feature = "nccl"), debug_assertions))]
-use crate::decode::baked::{BakedAddress, BakedAddresses};
+#[cfg(not(feature = "nccl"))]
+use crate::decode::baked::{BakedAddress, BakedAddresses, BakedError};
 #[cfg(not(feature = "nccl"))]
 use crate::decode::batch::{Checked, DecodeBatch};
 #[cfg(not(feature = "nccl"))]
 use crate::decode::graphs::{GraphSet, GraphSetError};
 #[cfg(not(feature = "nccl"))]
-use crate::device::decode::{DecodeStep, DecodeStepError};
+use atoma_runtime::arena::BucketIdx;
+#[cfg(not(feature = "nccl"))]
+use atoma_runtime::session::GraphIdx;
+
+#[cfg(not(feature = "nccl"))]
+use crate::device::decode::{DecodeStep, DecodeStepError, LogitsReplay, ReplayedLogits};
+
+/// The parts one replay runs over, borrowed from the forward that holds them: the session it is
+/// replayed through, the step that stages it, the graph serving the batch's bucket, and the
+/// sampler whose gather and sample that graph holds.
+#[cfg(not(feature = "nccl"))]
+struct Replaying<'a> {
+    session: &'a Replay,
+    decode_step: &'a mut DecodeStep,
+    graph: GraphIdx,
+    sampler: &'a mut DeviceSampler,
+}
 
 /// Why a step could not be run on the device.
 #[derive(Debug, Error)]
@@ -68,6 +88,16 @@ pub enum CudaForwardError {
     #[cfg(not(feature = "nccl"))]
     #[error("a keyed batch reached the decode step on a rank that holds no sampler")]
     NoSampler,
+    /// A replay asked of a layout the graph set holds no graph for: dispatched eagerly, or keyed
+    /// to a shape the decode step does not serve, which is logged where it is checked.
+    #[cfg(not(feature = "nccl"))]
+    #[error("the layout is not keyed to a graph the decode step serves, so there is no replay")]
+    NothingToReplay,
+    /// A baked address read again is not where it was baked: what [`CudaForward::baked_unmoved`]
+    /// returns for the first that moved.
+    #[cfg(not(feature = "nccl"))]
+    #[error(transparent)]
+    Baked(#[from] BakedError),
     /// The forward's logits came back on the host, which no device forward should produce.
     #[error("the logits are not on the device")]
     LogitsNotOnDevice,
@@ -127,10 +157,10 @@ pub struct CudaForward {
     #[cfg(not(feature = "nccl"))]
     decode_step: DecodeStep,
     /// Every address the decode step and the sampler bake, read when the forward was built; a
-    /// debug build reads them again before each keyed step, and a release build carries no list.
-    /// Names and `u64` addresses only: it owns none of the memory a recording bakes, so where it
-    /// sits in the order is free.
-    #[cfg(all(not(feature = "nccl"), debug_assertions))]
+    /// debug build reads them again before each keyed step, and any build on demand. Names and
+    /// `u64` addresses only: it owns none of the memory a recording bakes, so where it sits in
+    /// the order is free.
+    #[cfg(not(feature = "nccl"))]
     baked: BakedAddresses,
     /// Dropped last: candle's weights and cache and the sampler's arrays are most of what a
     /// recording bakes, and the device itself is here.
@@ -139,8 +169,9 @@ pub struct CudaForward {
 
 impl CudaForward {
     /// Holds what the rank allocated, the step over runtime tensors and the graph set `graphs`
-    /// its capture made for the Replay phase `session`, and, in a debug build, bakes every
-    /// address the step and the sampler read, by name, to check before each keyed step.
+    /// its capture made for the Replay phase `session`, and bakes every address the step and the
+    /// sampler read, by name, to check before each keyed step in a debug build and on demand in
+    /// any.
     ///
     /// # Errors
     ///
@@ -152,7 +183,7 @@ impl CudaForward {
         #[cfg(not(feature = "nccl"))] graphs: GraphSet,
         session: Replay,
     ) -> Result<Self, CudaForwardError> {
-        #[cfg(all(not(feature = "nccl"), debug_assertions))]
+        #[cfg(not(feature = "nccl"))]
         let baked = BakedAddresses::bake(addresses(&allocated, &decode_step)?);
         Ok(Self {
             session,
@@ -160,21 +191,34 @@ impl CudaForward {
             graphs,
             #[cfg(not(feature = "nccl"))]
             decode_step,
-            #[cfg(all(not(feature = "nccl"), debug_assertions))]
+            #[cfg(not(feature = "nccl"))]
             baked,
             allocated,
         })
     }
 
-    /// Reads every baked address again and panics naming the first that moved, before the step's
-    /// own work is enqueued: what a debug build runs before each keyed step. Each address is read
-    /// through its owner, so the reading enqueues cudarc's event guard for each weight and cache
-    /// candle holds. A release build trusts the addresses and reads none.
+    /// Reads every baked address again and holds it to where it was baked: what a gate asserts
+    /// after a replay and across a soak, in any build. Each address is read through its owner,
+    /// so the reading enqueues cudarc's event guard for each weight and cache candle holds.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CudaForwardError::Baked`] naming the first address that moved, or the error of
+    /// an address that cannot be read again.
+    #[cfg(not(feature = "nccl"))]
+    pub fn baked_unmoved(&self) -> Result<(), CudaForwardError> {
+        let current = addresses(&self.allocated, &self.decode_step)?;
+        Ok(self.baked.check(current)?)
+    }
+
+    /// Panics naming the first baked address that moved, before the step's own work is
+    /// enqueued: what a debug build runs before each keyed step. A release build trusts the
+    /// addresses between steps and reads none on its own.
     #[cfg(all(not(feature = "nccl"), debug_assertions))]
     fn assert_unmoved(&self) {
-        let current = addresses(&self.allocated, &self.decode_step)
-            .expect("every address the forward baked can be read again before a step");
-        self.baked.assert_unmoved(current);
+        if let Err(error) = self.baked_unmoved() {
+            panic!("{error}");
+        }
     }
 
     /// Runs `layout` and reads the logits of the rows it selected into `readback`: one row per
@@ -198,8 +242,7 @@ impl CudaForward {
                 session,
                 graphs: _,
                 decode_step,
-                #[cfg(debug_assertions)]
-                    baked: _,
+                baked: _,
                 allocated: _,
             } = self;
             return Ok(decode_step.run_for_logits(session, layout, batch, readback)?);
@@ -217,6 +260,70 @@ impl CudaForward {
             return Ok(Logits::new(&[], *vocab));
         }
         read_back(readback, device.stream(), &logits, rows, *vocab)
+    }
+
+    /// Replays the graph `layout`'s bucket was captured into and reads the logits of its live
+    /// rows into `readback`, beside the tokens the graph's sample drew for them: what a gate
+    /// holds a replay to the eager step through, since serving never reads a replay's logits.
+    /// The sample is the graph's, so each live row's record and draw counter move as they do
+    /// in serving.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CudaForwardError::NothingToReplay`] when the layout is not keyed to a graph the
+    /// step serves, [`CudaForwardError::NoSampler`] on a rank without one, and the step's error
+    /// when it cannot be staged, replayed or read back.
+    #[cfg(not(feature = "nccl"))]
+    pub fn replay_logits<'a>(
+        &'a mut self,
+        layout: &BatchLayout,
+        readback: &'a mut Readback<f32>,
+    ) -> Result<ReplayedLogits<'a>, CudaForwardError> {
+        let Some(batch) = self.keyed_batch(layout)? else {
+            return Err(CudaForwardError::NothingToReplay);
+        };
+        let Replaying {
+            session,
+            decode_step,
+            graph,
+            sampler,
+        } = self.replaying(batch.bucket)?;
+        let replay = LogitsReplay {
+            graph,
+            sampler,
+            readback,
+        };
+        Ok(decode_step.replay_for_logits(session, layout, batch, replay)?)
+    }
+
+    /// What a replay of `bucket`'s graph runs over, with the baked addresses held to where they
+    /// were baked first, before anything is enqueued: the session, the decode step, the graph
+    /// serving the bucket and the sampler whose gather and sample that graph holds.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CudaForwardError::NoSampler`] on a rank without one and the graph set's error
+    /// when no graph serves the bucket.
+    #[cfg(not(feature = "nccl"))]
+    fn replaying(&mut self, bucket: BucketIdx) -> Result<Replaying<'_>, CudaForwardError> {
+        #[cfg(debug_assertions)]
+        self.assert_unmoved();
+        let Self {
+            session,
+            graphs,
+            decode_step,
+            baked: _,
+            allocated,
+        } = self;
+        let Some(sampler) = allocated.sampler.as_mut() else {
+            return Err(CudaForwardError::NoSampler);
+        };
+        Ok(Replaying {
+            session,
+            decode_step,
+            graph: graphs.graph(bucket)?,
+            sampler,
+        })
     }
 
     /// The batch as the decode step serves it, when the layout is keyed and the shape its graphs
@@ -244,20 +351,12 @@ impl CudaForward {
         layout: &BatchLayout,
         batch: DecodeBatch,
     ) -> Result<&[u32], CudaForwardError> {
-        #[cfg(debug_assertions)]
-        self.assert_unmoved();
-        let Self {
+        let Replaying {
             session,
-            graphs,
             decode_step,
-            #[cfg(debug_assertions)]
-                baked: _,
-            allocated,
-        } = self;
-        let Some(sampler) = allocated.sampler.as_mut() else {
-            return Err(CudaForwardError::NoSampler);
-        };
-        let graph = graphs.graph(batch.bucket)?;
+            graph,
+            sampler,
+        } = self.replaying(batch.bucket)?;
         Ok(decode_step.run(session, graph, layout, batch, sampler)?)
     }
 
@@ -352,7 +451,7 @@ impl CudaForward {
 
 /// Every address the decode step and the sampler bake, read from the memory that holds each, in
 /// one fixed order: the step's, then the sampler's when this rank holds one.
-#[cfg(all(not(feature = "nccl"), debug_assertions))]
+#[cfg(not(feature = "nccl"))]
 fn addresses(
     allocated: &Allocated,
     decode_step: &DecodeStep,

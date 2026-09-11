@@ -36,6 +36,8 @@ cuda = [
     "models/cuda",
 ]
 nccl = [ "atoma-runtime/nccl", "cuda", "cudarc/nccl", "models/nccl" ]
+# What a gate needs that a serving build must not have: nothing enables it but the gate scripts.
+test-support = [ "atoma-models/test-support" ]
 
 [dev-dependencies]
 atoma-runtime = { workspace = true, features = [ "test-support" ] }

@@ -431,12 +431,32 @@ pub const LLAMA_OPS: [LayerOp; 15] = [
     },
 ];
 
+/// The Llama role table with `Normed`'s lifetime declared one op short, `[0, 11)` for `[0, 12)`.
+///
+/// Op 11 is the up projection, the last op that reads `Normed`, so the declaration says the slot
+/// is dead while that projection still reads it. This is the one lie the correctness gates run,
+/// and it is stated here once so the host proofs of what it does and the device gate that runs it
+/// cannot drift apart.
+///
+/// Under the poison layout a fill lands over `Normed` ahead of that projection and the step reads
+/// not-a-number. Under greedy it moves no slot: `Up`, which the projection writes, is feed-forward
+/// wide, and the hole the lie frees is hidden wide with live neighbours.
+#[cfg(any(test, feature = "test-support"))]
+#[must_use]
+pub fn normed_one_op_short(dims: &LlamaDims) -> RoleTable {
+    let mut table = LLAMA_LAYER.role_table(dims);
+    table.roles[Role::Normed as usize].lifetime.last_use -= 1;
+    table
+}
+
 #[cfg(test)]
 mod tests {
-    use atoma_runtime::arena::{ArenaLayout, BucketIdx, CaptureArena, LayerIdx};
+    use std::ops::Range;
+
+    use atoma_runtime::arena::{op_timeline_index, ArenaLayout, BucketIdx, CaptureArena, LayerIdx};
 
     use super::*;
-    use crate::dims::test_support::llama_8b;
+    use crate::dims::test_support::{llama_1b, llama_8b};
 
     #[test]
     fn every_declared_lifetime_is_the_hull_of_the_ops_that_touch_the_role() {
@@ -528,5 +548,99 @@ mod tests {
         let final_hidden = arena.offset(BucketIdx(1), LayerIdx(2), Role::Hidden.tensor_role());
         assert_eq!(final_hidden % 256, 0);
         assert!(arena.total_size() > 0);
+    }
+
+    /// The bucket ladder the device gates run by default: every bucket of the Hopper ladder at
+    /// or below a maximum batch of 128.
+    const GATE_LADDER: [usize; 19] = [
+        1, 2, 4, 8, 16, 24, 32, 40, 48, 56, 64, 72, 80, 88, 96, 104, 112, 120, 128,
+    ];
+
+    /// The byte range of `role`'s slot in `layer`'s frame under `bucket`.
+    fn slot_bytes(arena: &CaptureArena, bucket: usize, layer: usize, role: Role) -> Range<usize> {
+        let start = arena.offset(BucketIdx(bucket), LayerIdx(layer), role.tensor_role());
+        start..start + arena.slot_size(BucketIdx(bucket), role.tensor_role())
+    }
+
+    fn arena_under(dims: &LlamaDims, table: RoleTable, layout: ArenaLayout) -> CaptureArena {
+        CaptureArena::new(dims.layers + 1, table, &GATE_LADDER, layout)
+            .expect("the table declares valid lifetimes")
+    }
+
+    #[test]
+    fn the_up_projection_is_the_last_op_to_read_normed() {
+        assert!(matches!(
+            LLAMA_OPS[11],
+            LayerOp::Projection {
+                input: RoleRef {
+                    role: Role::Normed,
+                    layer: LayerOffset::Same
+                },
+                weight: LayerWeight::Up,
+                ..
+            }
+        ));
+        assert_eq!(Role::Normed.lifetime().last_use, 12);
+        let dims = llama_8b(2);
+        let table = normed_one_op_short(&dims);
+        assert_eq!(
+            table.roles[Role::Normed as usize].lifetime,
+            Lifetime {
+                first_use: 0,
+                last_use: 11
+            }
+        );
+    }
+
+    #[test]
+    fn normed_declared_dead_one_op_early_is_poisoned_ahead_of_the_projection_that_reads_it() {
+        for dims in [llama_8b(4), llama_1b(16)] {
+            let arena = arena_under(&dims, normed_one_op_short(&dims), ArenaLayout::Poison);
+            let ops_per_layer = LLAMA_LAYER.ops_per_layer();
+            for (bucket, &tokens) in GATE_LADDER.iter().enumerate() {
+                let fills = arena.poison_fills(BucketIdx(bucket));
+                for layer in 0..dims.layers {
+                    let normed = slot_bytes(&arena, bucket, layer, Role::Normed);
+                    let up_projection = op_timeline_index(ops_per_layer, layer, 11);
+                    assert!(
+                        fills.iter().any(|fill| fill.before_op == up_projection
+                            && fill.offset == normed.start
+                            && fill.len == normed.len()),
+                        "hidden {}, bucket {tokens}, layer {layer}: no fill over Normed's slot \
+                         before its up projection",
+                        dims.hidden
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn normed_declared_dead_one_op_early_moves_no_slot_under_greedy() {
+        // `Up`, which the up projection writes, is feed-forward wide; the hole the lie frees is
+        // hidden wide with live neighbours, so greedy has nothing to place in it. The greedy
+        // step over the lie is the declared step, and a gate over it under greedy reads the
+        // reference's logits back: only the poison layout can turn the lie into a failure.
+        for dims in [llama_8b(4), llama_1b(16)] {
+            let declared = arena_under(&dims, LLAMA_LAYER.role_table(&dims), ArenaLayout::Greedy);
+            let lied = arena_under(&dims, normed_one_op_short(&dims), ArenaLayout::Greedy);
+            for (bucket, &tokens) in GATE_LADDER.iter().enumerate() {
+                for layer in 0..=dims.layers {
+                    for role in Role::ALL {
+                        assert_eq!(
+                            slot_bytes(&lied, bucket, layer, role),
+                            slot_bytes(&declared, bucket, layer, role),
+                            "hidden {}, bucket {tokens}, layer {layer}, {role:?}: the lie moved \
+                             the slot, so a greedy step over it is no longer the declared step",
+                            dims.hidden
+                        );
+                    }
+                }
+                assert_eq!(
+                    lied.bucket_footprint(BucketIdx(bucket)),
+                    declared.bucket_footprint(BucketIdx(bucket))
+                );
+            }
+        }
     }
 }

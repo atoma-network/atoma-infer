@@ -8,6 +8,8 @@
 
 use atoma_core::engine::{EngineConfig, ExecutorHandoff};
 use atoma_core::types::{BlockId, RequestCount, TokenCount};
+#[cfg(not(feature = "nccl"))]
+use atoma_runtime::arena::ArenaLayout;
 use atoma_runtime::context::RuntimeContext;
 use atoma_runtime::session::Allocation;
 use candle_core::DType;
@@ -123,6 +125,11 @@ pub fn spawn_ranks(
             block_size: engine.scheduler.block_size,
             dtype: model.dtype,
             staging_depth: executor.staging_depth,
+            // Serving places greedily over the model's own roles; the reference and poison
+            // layouts and a stated table are a gate's alone.
+            arena_layout: ArenaLayout::Greedy,
+            #[cfg(feature = "test-support")]
+            roles: None,
         },
         #[cfg(feature = "nccl")]
         collective: Id::new().map_err(|error| StartupError::Collective { status: error.0 })?,
